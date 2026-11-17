@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
 
@@ -87,14 +87,12 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       (voices.length ? voices : [meas]).forEach((vEl, vi) => {
       if (vi >= MAX_LAYERS) { report.count(`Notes in voices beyond ${MAX_LAYERS} per staff skipped`, kids(vEl, "Chord").length); return; }
       const bar = [];
-      let tup = null;
+      let tup = null, cur = 0; // cur: time cursor in ticks; <location> moves it either way
       for (const el of vEl.children) {
         switch (el.localName) {
-          case "location": { // a gap in this voice (MuseScore 4)
+          case "location": {
             const [n, dd] = (txt(el, "fractions") || "").split("/").map(Number);
-            const ticks = Math.round((n / dd) * 1920);
-            if (ticks > 0) { for (const d of splitTicks(ticks)) bar.push({ dur: d.dur, dots: d.dots, tie: false, pitches: [] }); report.count("Gaps in a voice filled with rests"); }
-            else if (ticks < 0) report.count("Backward position moves ignored");
+            if (dd) cur = Math.max(0, cur + Math.round((n / dd) * 1920));
             break;
           }
           case "Clef": {
@@ -130,7 +128,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             const isRest = el.localName === "Rest";
             if (GRACE.some((g) => kid(el, g))) { report.count("Grace notes skipped"); break; }
             const dt = txt(el, "durationType");
-            if (dt === "measure") break; // whole-bar rest = empty bar
+            if (dt === "measure") { cur += barCapacity(time); break; } // whole-bar rest = empty bar
             let dur = DUR[dt];
             if (!dur && LONGER.has(dt)) { dur = "w"; report.count("Notes longer than a whole note shortened"); }
             if (!dur && SHORTER.has(dt)) { dur = "32"; report.count("Notes shorter than a 32nd lengthened"); }
@@ -159,7 +157,14 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               if (!ev.pitches.length) break;
               ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
             }
+            // a chord or rest that starts past where this voice has got to: rests in front
+            const gap = Math.floor((cur - barTicks(bar)) / 60) * 60;
+            if (gap > 0) {
+              for (const d of splitTicks(gap)) bar.push({ dur: d.dur, dots: d.dots, tie: false, pitches: [] });
+              report.count("Gaps in a voice filled with rests");
+            }
             bar.push(ev);
+            cur = barTicks(bar);
             break;
           }
           default: break;

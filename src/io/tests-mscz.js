@@ -36,6 +36,17 @@ export async function run({ check, eq, brief, fetchBytes, importBytes }) {
     return p === 41 || "program " + p;
   });
 
+  await check("MuseScore voices become layers; <location> moves a cursor, gaps become rests (DESIGN §15)", () => {
+    const chord = (dt, p, tpc) => `<Chord><durationType>${dt}</durationType><Note><pitch>${p}</pitch><tpc>${tpc}</tpc></Note></Chord>`;
+    const loc = (f) => `<location><fractions>${f}</fractions></location>`;
+    const x = `<museScore version="4.20"><Score><Part><Staff id="1"/><trackName>P</trackName></Part>
+      <Staff id="1"><Measure><voice><TimeSig><sigN>4</sigN><sigD>4</sigD></TimeSig>${loc("1/2")}<Dynamic><subtype>p</subtype></Dynamic>${loc("-1/2")}${chord("whole", 60, 14)}</voice>
+      <voice>${loc("1/2")}${chord("half", 64, 18)}</voice></Measure></Staff></Score></museScore>`;
+    const st = importMSCX(x, "x.mscx").score.staves[0];
+    const l2 = st.layers ? brief({ bars: st.layers[0] }) : "";
+    return (brief(st) === "C4:w" && l2 === "r:h E4:h") || `${brief(st)} / ${l2}`;
+  });
+
   await check("MuseScore archive without a score gives a message", async () => {
     const zip = fflate.zipSync({ "META-INF/container.xml": new TextEncoder().encode("<container/>"), "a.mscx": new Uint8Array(0) });
     const files = fflate.unzipSync(zip);
