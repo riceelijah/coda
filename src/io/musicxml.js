@@ -208,7 +208,16 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
       const sn = +(txt(n, "staff") || 1), v = txt(n, "voice") || "1";
       if (!(voiceOf[sn] ||= []).includes(v)) voiceOf[sn].push(v);
     }
-    for (const k in voiceOf) voiceOf[k].sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || a.localeCompare(b));
+    for (const k in voiceOf) {
+      // Voices numbered staff×4 + layer (Coda, MuseScore): the layer comes from the number, so an
+      // empty layer 2 under a used layer 3 survives. Otherwise layers follow numeric voice order.
+      const lo = (k - 1) * MAX_LAYERS;
+      if (voiceOf[k].every((v) => /^\d+$/.test(v) && +v > lo && +v <= lo + MAX_LAYERS)) {
+        const slots = [];
+        for (const v of voiceOf[k]) slots[+v - lo - 1] = v;
+        voiceOf[k] = slots;
+      } else voiceOf[k].sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || a.localeCompare(b));
+    }
 
     measures.forEach((meas, mi) => {
       staves.forEach((st) => allLayers(st).forEach((bars) => bars.push([])));

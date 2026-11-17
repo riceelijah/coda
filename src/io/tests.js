@@ -255,6 +255,14 @@ export async function run({ check, eq }) {
     return (!M.isValidScore(short) && !M.isValidScore(four)) || "validation accepted a short layer or a fifth";
   });
 
+  await check("layers: an empty layer 2 under a used layer 3 survives MusicXML save and open (DESIGN §15)", () => {
+    const s = M.newScore({ bars: 2 });
+    s.staves[0].bars[0] = [ev("w", "C5")];
+    s.staves[0].layers = [[[], []], [[ev("w", "E4")], []]];
+    const { score: b } = importMusicXML(exportMusicXML(s), "x.musicxml");
+    return eq(b.staves[0].layers, s.staves[0].layers) || JSON.stringify(b.staves[0].layers);
+  });
+
   await check("MusicXML export pads an underfull bar to capacity", () => {
     const sc = { title: "", composer: "", tempo: 100, measures: [{ key: 0, time: [3, 4] }],
       staves: [{ name: "", clef: "treble", brace: false, bars: [[ev("8", "C5")]] }] };
