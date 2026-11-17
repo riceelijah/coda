@@ -28,7 +28,7 @@ only says what to build in what order and how to know each phase is finished.
 | 1 | Model + rendering (read-only score on screen) | done |
 | 2 | Editing, playback, autosave, print | done |
 | 3 | MusicXML / MXL open + save | done |
-| 4 | MIDI import | not started |
+| 4 | MIDI import | done |
 | 5 | MuseScore `.mscz` import | not started |
 | 6 | `.musx` import | not started — **needs sample files from the user** |
 | 7 | Publish to GitHub Pages | not started — **needs the user's go-ahead** |
@@ -143,9 +143,9 @@ Save / Open / drag-and-drop.
 
 Build: `src/io/midi.js` (§9.4).
 
-- [ ] Parser with running status and all event lengths handled.
-- [ ] Conversion steps 1–8.
-- [ ] `samples/scale.mid`: generate it with a short script (keep the script in `samples/`),
+- [x] Parser with running status and all event lengths handled.
+- [x] Conversion steps 1–8.
+- [x] `samples/scale.mid`: generate it with a short script (keep the script in `samples/`),
       format 1, two tracks, including a note that crosses a barline and a chord. Add test check 6
       for it.
 
