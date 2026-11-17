@@ -15,7 +15,7 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 - **Type** letters to add notes quickly. Coda picks the octave closest to the previous note and moves to the next bar when one fills up.
 - **Key/Time** changes the key or time signature from the current bar on.
 - **Play** plays from the current bar. **Print** prints the score, or saves it as a PDF from your browser's print dialog.
-- Your work is saved automatically in this browser. Use **Save** to keep a file (MusicXML) you can open anywhere.
+- Your work is saved automatically in this browser. **Scores** lists everything saved here: open, duplicate or delete. Scores stay only in this browser, so use **Save** to keep a file (MusicXML) you can back up or open anywhere.
 
 ### Keyboard shortcuts
 

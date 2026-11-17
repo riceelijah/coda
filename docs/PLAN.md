@@ -34,6 +34,7 @@ only says what to build in what order and how to know each phase is finished.
 | 7 | Publish to GitHub Pages | done: https://riceelijah.github.io/coda/ |
 | 8 | Fix-first: chords, audition, key/time changes, double dots, bar numbers | done |
 | 9 | Entry: insert mid-bar, triplets, range select + copy/paste | done |
+| 10 | Score library in the browser | done |
 
 ---
 
@@ -241,6 +242,16 @@ entering a note sounds it; a key and a time change can be added at bar 5 and rem
 **Done when:** a note can be added between two existing notes by click and by keyboard; three
 triplet eighths fill a quarter; a two-bar passage can be copied and pasted elsewhere and undone in one step.
 
+## Phase 10 — Score library (DESIGN §12)
+
+- [x] `src/store.js` (list, load, save, remove, migrate) with tests on a separate prefix.
+- [x] Autosave per score; warning when storage is full or blocked; migration from `coda.score`.
+- [x] Scores dialog: open, duplicate, delete. No "will be replaced" confirmations.
+- [x] README, help.
+
+**Done when:** two scores can be kept, switched between and deleted; reloading reopens the
+tab's score; an existing autosave survives the upgrade.
+
 ## After the first version (not scheduled)
 
 In rough order of how much users will miss them: tuplet entry; inserting notes mid-bar and
@@ -255,5 +266,7 @@ DESIGN.md before work starts.
 - **Rest padding in exported MusicXML is greedy** (e.g. after an eighth in 3/4: half + eighth),
   not beat-aware. Correct durations, but not how an engraver would write it.
 - **Undo history is per session**; it is not saved with the autosave.
+- **The same score open in two tabs: last write wins.**
+- **Instruments:** research report in `docs/research/instruments.md`; waiting on the user's answers to its open questions.
 - **`.musx` has only been checked on small test files** (musxdom's). Ties, voice 2 and title/composer
   were not present in them; a real-world piece would confirm those.

@@ -425,15 +425,16 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
 
 ### 6.5 Persistence
 
-- **Autosave**: after every edit, `localStorage.setItem("coda.score", JSON.stringify(score))`
-  inside `try/catch`. On load, restore it if present and valid, otherwise show a default
-  16-bar treble score. A corrupt value is ignored, not thrown.
+- **Autosave**: after every edit, the score is written to its entry in the in-browser score
+  library (§12). On load, this tab's score, else the newest saved one, else a default 16-bar
+  treble score. A corrupt value is ignored, not thrown. A failed write shows a warning that
+  stays until a save succeeds.
 - **Save** downloads `<title>.musicxml` (§9.2). MusicXML is the native file format; there is no
   custom format.
 - **Open** uses a hidden `<input type="file">` with **no `accept` filter** (renamed or unusual
   extensions must still reach the sniffer in §9.1); dropping a file anywhere on the page does the same.
-- Opening a file replaces the score and clears undo history, after a confirmation if the
-  current score has any notes.
+- Opening a file starts a new library entry and clears undo history. Nothing is lost, so there
+  is no confirmation.
 
 ---
 
@@ -808,6 +809,28 @@ Palette toggle and key `;` set `armed.tup = [3, 2]` (sticky, shown in the status
 - The clipboard is an in-page copy of the events. Paste inserts them after the selection (or
   at the caret bar's end) using `insertEvent`, carrying into following bars as needed, and
   clears the tie on the last pasted event. `preventDefault` only when there is something to act on.
+
+## 12. Score library (Phase 10, `src/store.js`)
+
+Scores are kept in `localStorage`, one key per score, so autosave stays synchronous and no
+dependency is needed.
+
+- `coda.doc.<id>` = `{modified, score}`. There is no index key: the list is made by scanning the
+  prefix, so two tabs never overwrite each other's list. Ids come from `crypto.randomUUID()` and
+  live in `state.docId`, not in the score.
+- `coda.current` = the open id, in `sessionStorage` (this tab) and `localStorage` (fallback), so
+  reloading a tab reopens that tab's score.
+- Migration: an old single `coda.score` becomes the first entry; the old key is removed only
+  after the new entry is written.
+- `store.js` has no DOM; its functions take `(storage, prefix)`: `list` (newest first, unreadable
+  entries listed with `ok: false`), `load`, `save` (false on quota/blocked), `remove`, `migrate`.
+- New gets a fresh id, written on its first edit (abandoned blank scores don't pile up). Opening
+  or dropping a file gets a fresh id, written at once.
+- **Scores** dialog: title, composer, bars, last modified (newest first, the open one marked),
+  with Open, Duplicate and Delete. Delete confirms by title; deleting the open score opens the
+  newest remaining one, or a blank one. Built with `textContent`. One line says scores live only
+  in this browser and Save makes a file.
+- Tests use the `codatest.` prefix and clean up, because `test.html` shares the app's origin.
 
 ## 10. Testing
 

@@ -3,9 +3,10 @@ import * as M from "./model.js";
 import { render, SHEET_W } from "./render.js";
 import { play, stop, isPlaying, audition } from "./play.js";
 import { demoScore } from "./demo.js";
+import * as store from "./store.js";
 
 const $ = (id) => document.getElementById(id);
-const STORE = "coda.score";
+const PREFIX = "coda."; // library keys: coda.doc.<id>, coda.current (DESIGN §12)
 const DUR_NAMES = { w: "Whole note", h: "Half note", q: "Quarter note", 8: "Eighth note", 16: "16th note", 32: "32nd note" };
 const KEY_LABELS = {
   "-7": "C♭ major / A♭ minor (7♭)", "-6": "G♭ major / E♭ minor (6♭)", "-5": "D♭ major / B♭ minor (5♭)",
@@ -17,6 +18,7 @@ const KEY_LABELS = {
 
 const state = {
   score: null,
+  docId: null, // library entry of the open score; written on the first edit
   caret: { staff: 0, bar: 0 },
   sel: null,
   selEnd: null, // other end of a range on the same staff, {bar, idx} (DESIGN §11.7)
@@ -28,21 +30,41 @@ const state = {
 
 // ---------- persistence ----------
 
+function getCurrent() {
+  try { return sessionStorage.getItem(PREFIX + "current") || localStorage.getItem(PREFIX + "current"); } catch { return null; }
+}
+
+function setCurrent(id) {
+  try { sessionStorage.setItem(PREFIX + "current", id); localStorage.setItem(PREFIX + "current", id); } catch { /* blocked */ }
+}
+
+// Pick the score to show: ?demo, else this tab's score, else the newest saved one, else a blank one.
 function loadInitial() {
-  const params = new URLSearchParams(location.search);
-  if (params.has("demo")) return demoScore();
-  try {
-    const raw = localStorage.getItem(STORE);
-    if (raw) {
-      const sc = JSON.parse(raw);
-      if (M.isValidScore(sc)) return sc;
+  let ls = null;
+  try { ls = localStorage; } catch { /* blocked */ }
+  if (ls) store.migrate(ls, PREFIX, "coda.score");
+  state.docId = store.newId();
+  if (new URLSearchParams(location.search).has("demo")) return demoScore();
+  if (ls) {
+    for (const id of [getCurrent(), ...store.list(ls, PREFIX).filter((e) => e.ok).map((e) => e.id)]) {
+      const sc = id && store.load(ls, PREFIX, id);
+      if (sc) { state.docId = id; setCurrent(id); return sc; }
     }
-  } catch { /* storage blocked or corrupt: ignore */ }
+  }
   return M.newScore({ bars: 16 });
 }
 
+let saveFailed = false;
 function autosave() {
-  try { localStorage.setItem(STORE, JSON.stringify(state.score)); } catch { /* quota or blocked */ }
+  let ok = false;
+  try { ok = store.save(localStorage, PREFIX, state.docId, state.score); } catch { /* blocked */ }
+  if (ok) {
+    setCurrent(state.docId);
+    if (saveFailed) { saveFailed = false; message("Saved in this browser again"); }
+  } else {
+    saveFailed = true;
+    message("Couldn't save in this browser (storage full or blocked). Use Save to keep a file.", true, true);
+  }
 }
 
 // ---------- editing core ----------
@@ -65,14 +87,17 @@ function edit(fn, { keepRedo = false } = {}) {
   return true;
 }
 
-function replaceScore(sc) {
+// Show a different score. A new id unless `id` is given; written now when `save` is true
+// (a blank New score is written on its first edit, so abandoned ones don't pile up).
+function replaceScore(sc, { id = null, save = true } = {}) {
   stop();
   state.score = sc;
+  state.docId = id || store.newId();
   state.undo = []; state.redo = [];
   state.sel = null;
   state.caret = { staff: 0, bar: 0 };
   refresh();
-  autosave();
+  if (save) autosave(); else setCurrent(state.docId);
 }
 
 function undo() {
@@ -159,13 +184,13 @@ function updateStatus() {
 }
 
 let msgTimer = 0;
-function message(text, warn = false) {
+function message(text, warn = false, sticky = false) {
   const el = $("status-msg");
   el.textContent = text;
   el.classList.toggle("warn", warn);
   $("status-hint").hidden = !!text;
   clearTimeout(msgTimer);
-  msgTimer = setTimeout(() => { el.textContent = ""; $("status-hint").hidden = false; }, 3500);
+  if (!sticky) msgTimer = setTimeout(() => { el.textContent = ""; $("status-hint").hidden = false; }, 3500);
 }
 
 // ---------- palette ----------
@@ -619,7 +644,6 @@ function buildKeySelect(id) {
 
 function openSetup(isNew) {
   const d = $("setup"), sc = state.score;
-  if (isNew && M.noteCount(sc) > 0 && !confirm("Replace the current score? Unsaved changes will be lost.")) return;
   $("setup-head").textContent = isNew ? "New score" : "Score details";
   $("setup-ok").textContent = isNew ? "Create" : "Apply";
   d.querySelectorAll(".new-only").forEach((el) => (el.hidden = !isNew));
@@ -643,7 +667,7 @@ function closeSetup() {
     replaceScore(M.newScore({
       title, composer, tempo, preset: $("f-preset").value, key: +$("f-key").value,
       time: [n, dd], bars: +$("f-bars").value || 16,
-    }));
+    }), { save: false });
   } else {
     edit((sc) => { sc.title = title; sc.composer = composer; sc.tempo = tempo; return null; });
   }
@@ -676,6 +700,67 @@ function closeAttrs() {
   }
 }
 
+// ---------- score library dialog (DESIGN §12) ----------
+
+function openLibrary() {
+  const ul = $("lib-list");
+  ul.replaceChildren();
+  let entries = [];
+  try { entries = store.list(localStorage, PREFIX); } catch { /* blocked */ }
+  if (!entries.length) {
+    const li = document.createElement("li");
+    li.textContent = "No scores saved in this browser yet.";
+    ul.appendChild(li);
+  }
+  for (const e of entries) {
+    const li = document.createElement("li");
+    const info = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = e.ok ? e.title : "Unreadable score";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = e.ok
+      ? [e.composer, `${e.bars} bar${e.bars === 1 ? "" : "s"}`, new Date(e.modified).toLocaleString(), e.id === state.docId ? "open now" : ""].filter(Boolean).join(" · ")
+      : "This entry is damaged and can only be deleted.";
+    info.append(name, meta);
+    const btns = document.createElement("div");
+    const btn = (label, fn) => { const b = document.createElement("button"); b.className = "btn"; b.type = "button"; b.textContent = label; b.onclick = fn; btns.appendChild(b); };
+    if (e.ok && e.id !== state.docId) btn("Open", () => libOpen(e.id));
+    if (e.ok) btn("Duplicate", () => libDuplicate(e.id));
+    btn("Delete", () => libDelete(e));
+    li.append(info, btns);
+    ul.appendChild(li);
+  }
+  if (!$("library").open) $("library").showModal();
+}
+
+function libOpen(id) {
+  const sc = store.load(localStorage, PREFIX, id);
+  if (!sc) { message("That score couldn't be read", true); return; }
+  $("library").close();
+  replaceScore(sc, { id, save: false });
+}
+
+function libDuplicate(id) {
+  const sc = store.load(localStorage, PREFIX, id);
+  if (!sc) return;
+  sc.title = (sc.title || "Untitled") + " (copy)";
+  if (!store.save(localStorage, PREFIX, store.newId(), sc)) message("Couldn't save the copy (storage full?)", true);
+  openLibrary();
+}
+
+function libDelete(e) {
+  if (!confirm(`Delete “${e.ok ? e.title : "Unreadable score"}” from this browser? This can't be undone.`)) return;
+  store.remove(localStorage, PREFIX, e.id);
+  if (e.id === state.docId) {
+    const next = store.list(localStorage, PREFIX).find((x) => x.ok);
+    const sc = next && store.load(localStorage, PREFIX, next.id);
+    if (sc) replaceScore(sc, { id: next.id, save: false });
+    else replaceScore(M.newScore({ bars: 16 }), { save: false });
+  }
+  openLibrary();
+}
+
 // ---------- files (implemented in src/io, Phase 3+) ----------
 
 async function saveFile() {
@@ -693,7 +778,6 @@ async function openFile(file) {
   try {
     const { openFile: open } = await import("./io/open.js");
     const { score, report } = await open(file);
-    if (M.noteCount(state.score) > 0 && !confirm(`Open “${file.name}”? The current score will be replaced.`)) return;
     replaceScore(score);
     showReport(file.name, report);
   } catch (e) {
@@ -750,6 +834,7 @@ function init() {
   $("attrs-cancel").onclick = () => $("attrs").close("cancel");
   $("attrs-remove").onclick = () => $("attrs").close("remove");
   $("b-new").onclick = () => openSetup(true);
+  $("b-lib").onclick = openLibrary;
   $("title").onclick = $("composer").onclick = () => openSetup(false);
   $("setup").addEventListener("close", closeSetup);
   $("setup-cancel").onclick = () => $("setup").close("cancel");

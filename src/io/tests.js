@@ -3,6 +3,7 @@ import { exportMusicXML, importMusicXML } from "./musicxml.js";
 import { importBytes, sniff, LEGACY_MUS } from "./open.js";
 import { schedule } from "../play.js";
 import * as M from "../model.js";
+import * as store from "../store.js";
 
 const P = (name) => {
   const m = /^([A-G])(#{1,2}|b{1,2})?(-?\d)$/.exec(name);
@@ -150,6 +151,29 @@ export async function run({ check, eq }) {
     const back = importMusicXML(exportMusicXML(s)).score.staves[0].bars[0];
     const total = back.reduce((n, e) => n + M.eventTicks(e), 0);
     return (total === 1920 && back.slice(0, 3).every((e) => e.tup)) || `total ${total}: ${JSON.stringify(back.map((e) => e.dur + (e.tup ? "/3" : "")))}`;
+  });
+
+  await check("score library: save, list order, unreadable entry, migrate, full storage (DESIGN §12)", async () => {
+    const P = "codatest.", ls = localStorage;
+    const clean = () => { for (const k of Object.keys(ls)) if (k.startsWith(P)) ls.removeItem(k); };
+    clean();
+    try {
+      const a = M.newScore({ title: "A", bars: 2 }), b = M.newScore({ title: "B", bars: 3 });
+      if (!store.save(ls, P, "a", a)) return "save failed";
+      await new Promise((r) => setTimeout(r, 5));
+      store.save(ls, P, "b", b);
+      ls.setItem(P + "doc.bad", "{not json");
+      const l = store.list(ls, P);
+      if (l.map((e) => e.id).join() !== "b,a,bad" || l[2].ok) return "list " + JSON.stringify(l);
+      if (store.load(ls, P, "a").title !== "A" || store.load(ls, P, "bad") !== null) return "load";
+      ls.setItem(P + "legacy", JSON.stringify(M.newScore({ title: "Old" })));
+      const id = store.migrate(ls, P, P + "legacy");
+      if (!id || ls.getItem(P + "legacy") !== null || store.load(ls, P, id).title !== "Old") return "migrate";
+      store.remove(ls, P, "a");
+      if (store.load(ls, P, "a")) return "remove";
+      const full = { setItem() { throw new Error("QuotaExceededError"); } };
+      return store.save(full, P, "x", a) === false || "save on full storage did not return false";
+    } finally { clean(); }
   });
 
   // Later phases: MIDI, MuseScore, musx.

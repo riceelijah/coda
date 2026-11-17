@@ -112,6 +112,11 @@
   #help td { padding: 3px 10px 3px 0; vertical-align: top; }
   #help kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; background: var(--desk); }
   .new-only[hidden] { display: none; }
+  #library { width: min(560px, calc(100vw - 32px)); }
+  #lib-list { list-style: none; margin: 0; padding: 0; max-height: 55vh; overflow: auto; }
+  #lib-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  #lib-list li > div:last-child { display: flex; gap: 6px; flex-shrink: 0; }
+  #lib-list .meta, #library .note { font-size: 12px; opacity: .75; }
 
   @media (max-width: 800px) {
     body { grid-template: "top" auto "pal" auto "desk" 1fr "status" auto / 1fr; }
@@ -139,6 +144,7 @@
 <header id="topbar">
   <span class="brand">Coda</span>
   <button class="tb" id="b-new" title="New score">New</button>
+  <button class="tb" id="b-lib" title="Scores saved in this browser">Scores</button>
   <button class="tb" id="b-open" title="Open a file (Ctrl/Cmd+O)">Open</button>
   <button class="tb" id="b-save" title="Save as MusicXML (Ctrl/Cmd+S)">Save</button>
   <button class="tb" id="b-print" title="Print or save as PDF">Print</button>
@@ -231,6 +237,15 @@
   </form>
 </dialog>
 
+<dialog id="library">
+  <form method="dialog">
+    <h2>Scores in this browser</h2>
+    <ul id="lib-list"></ul>
+    <p class="note">Scores are kept only in this browser on this device. Use Save to keep a file you can back up or open elsewhere.</p>
+    <div class="actions"><button class="btn primary">Close</button></div>
+  </form>
+</dialog>
+
 <dialog id="help">
   <form method="dialog">
     <h2>Keyboard shortcuts</h2>
@@ -250,6 +265,7 @@
       <tr><td><kbd>Space</kbd></td><td>Play / stop</td></tr>
       <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>Z</kbd></td><td>Undo (add <kbd>Shift</kbd> to redo)</td></tr>
       <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>S</kbd> / <kbd>O</kbd></td><td>Save / open</td></tr>
+      <tr><td>Scores button</td><td>Scores saved in this browser: open, duplicate, delete</td></tr>
       <tr><td>Click</td><td>Add a note where you click (between notes inserts); click a note to select it</td></tr>
       <tr><td><kbd>Shift</kbd>+<kbd>A</kbd>–<kbd>G</kbd></td><td>Add that note above the selected note (build a chord)</td></tr>
       <tr><td>Shift+click</td><td>Add or remove a chord note on the clicked note</td></tr>
