@@ -18,10 +18,12 @@ Markers used below:
 1. **Static only.** No server, no build step, no bundler, no framework, no `package.json`.
    Plain ES modules loaded by `index.html`. It must work when served from a subpath
    (`https://user.github.io/coda/`), so every path is **relative** (`./app.js`, never `/app.js`).
-2. **Two vendored dependencies, pinned, committed to `vendor/`:**
+2. **Three vendored dependencies, pinned, committed to `vendor/`:**
    - VexFlow **4.2.3**, file `build/cjs/vexflow.js` (MIT; embeds the Bravura font, OFL). Classic
      `<script>`, exposes global `Vex`. Use `const VF = Vex.Flow`.
    - fflate **0.8.2**, file `umd/index.js` (MIT). Classic `<script>`, exposes global `fflate`.
+   - wasm-media-encoders **0.7.0** (MIT loader `dist/umd/WasmMediaEncoder.min.js` and `wasm/mp3.wasm`,
+     LAME, LGPL), for MP3 export only; `src/mp3.js` adds the script the first time it's needed.
    Do not add others without asking the user.
 3. **No third-party branding.** The words "Finale", "NotePad", "MakeMusic" must not appear in the
    UI, the page title, icons, or file names. They may appear only (a) in the README's
@@ -1070,7 +1072,8 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   `scheduleNotes` as Play, after waiting for every sound (no time limit). WAV is 16-bit PCM.
   Compressed audio plays that buffer silently through `MediaRecorder` in real time (the only
   encoder browsers have built in); the item shows the type this browser records (WebM/Ogg Opus or
-  M4A) and is hidden where there is none. MP3 would need an encoder library.
+  M4A) and is hidden where there is none. MP3 encodes that buffer with LAME (wasm-media-encoders,
+  VBR quality 2), in slices so the page keeps updating; the encoder loads on first use.
 - **Not exported:** Finale `.musx` (closed format; nothing here could check the result).
 
 ## 20. Parts: add, remove, rename, reorder (Phase 23)

@@ -8,7 +8,8 @@ current status). Work one phase at a time and update the status table in PLAN.md
 Rules that are easy to break by accident:
 
 - No build step, bundler, framework, or `package.json`. Plain ES modules, relative paths only.
-- Only two dependencies, vendored in `vendor/`: VexFlow 4.2.3 and fflate 0.8.2. Ask before adding any.
+- Only three dependencies, vendored in `vendor/`: VexFlow 4.2.3, fflate 0.8.2, and wasm-media-encoders
+  0.7.0 (MP3 export only, loaded on demand). Ask before adding any.
   Instrument sounds are fetched at run time from cdn.jsdelivr.net (pinned commit) and gleitz.github.io.
 - `src/model.js` stays pure: no DOM, no VexFlow.
 - The names "Finale", "NotePad" and "MakeMusic" appear only in the README and in the one

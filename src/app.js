@@ -1213,7 +1213,7 @@ const CMD = {
   "x-pdf": { run: () => window.print() },
   "b-print": { run: () => window.print() },
   "x-musicxml": { run: () => saveFile() },
-  ...Object.fromEntries(["x-mxl", "x-mscz", "x-midi", "x-wav", "x-audio"].map((id) => [id, { run: () => exportAs(id), on: () => !exporting && (id !== "x-audio" || !!recordType()) }])),
+  ...Object.fromEntries(["x-mxl", "x-mscz", "x-midi", "x-wav", "x-mp3", "x-audio"].map((id) => [id, { run: () => exportAs(id), on: () => !exporting && (id !== "x-audio" || !!recordType()) }])),
   "b-undo": { run: () => undo(), on: () => state.undo.length > 0 },
   "b-redo": { run: () => redo(), on: () => state.redo.length > 0 },
   "m-cut": { run: () => copySel(true), on: hasSel },
@@ -1511,6 +1511,8 @@ const EXPORTS = {
   "x-midi": { ext: "mid", mime: "audio/midi", make: async () => (await import("./io/midi.js")).exportMIDI(state.score),
     note: "MIDI keeps notes, tempo, key, time and instruments; note spellings, marks and layers are not kept." },
   "x-wav": { ext: "wav", mime: "audio/wav", audio: true, make: async () => wavBytes((await audioBuffer()).buffer) },
+  "x-mp3": { ext: "mp3", mime: "audio/mpeg", audio: true, make: async () => (await import("./mp3.js"))
+    .mp3Blob((await audioBuffer()).buffer, (f) => message(`Encoding MP3… ${Math.round(f * 100)}%`, false, true)) },
   "x-audio": { audio: true, make: async () => {
     const { buffer } = await audioBuffer();
     return recordCompressed(buffer, (f) => message(`Recording audio… ${Math.round(f * 100)}% (it takes as long as the piece; Stop cancels)`, false, true));

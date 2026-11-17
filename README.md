@@ -19,7 +19,7 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 - **Score ▸ Parts and instruments** adds, removes, renames and reorders parts (treble, bass, alto or tenor staff, or a grand staff), and picks a sound for each part from the 128 General MIDI instruments (New also asks for one). Sounds download the first time a part uses them and are then kept in your browser; without a connection, parts play a plain tone. Each part can also be set to a transposing instrument (B♭ clarinet or trumpet, F horn, E♭ alto sax and others): the notes are then written for that instrument and still sound the same.
 - **Play** plays from the current bar.
 - **File ▸ Print…** (Ctrl/Cmd+P) prints the score.
-- **File ▸ Export** saves the score as a PDF (through your browser's print dialog), MusicXML, compressed MusicXML (`.mxl`), MuseScore (`.mscz`), MIDI, WAV audio, or compressed audio (WebM, Ogg or M4A, whichever your browser can record; it takes as long as the piece).
+- **File ▸ Export** saves the score as a PDF (through your browser's print dialog), MusicXML, compressed MusicXML (`.mxl`), MuseScore (`.mscz`), MIDI, WAV or MP3 audio, or compressed audio (WebM, Ogg or M4A, whichever your browser can record; it takes as long as the piece).
 - Your work is saved automatically in this browser. **File ▸ Scores in this browser** lists everything saved here: open, duplicate or delete. Scores stay only in this browser, so use **File ▸ Save as MusicXML** to keep a file (MusicXML) you can back up or open anywhere.
 
 ### Keyboard shortcuts
@@ -83,8 +83,9 @@ Then open <http://localhost:8000/>. Self-checks run at <http://localhost:8000/te
 ## Licence
 
 MIT — see [LICENSE](LICENSE). Coda bundles [VexFlow](https://www.vexflow.com) (MIT, including the
-Bravura music font under the SIL Open Font License) and [fflate](https://github.com/101arrowz/fflate) (MIT);
-see [vendor/README.md](vendor/README.md).
+Bravura music font under the SIL Open Font License), [fflate](https://github.com/101arrowz/fflate) (MIT)
+and, for MP3 export, [wasm-media-encoders](https://github.com/arseneyr/wasm-media-encoders) (MIT) with
+the [LAME](https://lame.sourceforge.io/) encoder (LGPL); see [vendor/README.md](vendor/README.md).
 
 Instrument sounds are the FluidR3_GM sound set by Frank Wen (MIT), in the MP3 rendering from
 [gleitz/midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts) (CC BY 3.0). They are not
