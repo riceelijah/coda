@@ -35,7 +35,7 @@ Smart Shape, Lyrics, Repeat, Key Signature, Mass Mover).
 | **Grace notes** | NotePad couldn't do this either. | M |
 | **MIDI keyboard entry** | Browsers can read a MIDI keyboard directly (Web MIDI API), so no dependency is needed. Chrome and Edge support it; Firefox asks for permission; Safari doesn't. | S |
 | **MIDI export** | **Done (Phase 22):** File ▸ Export ▸ MIDI. | — |
-| **Up to 8 staves with instrument names** | **Instrument sounds done (Phases 12–13):** Score ▸ Instruments. Adding/renaming staves after New is still to do. | S |
+| **Up to 8 staves with instrument names** | **Done (Phases 12–13, 23):** Score ▸ Parts and instruments adds, removes, renames and reorders parts and picks their sounds. | — |
 
 ## 3. What people praise in other editors (worth copying)
 
