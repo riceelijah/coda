@@ -50,9 +50,9 @@ only says what to build in what order and how to know each phase is finished.
 | 23 | Parts: add, remove, rename, reorder (DESIGN §20) | done |
 | 24 | Transposing instruments (DESIGN §21) | done |
 | 25 | .musx: second voices, articulations, transposition, tempo, C/¢, sounds by name (DESIGN §9.5) | done |
-| 26 | Dynamics, with playback and MIDI velocity (DESIGN §22) | done |
+| 26 | Dynamics and hairpins in playback and MIDI velocity (DESIGN §22–23) | done |
 | 27 | Slurs and hairpins (DESIGN §23) | done |
-| 28 | Lyrics, one verse (DESIGN §24) | done |
+| 28 | Lyrics, up to 5 verses (DESIGN §24) | done |
 | 29 | Clef changes mid-score (DESIGN §25) | done |
 | 30 | Grace notes (DESIGN §26) | done |
 

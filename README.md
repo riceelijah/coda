@@ -14,7 +14,7 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 - **Click** on a staff to add a note of the selected length; clicking between two notes inserts it there. Click a note to select it. To build a chord, select a note and press **Shift+A–G**, **Shift+click** the staff, or turn on the chord button so clicks add to the selected note.
 - **Type** letters to add notes quickly. Coda picks the octave closest to the previous note and moves to the next bar when one fills up.
 - The **Selection tool** (arrow, top of the left palette, or `V`) selects instead of adding notes: click a note, drag across notes, Shift+click to extend. Duration, dot, accidentals, tie, transpose and tuplets then apply to all the selected notes. Right-click a note or bar for a menu of actions.
-- The **Notes** menu adds dynamics, slurs (`S`), crescendo and diminuendo hairpins, articulations, lyrics (`L`, then type: Space moves to the next note, `-` splits a word) and grace notes (the grace button, then click a note or type A–G). Dynamics change how loud the part plays.
+- The **Notes** menu adds dynamics, slurs (`S`), crescendo and diminuendo hairpins, articulations, lyrics (`L`, then type: Space moves to the next note, `-` splits a word, ↑/↓ switch between up to 5 verses) and grace notes (the grace button, then click a note or type A–G). Dynamics and hairpins change how loud the part plays.
 - **Score ▸ Key and time** changes the key or time signature from the current bar on; **Score ▸ Clef from this bar** changes a staff's clef. **View** zooms the score.
 - **Score ▸ Parts and instruments** adds, removes, renames and reorders parts (treble, bass, alto or tenor staff, or a grand staff), and picks a sound for each part from the 128 General MIDI instruments (New also asks for one). Sounds download the first time a part uses them and are then kept in your browser; without a connection, parts play a plain tone. Each part can also be set to a transposing instrument (B♭ clarinet or trumpet, F horn, E♭ alto sax and others): the notes are then written for that instrument and still sound the same.
 - **Play** plays from the current bar.
@@ -60,11 +60,11 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 | Finale (`.mus`, 2012 and earlier) | Can't be opened. The format is closed and undocumented, and no open reader exists. Export MusicXML from a copy of Finale or Finale NotePad instead. |
 
 Coda keeps up to four layers (voices) per staff. When a file contains things Coda doesn't support yet
-(second verses of lyrics, repeats…), it opens the rest and lists what it left out.
+(repeats, text marks…), it opens the rest and lists what it left out.
 
 ## Not supported yet
 
-More than one verse of lyrics, articulations other than staccato/accent/tenuto/marcato/fermata, hairpins in playback, septuplets, repeats and endings, a concert-pitch view, page layout
+Articulations other than staccato/accent/tenuto/marcato/fermata, septuplets, repeats and endings, a concert-pitch view, page layout
 controls, and a one-click PDF (PDF export uses the browser's print dialog). See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Running it locally

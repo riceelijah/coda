@@ -26,9 +26,9 @@ Smart Shape, Lyrics, Repeat, Key Signature, Mass Mover).
 | **Tuplet entry** | **Done (Phases 9, 17):** 3:2, 2:3, 4:3, 5:4, 6:4 (`9`/`;`, Notes ▸ Tuplet…). 7-tuplets don't fit the tick grid. | — |
 | **Second voice** (stems up/down in one staff) | **Done (Phase 18):** layers 1–4, entered with the Layer buttons; open, draw, play and save from MusicXML, MuseScore and .musx. | — |
 | **Articulations**: staccato, accent, tenuto, marcato, fermata | **Done (Phase 19):** Notes menu and right-click; MusicXML and MuseScore both read them; staccato plays short. `.musx` articulations too (Phase 25). | — |
-| **Dynamics and hairpins** (p, mf, ff, cresc.) | **Done (Phases 26–27):** dynamics set playback and MIDI velocity; hairpins don't change the sound yet. Tempo text and rehearsal letters are not done. | — |
+| **Dynamics and hairpins** (p, mf, ff, cresc.) | **Done (Phases 26–27):** dynamics and hairpins shape playback and MIDI velocity. Tempo text and rehearsal letters are not done. | — |
 | **Slurs** | **Done (Phase 27).** | — |
-| **Lyrics** (one verse) | **Done (Phase 28):** L, then type; space moves on, hyphen splits a word. | — |
+| **Lyrics** | **Done (Phase 28):** L, then type; space moves on, hyphen splits a word, ↑/↓ for verses 1–5. | — |
 | **Repeats and 1st/2nd endings**, played back | NotePad drew them but didn't play them back; Coda can do both. | M |
 | **Clef changes mid-score** | **Done (Phase 29):** Score ▸ Clef from this bar. | — |
 | **Pickup bar** (anacrusis) | NotePad couldn't do this either; very common in songs and hymns. | S |

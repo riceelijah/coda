@@ -1122,7 +1122,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
 - **Drawn** under the note in bold italic; a staff's drawing grows to fit what hangs below.
 - **Sound:** a level (`ppp`…`fff`) holds until the next one, for the whole part (all its staves
   and layers); `mf` before the first. `sf`, `sfz`, `fz` accent one note; `fp` accents, then `p`.
-  Playback, MIDI and audio export use it as note velocity. Hairpins don't change the sound yet.
+  Playback, MIDI and audio export use it as note velocity. Hairpins ramp it (§23).
 - **Files:** MusicXML `<direction><dynamics>` before the note; MuseScore `<Dynamic>` before the
   chord or rest. Rarer marks map to the nearest (`pppp`→`ppp`, `sfp`→`fp`, `rfz`→`sfz`…); a
   dynamic after a part's last note is counted.
@@ -1139,19 +1139,28 @@ Print, and ⌘/Ctrl+P is now its PDF item.
 - **Files:** MusicXML `<slur number="1">` in `<notations>` (other numbers counted) and `<wedge>`
   directions, the stop after its note. MuseScore Slur spanners in the chords, HairPin spanners at
   voice level. Other MuseScore lines are counted.
+- **Sound:** a hairpin ramps velocity from the level where it starts to the next dynamic, if that
+  comes no later than a beat after its end and goes its way, else by 16 steps; the level reached
+  holds afterwards. A dynamic inside the hairpin ends the ramp there; a hairpin starting on the
+  last note of another (a swell) ends the first ramp at that note.
 
 ## 24. Lyrics (Phase 28)
 
-- **Model:** `ev.lyric` (1–40 characters) and `ev.lyricHyph` (a hyphen to the next syllable), on
-  notes only. One verse.
+- **Model:** `ev.lyrics = [{text, hyph?} | null, …]`, verse v at index v, up to 5 verses; text
+  1–40 characters, `hyph` a hyphen to the next syllable in that verse. No holes or trailing nulls;
+  absent when empty; notes only. Scores saved with the earlier one-verse `ev.lyric`/`lyricHyph`
+  are upgraded when the library reads them (`upgradeScore`).
 - **Entry:** select a note, press L (Notes ▸ Lyrics…). A box opens under the note. Space or Tab
   moves to the next note, `-` moves on with a hyphen, Shift+Tab goes back, Enter or clicking
-  away finishes, Escape drops what's typed. Each syllable is one undo step. Rests are skipped.
-- **Drawn** on one line per staff per system, under the notes and dynamics; a staff with lyrics
-  gets extra room below and bars widen for long words.
-- **Files:** MusicXML `<lyric number="1">` with `<syllabic>`; MuseScore `<Lyrics>` (verse 1 has no
-  `<no>`). Syllabic values are worked out from the hyphens. Other verses, extender lines and
-  lyrics on rests are counted. Elided syllables join with ‿.
+  away finishes, Escape drops what's typed, ↑/↓ change verse (kept for next time). Each syllable
+  is one undo step. Rests are skipped.
+- **Drawn** a line per verse per staff per system, under the notes and dynamics; a staff gets room
+  for its verses below and bars widen for long words. The render hit map gives verse 1's baseline
+  (`lyricY`) so the box sits on the line being typed.
+- **Files:** MusicXML `<lyric number="1">`–`"5"` with `<syllabic>`; MuseScore `<Lyrics>` with
+  `<no>` = verse − 1 (none for verse 1). Syllabic values are worked out from the hyphens, per verse.
+  Verses past 5, non-numeric numbers, extender lines and lyrics on rests are counted. Elided
+  syllables join with ‿.
 
 ## 25. Clef changes (Phase 29)
 
