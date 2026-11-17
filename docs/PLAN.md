@@ -30,7 +30,7 @@ only says what to build in what order and how to know each phase is finished.
 | 3 | MusicXML / MXL open + save | done |
 | 4 | MIDI import | done |
 | 5 | MuseScore `.mscz` import | done (4.x verified; 3.x untested) |
-| 6 | `.musx` import | decode done; mapping **blocked on sample files from the user** |
+| 6 | `.musx` import | done (checked on musxdom's test files; no real-world piece yet) |
 | 7 | Publish to GitHub Pages | README + subpath check done; **repo creation needs the user's go-ahead** |
 
 ---
@@ -185,14 +185,13 @@ Order matters here:
 
 1. [x] `crypt` + unzip + gunzip + parse (§9.5 "Decode"). Test check 7. (Tested on a synthetic file only.)
 2. [x] `?debug` download of the decoded EnigmaXML.
-3. [ ] **Open the decoded XML and confirm every element name and formula in §9.5**, not only
+3. [x] **Open the decoded XML and confirm every element name and formula in §9.5**, not only
        the rows of its "[expected]" table: the Structure bullets were partly inferred too.
        Update DESIGN.md with what the file actually says and change the markers to [verified]. If the structure differs from §9.5 in a way that changes the
        approach, stop and tell the user.
-4. [ ] Write the mapper: staves in score order → bars → layer-1 entries → events.
-5. [ ] Report everything skipped (layers 2–4, voice 2, grace notes, tuplets, unknown clefs/keys).
-6. [ ] If a sample may be redistributed (ask the user), add it to `samples/` with an
-       expected-events check. Otherwise test locally and note that in Open items.
+4. [x] Write the mapper: staves in score order → bars → layer-1 entries → events.
+5. [x] Report everything skipped (layers 2–4, voice 2, grace notes, tuplets, unknown clefs/keys).
+6. [x] musxdom's MIT-licensed test files are in `samples/musx/` with expected-event checks.
 
 **Done when:** each provided file opens; notes, rhythms, key, time, clefs and ties match the
 reference for layer 1; the report accounts for everything not carried over; a truncated or
@@ -232,5 +231,6 @@ DESIGN.md before work starts.
 - **Rest padding in exported MusicXML is greedy** (e.g. after an eighth in 3/4: half + eighth),
   not beat-aware. Correct durations, but not how an engraver would write it.
 - **Undo history is per session**; it is not saved with the autosave.
-- **Phase 6 (`.musx`) is blocked** on sample files from the user (see Phase 6).
+- **`.musx` has only been checked on small test files** (musxdom's). Ties, voice 2 and title/composer
+  were not present in them; a real-world piece would confirm those.
 - **Phase 7 (publish) is waiting** for the user's go-ahead.

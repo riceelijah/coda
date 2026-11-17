@@ -144,7 +144,7 @@ export async function run({ check, eq }) {
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;
-    try { mod = await import(path); } catch { continue; }
+    try { mod = await import(path); } catch (e) { await check(`load ${path}`, () => e.message); continue; }
     await mod.run({ check, eq, brief, fetchBytes, importBytes });
   }
 }

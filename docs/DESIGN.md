@@ -621,71 +621,56 @@ the CC0 decrypt routine above):
 - Reference reader (C++, MIT): `https://github.com/openmusx/musxdom` — `src/musx/dom/Entries.cpp`,
   `CommonClasses.cpp`, `Others.h`, `Details.h`, `Options.h`. (The old `rpatters1/musxdom` URL redirects here.)
 
-**Structure** (Project-Attacca enigmaxml-documentation, musxdom source). The overall shape —
-the pools, the `cmper` keying, gfhold → frame → linked entries — is **[verified]** from the
-written documentation. **Individual element names below are [expected]**: several were read
-from an experimental schema or inferred from C++ field names, not seen in a real file. Confirm
-each against decoded XML before relying on it.
+**Structure — [verified]** against seven real `.musx` files (musxdom's test data, kept in
+`samples/musx/`) and musxdom's source and tests. Everything below was seen in decoded files
+unless marked otherwise.
 
 - Records are keyed by attributes: `cmper` in `<others>`; `cmper1` + `cmper2` in `<details>`;
-  `entnum` in `<entries>`. Repeated records add a 0-based `inci`.
-- Staff order: `others > instUsed[cmper="0"]`, ordered by `inci`; each one's `<inst>` child is a
-  `staffSpec` cmper. (`staffSpec` cmpers are **not** in score order.)
-- Bars: `others > measSpec`, ordered by `cmper` (1-based, sequential). Children include
-  `<beats>`, `<divbeat>`, and a key signature element.
-- Music for a staff + bar: `details > gfhold[cmper1=staffCmper][cmper2=measureCmper]`. Missing
-  gfhold = empty bar. Its `<frame1>`…`<frame4>` children are layers 1–4; each value is a
-  `frameSpec` cmper. Its `<clefID>` is the clef index for that bar.
-- `others > frameSpec[cmper=…]` has `<startEntry>` and `<endEntry>` (entry numbers).
-- `entries > entry[entnum=…]` form a linked list via the `next` attribute (0 = end). Walk from
-  `startEntry` following `next` until you have processed `endEntry`. **Never** assume entry
-  numbers are consecutive.
-- `<entry>` children: `<dura>`, `<numNotes>`, `<isNote/>` (present = notes, absent = rest),
-  `<graceNote/>`, `<v2/>` (voice 2), `<note>` children each with `<harmLev>`, `<harmAlt>`.
-  A rest may still contain one `<note>` giving its vertical position; ignore it.
-- Duration from `<dura>` **[verified algorithm]**: the note value is the highest set bit; the
-  number of dots is the count of consecutive set bits immediately below it.
-- Pitch **[verified algorithm]**, for a standard major/minor key with `fifths` sharps (+) or flats (−):
+  `entnum` in `<entries>`. Repeated records add a 0-based `inci`. **Records with a `part`
+  attribute belong to linked parts: ignore them.**
+- Staff order: `others > instUsed[cmper="0"]`, ordered by `inci`; each one's `<inst>` is a
+  `staffSpec` cmper. `staffSpec` 32767 is a hidden template staff; skip it.
+- Staff name: `staffSpec > fullName` → `textBlock[cmper] > textID` → `texts > blockText[number]`.
+  Strip `^name(...)` formatting codes. Brace: a `details > staffGroup` spanning exactly two
+  consecutive staves.
+- Clef: `staffSpec > defaultClef` (absent = 0), overridden by `gfhold > clefID` in bar 1. Map
+  through `options > clefOptions > clefDef[index]` by shape (`clefChar`, `clefYDisp`):
+  38/−6 treble, 66/−4 alto, 66/−2 tenor, 63/−2 bass. Other shapes → treble, reported.
+  A `clefListID` (several clefs in a bar) or a later different `clefID` → "Clef changes ignored".
+- Bars: `others > measSpec` by `cmper`. `<beats>` × `<divbeat>` EDU (quarter = 1024): time is
+  `beats / (4096 / divbeat)`; `divbeat` 1536 (dotted quarter) gives `beats*3 / 8`.
+- Key: `measSpec > keySig > key`. Linear key when `key & 0xC000` is 0: low byte = signed
+  fifths, `key >> 8` = mode (0 major, 1 minor, others custom). Otherwise non-linear and the whole
+  value is the mode. Custom modes have tables keyed by mode cmper: `fstKeySharps`/`fstKeyFlats`
+  (tonal centres), `acciAmountSharps`/`Flats`, `acciOrderSharps`/`Flats`; `keyFormat > semitones`
+  ≠ 12 means microtonal.
+- Pitch: port of musxdom `KeySignature::calcPitch` with displacement `harmLev` and alteration
+  `harmAlt` (independent of the clef):
   ```
-  tonalCenter = fifths >= 0 ? [0,4,1,5,2,6,3,0][fifths]      // step index of the major tonic
-                            : [0,3,6,2,5,1,4,0][-fifths]
-               (minor keys: sharps [5,2,6,3,0,4,1,5], flats [5,1,4,0,3,6,2,5])
-  lev   = tonalCenter + harmLev
-  step  = ((lev % 7) + 7) % 7
-  oct   = Math.floor(lev / 7) + 4
-  alter = harmAlt + keyAlter(fifths, step)                   // keyAlter from §3.3
+  lev = tonalCentre + harmLev;  step = mod(lev, 7);  oct = floor(lev / 7) + 4
+  alter = harmAlt + keyAlterationOn(step)
   ```
-  i.e. `harmLev` 0 is the tonic in the middle-C octave, and `harmAlt` is relative to the key.
-
-**Still to confirm on a real file — [expected]:**
-
-| Item | Expected | How to confirm |
-|---|---|---|
-| EDU scale | quarter note `dura` = 1024 (whole 4096, eighth 512, 16th 256, 32nd 128) | find a known quarter note |
-| `<divbeat>` unit | EDU, so 4/4 is `beats`=4, `divbeat`=1024 | read bar 1 of a 4/4 file |
-| Key element | `<keySig><key>N</key></keySig>` in `measSpec`; N in 0..7 = that many sharps; 255 down to 249 = 1 to 7 flats (i.e. the low byte as a signed 8-bit number); a non-zero high byte (256+) = minor or non-standard | compare files in G, F, and a minor key |
-| Clef index (`clefID`) | 0 treble, 1 alto, 2 tenor, 3 bass, 4 percussion, 5 treble-8vb, 6 bass-8vb | compare a piano file |
-| Tie element names | `<tieStart/>` / `<tieEnd/>` inside `<note>` | file with a tie |
-| Tuplets | `details > tupletDef` keyed by entry number, with the entry carrying a `tupletStart` flag | file with a triplet |
-| Staff name | from `staffSpec` (`fullName` → a `texts` block) | — |
-| Title / composer | `texts > fileInfo` blocks by type | — |
-| Clef when bar 1 has no `gfhold` | falls back to a default clef on `staffSpec` | file with an empty first bar |
-| `frameSpec` records | one per cmper; if several `inci` exist, each is a separate run of entries to concatenate | look for repeated cmpers |
-| Absent `<key>` | same as 0 (C major) | file in C |
-| Pitch formula end to end | the formula above gives the right note names | compare 5–10 notes against the reference export |
+  Checked against musxdom's KeySigs test: Ab major, G# minor, Eb Lydian, C# Phrygian and a
+  non-linear key all give E4 F#4 G4 Ab4 Bb4 C5 D5 Eb5 for the same written notes.
+- Music for a staff + bar: `details > gfhold[cmper1=staff][cmper2=measure]`; missing = empty bar.
+  `<frame1>`…`<frame4>` are layers 1–4, each a `frameSpec` cmper with `<startEntry>`/`<endEntry>`.
+- `entries > entry` is a linked list via `next` (0 = end). Children: `<dura>` (EDU, dots included,
+  e.g. 1536 = dotted quarter), `<isNote/>` (absent = rest), `<graceNote/>`, `<tupletStart/>`,
+  and `<note>` with `<harmLev>`, `<harmAlt>`, `<tieStart/>`.
+- Tuplets: `details > tupletDef[entnum][inci="0"]` with `symbolicNum`/`symbolicDur` and
+  `refNum`/`refDur` (5 eighths in the time of 4 = 5/512, 4/512). The tuplet covers entries until
+  `symbolicNum × symbolicDur` EDU of written values are used.
+- **[expected], not seen in a sample:** voice-2 entries (`<voice2/>`, `<v2/>` accepted), title
+  and composer from `texts > fileInfo[type]`, multiple `frameSpec` incis.
 
 **Rules for this importer:**
 
-- Use **layer 1 (`frame1`) only**, skip voice-2 entries and grace notes; count all three in the report.
-- Unknown clef index → treble, reported. Non-standard key (high byte set) → use the low byte as
-  fifths, reported.
-- If tuplets cannot be resolved, import the notes with their written values and add
-  "N bars contain tuplets that were not converted" to the report. Bars may then be overfull,
-  which the model allows.
-- The importer must not throw on missing pieces: a bar it cannot read becomes an empty bar and
-  is counted.
-- With `?debug` in the page URL, opening a `.musx` also offers the decoded EnigmaXML as a
-  download. This is how the [expected] items get confirmed.
+- Use the **lowest layer present** in each bar; other layers, voice-2 entries and grace notes are
+  skipped and counted.
+- Non-linear and microtonal keys: pitches keep their real spelling (microtonal alterations are
+  rounded to semitones and counted); the key signature shown is the nearest standard one.
+- Transposing staves are shown at written pitch, reported. Expressions (`measExprAssign`) are counted.
+- With `?debug` in the page URL, opening a `.musx` also offers the decoded EnigmaXML as a download.
 
 ### 9.6 Import report
 
