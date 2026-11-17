@@ -424,7 +424,7 @@ function makeEvent(pitch) {
 }
 
 function withAlter(step, oct) {
-  const { key } = M.attrsAt(state.score, state.caret.bar);
+  const key = M.keyAt(state.score, state.caret.staff, state.caret.bar);
   return { step, oct, alter: state.armed.alter ?? M.keyAlter(key, step) };
 }
 
@@ -465,7 +465,7 @@ function enterAtCaret(pitch) {
 // Sound the pitches of an event (DESIGN §11.2).
 function hear(ev) {
   const st = state.score.staves[state.sel?.staff ?? 0];
-  if (ev && ev.pitches.length) audition(ev.pitches.map(M.midi), st.program ?? 0, st.sound);
+  if (ev && ev.pitches.length) audition(ev.pitches.map((p) => M.soundingMidi(st, p)), st.program ?? 0, st.sound);
 }
 
 // Shift+A–G: add that letter above the selected note's top pitch (DESIGN §11.1).
@@ -480,7 +480,7 @@ function chordLetter(letter) {
     base = M.fromDiatonic(M.diatonic(prev) - 4);
   }
   const p = M.chordAbove(base, step);
-  const { key } = M.attrsAt(state.score, s.bar);
+  const key = M.keyAt(state.score, s.staff, s.bar);
   const pitch = { ...p, alter: state.armed.alter ?? M.keyAlter(key, p.step) };
   if (edit((sc) => M.toggleChordPitch(sc, s.staff, s.bar, s.idx, pitch))) { hear(selEvent()); message(M.pitchName(pitch) + " added"); }
 }
@@ -626,7 +626,7 @@ function onClick(e) {
   if (target !== null && (chord || L.near)) {
     state.sel = { staff: L.staff, bar: L.bar, idx: target };
     if (chord) {
-      const { key } = M.attrsAt(state.score, L.bar);
+      const key = M.keyAt(state.score, L.staff, L.bar);
       const pitch = { ...L.pitch, alter: state.armed.alter ?? M.keyAlter(key, L.pitch.step) };
       if (edit((sc) => M.toggleChordPitch(sc, L.staff, L.bar, target, pitch))) hear(selEvent());
     } else {
@@ -853,11 +853,25 @@ async function fillOwnSounds(picks = null) {
   }
 }
 
+// Transposition presets (DESIGN §21): [chromatic, diatonic] from written to sounding.
+const TRANSPOSITIONS = [
+  ["0,0", "Concert pitch"], ["-2,-1", "B♭ (clarinet, trumpet, soprano sax)"], ["-3,-2", "A (clarinet)"],
+  ["-7,-4", "F (horn, English horn)"], ["-9,-5", "E♭ (alto sax, alto clarinet)"], ["3,2", "E♭ (E♭ clarinet, sounds higher)"],
+  ["-14,-8", "B♭ low (tenor sax, bass clarinet)"], ["-21,-12", "E♭ low (baritone sax)"],
+  ["-12,-7", "Octave lower (guitar, bass)"], ["12,7", "Octave higher (piccolo, glockenspiel)"],
+];
+const trValue = (st) => (st.transpose ? st.transpose.join(",") : "0,0");
+
 const KIND_LABEL = { treble: "Treble staff", bass: "Bass staff", alto: "Alto staff", tenor: "Tenor staff", grand: "Grand staff" };
 
 // One row of the parts list (DESIGN §20). The rows are the draft: Apply reads them in order.
-function partRow({ from, kind, name, value }) {
+function partRow({ from, kind, name, value, tr = "0,0" }) {
   const row = document.createElement("div"), nm = document.createElement("input"), sel = document.createElement("select");
+  const trs = document.createElement("select");
+  trs.className = "tr"; trs.setAttribute("aria-label", "Transposition"); trs.title = "Transposition: written notes keep sounding the same";
+  for (const [v, label] of TRANSPOSITIONS) trs.appendChild(new Option(label, v));
+  if (!TRANSPOSITIONS.some(([v]) => v === tr)) trs.appendChild(new Option(`Other (${tr.replace(",", " semitones, ")} steps)`, tr));
+  trs.value = tr;
   row.className = "part-row"; row.setAttribute("role", "listitem");
   row.dataset.from = from ?? ""; row.dataset.kind = kind;
   nm.className = "nm"; nm.maxLength = 60; nm.value = name; nm.placeholder = "Part name"; nm.setAttribute("aria-label", "Part name");
@@ -876,7 +890,7 @@ function partRow({ from, kind, name, value }) {
   const k = document.createElement("div");
   k.className = "kind";
   k.textContent = KIND_LABEL[kind] + (from === null ? " (new)" : "");
-  row.append(nm, sel, up, down, del, k);
+  row.append(nm, sel, up, down, del, trs, k);
   return row;
 }
 const updatePartButtons = () => {
@@ -891,7 +905,7 @@ const kindOf = (sc, g) => (g.length > 1 ? "grand" : sc.staves[g[0]].clef);
 function openInstruments() {
   const sc = state.score, box = $("inst-rows");
   box.replaceChildren(...M.partGroups(sc).map((g) => partRow({
-    from: g[0], kind: kindOf(sc, g), name: sc.staves[g[0]].name || "", value: soundValue(sc.staves[g[0]]) })));
+    from: g[0], kind: kindOf(sc, g), name: sc.staves[g[0]].name || "", value: soundValue(sc.staves[g[0]]), tr: trValue(sc.staves[g[0]]) })));
   const want = new Map([...box.querySelectorAll("select.snd")].map((x) => [x, x.dataset.want]));
   updatePartButtons();
   $("instruments").returnValue = "";
@@ -912,9 +926,9 @@ function closeInstruments() {
   const sc = state.score, groups = M.partGroups(sc);
   const rows = [...$("inst-rows").children].map((r) => ({
     from: r.dataset.from === "" ? null : +r.dataset.from, kind: r.dataset.kind,
-    name: r.querySelector("input.nm").value, value: r.querySelector("select.snd").value }));
+    name: r.querySelector("input.nm").value, value: r.querySelector("select.snd").value, tr: r.querySelector("select.tr").value }));
   const same = rows.length === groups.length && rows.every((r, i) => r.from === groups[i][0] &&
-    r.name.trim() === (sc.staves[r.from].name || "") && r.value === soundValue(sc.staves[r.from]));
+    r.name.trim() === (sc.staves[r.from].name || "") && r.value === soundValue(sc.staves[r.from]) && r.tr === trValue(sc.staves[r.from]));
   if (same) return;
   // removed parts that hold notes (any layer): ask first, as Delete bar does
   const kept = new Set(rows.map((r) => r.from));
@@ -930,6 +944,8 @@ function closeInstruments() {
       const err = r.value.startsWith("u:") ? M.setStaffSound(score, s, r.value.slice(2))
         : M.setStaffSound(score, s, null) || M.setStaffProgram(score, s, +r.value);
       if (err) return err;
+      // keeps the sound: the written notes move (DESIGN §21)
+      if (r.tr !== trValue(score.staves[s])) { const e2 = M.setStaffTranspose(score, s, r.tr.split(",").map(Number)); if (e2) return e2; }
       s += r.kind === "grand" ? 2 : 1;
     }
     return null;
@@ -1035,6 +1051,7 @@ function openAttrs() {
   const m = sc.measures[b];
   $("attrs-head").textContent = `Key and time from bar ${b + 1}`;
   $("a-key").value = at.key;
+  $("a-key").previousElementSibling.textContent = sc.staves.some((st) => st.transpose) ? "Key (concert)" : "Key";
   const ts = $("a-time"), t = M.timeLabel(at);
   if (![...ts.options].some((o) => o.value === t)) ts.add(new Option(t, t));
   ts.value = t;

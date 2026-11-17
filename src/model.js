@@ -279,10 +279,43 @@ export function deleteEvent(score, s, b, i) {
   return null;
 }
 
+// ---------- transposing parts (DESIGN §21) ----------
+// staff.transpose = [chromatic, diatonic]: written -> sounding, MusicXML's signs (B♭ clarinet
+// [-2, -1]). Notes are stored as written; measures[b].key is the concert key.
+
+// An interval's size on the line of fifths (M2 = 2, P5 = 1, octave = 0).
+export const fifthsOf = (c, d) => 7 * c - 12 * d;
+export function wrapKey(k) { while (k > 7) k -= 12; while (k < -7) k += 12; return k; }
+// The key staff s shows at bar b.
+export function keyAt(score, s, b) {
+  const t = score.staves[s]?.transpose, k = attrsAt(score, b).key;
+  return t ? wrapKey(k - fifthsOf(t[0], t[1])) : k;
+}
+export const soundingMidi = (st, p) => midi(p) + (st.transpose?.[0] || 0);
+// p moved by an interval, spelled by its letter; past a double accidental, respelled.
+export function shiftPitch(p, c, d) {
+  const np = fromDiatonic(diatonic(p) + d), m = midi(p) + c;
+  const alter = m - midi({ ...np, alter: 0 });
+  return Math.abs(alter) <= 2 ? { ...np, alter } : spellMidi(m, 0);
+}
+const okTranspose = (t) => Array.isArray(t) && t.length === 2 && t.every(Number.isInteger) && Math.abs(t[0]) <= 36 && Math.abs(t[1]) <= 21;
+// Set a part's transposition, keeping its sound: every written note in every layer moves by
+// old − new. null or [0, 0] = concert pitch.
+export function setStaffTranspose(score, s, t) {
+  if (t && !okTranspose(t)) return "Unknown transposition";
+  const nt = t && (t[0] || t[1]) ? [...t] : null;
+  for (const i of partGroups(score).find((g) => g.includes(s))) {
+    const st = score.staves[i], ot = st.transpose || [0, 0], dc = ot[0] - (nt?.[0] || 0), dd = ot[1] - (nt?.[1] || 0);
+    if (dc || dd) for (const bars of allLayers(st)) for (const bar of bars) for (const ev of bar) ev.pitches = sortPitches(ev.pitches.map((p) => shiftPitch(p, dc, dd)));
+    if (nt) st.transpose = nt; else delete st.transpose;
+  }
+  return null;
+}
+
 export function transpose(score, s, b, i, steps) {
   const ev = score.staves[s].bars[b][i];
   if (!ev.pitches.length) return "Rests have no pitch";
-  const { key } = attrsAt(score, b);
+  const key = keyAt(score, s, b);
   ev.pitches = ev.pitches.map((p) => {
     const np = fromDiatonic(diatonic(p) + steps);
     return { ...np, alter: keyAlter(key, np.step) };
@@ -520,6 +553,7 @@ export function isValidScore(sc) {
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m))))));
     return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) &&
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
+      (st.transpose === undefined || okTranspose(st.transpose)) &&
       (st.sound === undefined || (typeof st.sound === "string" && st.sound.length > 0 && st.sound.length <= 64)) &&
       (st.layers === undefined || (Array.isArray(st.layers) && st.layers.length < MAX_LAYERS && st.layers.every(okBars))));
   } catch { return false; }

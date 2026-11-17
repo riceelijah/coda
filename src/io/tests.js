@@ -201,6 +201,45 @@ export async function run({ check, eq }) {
     return b.staves.map((st) => st.name + "/" + st.clef).join(" ") === "Piano/treble Piano/bass Bass/bass Alto 1/treble" || b.staves.map((st) => st.name).join();
   });
 
+  await check("transposition: written key and notes move, sound stays; braced pair; clear; validation (DESIGN §21)", () => {
+    const s = M.newScore({ preset: "treble", bars: 1 });
+    M.setAttrs(s, 0, { key: -1 }); // concert F major
+    s.staves[0].bars[0] = [ev("h", "C4 Bb4"), ev("h", "F#4")];
+    const before = s.staves[0].bars[0].map((e) => e.pitches.map((p) => M.midi(p)));
+    if (M.setStaffTranspose(s, 0, [-2, -1])) return "B♭ refused";
+    if (M.keyAt(s, 0, 0) !== 1) return "written key " + M.keyAt(s, 0, 0); // G major for B♭ clarinet
+    if (brief(s.staves[0]) !== "D4+C5:h G#4:h") return brief(s.staves[0]);
+    const sounding = s.staves[0].bars[0].map((e) => e.pitches.map((p) => M.soundingMidi(s.staves[0], p)));
+    if (!eq(sounding, before)) return "sound changed";
+    if (M.setStaffTranspose(s, 0, [-7, -4]) || M.keyAt(s, 0, 0) !== 0 || brief(s.staves[0]) !== "G4+F5:h C#5:h") return "F horn " + brief(s.staves[0]);
+    if (M.setStaffTranspose(s, 0, null) || s.staves[0].transpose || brief(s.staves[0]) !== "C4+Bb4:h F#4:h") return "clear";
+    if (M.keyAt(s, 0, 0) !== -1) return "concert key";
+    const p = M.newScore({ preset: "piano", bars: 1 });
+    M.setStaffTranspose(p, 1, [-12, -7]);
+    if (!eq(p.staves[0].transpose, [-12, -7]) || !eq(p.staves[1].transpose, [-12, -7])) return "pair";
+    if (!M.setStaffTranspose(s, 0, [1.5, 0]) || !M.isValidScore(p) || M.isValidScore({ ...p, staves: [{ ...p.staves[0], transpose: [99, 0] }] })) return "validation";
+    return M.wrapKey(M.keyAt({ ...s, staves: [{ ...s.staves[0], transpose: [-9, -5] }] }, 0, 0)) === 2 || "E♭ alto key"; // F major concert → D major written
+  });
+
+  await check("transposition in files: MusicXML written key → concert, round trips through MusicXML and MuseScore (DESIGN §21)", async () => {
+    const att = (k, t) => `<attributes><divisions>1</divisions><key><fifths>${k}</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef>${t}</attributes>`;
+    const xml = `<score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Clarinet</part-name></score-part><score-part id="P2"><part-name>Tenor Sax</part-name></score-part><score-part id="P3"><part-name>Flute</part-name></score-part></part-list>` +
+      `<part id="P1"><measure number="1">${att(2, "<transpose><diatonic>-1</diatonic><chromatic>-2</chromatic></transpose>")}<note><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note><note><pitch><step>C</step><alter>1</alter><octave>5</octave></pitch><duration>2</duration><type>half</type></note></measure></part>` +
+      `<part id="P2"><measure number="1">${att(2, "<transpose><diatonic>-1</diatonic><chromatic>-2</chromatic><octave-change>-1</octave-change></transpose>")}<note><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure></part>` +
+      `<part id="P3"><measure number="1">${att(0, "")}<note><pitch><step>D</step><octave>5</octave></pitch><duration>4</duration><type>whole</type></note></measure></part></score-partwise>`;
+    const a = importMusicXML(xml, "x.musicxml").score;
+    if (a.measures[0].key !== 0) return "concert key " + a.measures[0].key; // B♭ clarinet in D = concert C
+    if (!eq(a.staves.map((st) => st.transpose || null), [[-2, -1], [-14, -8], null])) return JSON.stringify(a.staves.map((st) => st.transpose));
+    if (brief(a.staves[0]) !== "E4:h C#5:h" || M.keyAt(a, 1, 0) !== 2 || M.keyAt(a, 2, 0) !== 0) return brief(a.staves[0]);
+    if (M.soundingMidi(a.staves[1], a.staves[1].bars[0][0].pitches[0]) !== 50) return "tenor sounds D3";
+    const b = importMusicXML(exportMusicXML(a), "x.musicxml").score;
+    if (!eq(b, a)) return "MusicXML round trip";
+    const { exportMSCX, importMSCX } = await import("./mscz.js");
+    const c = importMSCX(exportMSCX(a), "x.mscx").score;
+    return eq(c.staves.map((st) => [st.transpose, brief(st)]), a.staves.map((st) => [st.transpose, brief(st)])) && c.measures[0].key === 0 ||
+      JSON.stringify(c.staves.map((st) => [st.transpose, brief(st)]));
+  });
+
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {
     const s = M.newScore({ preset: "piano", bars: 1 });
     if (M.setStaffProgram(s, 1, 40) || s.staves[0].program !== 40 || s.staves[1].program !== 40) return "pair";

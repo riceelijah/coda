@@ -25,7 +25,7 @@ export function schedule(score, from = 0) {
         const len = eventTicks(ev);
         const nextOpen = new Map();
         for (const p of ev.pitches) {
-          const m = midi(p);
+          const m = midi(p) + (st.transpose?.[0] || 0); // sounding pitch (DESIGN §21)
           let n = open.get(m);
           if (n && n.end === at) n.end = at + len;
           else { n = { start: at, end: at + len, midi: m, program: st.program ?? 0, staff: si, ...(st.sound ? { sound: st.sound } : {}) }; notes.push(n); }

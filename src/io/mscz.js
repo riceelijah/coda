@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf } from "../model.js";
 import { completeTuplet } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
@@ -65,7 +65,15 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       if (byName) program = byName.program;
       else if (!/piano/i.test(name)) report.count("Parts with no instrument sound found (played as piano)");
     }
-    for (let k = 0; k < n; k++) decl.push({ name, brace: n === 2 && k === 0, program });
+    // written → sounding, same sign as Coda (DESIGN §21)
+    const inst = kid(part, "Instrument");
+    const tc = parseInt(txt(inst, "transposeChromatic"), 10) || 0, td = parseInt(txt(inst, "transposeDiatonic"), 10) || 0;
+    let transpose;
+    if (tc || td) {
+      if (Math.abs(tc) <= 36 && Math.abs(td) <= 21) transpose = [tc, td];
+      else report.count("Transpositions out of range (ignored)");
+    }
+    for (let k = 0; k < n; k++) decl.push({ name, brace: n === 2 && k === 0, program, transpose });
     if (n > 2) report.add(`A part with ${n} staves was split into separate staves without a brace`);
   });
 
@@ -87,7 +95,9 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   const firstAttrs = [];
   kids(sc, "Staff").forEach((stEl, si) => {
     const d = decl[si] || { name: "", brace: false };
-    const staff = { name: d.name, clef: null, brace: d.brace, bars: [], ...(d.program !== undefined ? { program: d.program } : {}) };
+    const staff = { name: d.name, clef: null, brace: d.brace, bars: [], ...(d.program !== undefined ? { program: d.program } : {}),
+      ...(d.transpose ? { transpose: [...d.transpose] } : {}) };
+    const [tc, td] = d.transpose || [0, 0];
     let key = 0, time = [4, 4], sym;
     const tuplets = {}; // MuseScore 3: id -> ratio
     kids(stEl, "Measure").forEach((meas, mi) => {
@@ -166,11 +176,14 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (!isRest) {
               for (const n of kids(el, "Note")) {
                 const pm = parseInt(txt(n, "pitch"), 10);
-                const tpc = parseInt(txt(n, "tpc"), 10);
+                const tpc = parseInt(txt(n, "tpc"), 10), tpc2 = parseInt(txt(n, "tpc2"), 10);
                 if (!Number.isFinite(pm)) continue;
-                let p = Number.isFinite(tpc) ? tpcToPitch(tpc, pm) : null;
-                if (!p || p.alter < -2 || p.alter > 2 || midi(p) !== pm) {
-                  p = spellMidi(pm, key);
+                // pitch and tpc are concert; Coda keeps the written note (tpc2)
+                const wm = pm - tc;
+                let p = Number.isFinite(tpc2) && tc ? tpcToPitch(tpc2, wm)
+                  : Number.isFinite(tpc) ? (tc || td ? shiftPitch(tpcToPitch(tpc, pm), -tc, -td) : tpcToPitch(tpc, pm)) : null;
+                if (!p || p.alter < -2 || p.alter > 2 || midi(p) !== wm) {
+                  p = spellMidi(wm, wrapKey(key - fifthsOf(tc, td)));
                   report.count("Note spellings guessed from pitch");
                 }
                 if (!ev.pitches.some((q) => q.step === p.step && q.oct === p.oct)) ev.pitches.push(p);
@@ -238,7 +251,8 @@ export function exportMSCX(score) {
     g.forEach((s, k) => x.push(`<Staff id="${++id}"><StaffType group="pitched"><name>stdNormal</name></StaffType>` +
       (g.length > 1 && k === 0 ? '<bracket type="1" span="2" col="0"/><barLineSpan>1</barLineSpan>' : "") + "</Staff>"));
     x.push(`<trackName>${esc(st.name || "")}</trackName><Instrument><longName>${esc(st.name || "")}</longName>` +
-      `<trackName>${esc(st.name || "")}</trackName>${g.map((s, k) => `<clef staff="${k + 1}">${CLEF_OUT[score.staves[s].clef]}</clef>`).join("")}<Channel><program value="${st.program ?? 0}"/></Channel></Instrument></Part>`);
+      `<trackName>${esc(st.name || "")}</trackName>${g.map((s, k) => `<clef staff="${k + 1}">${CLEF_OUT[score.staves[s].clef]}</clef>`).join("")}${st.transpose ? `<transposeDiatonic>${st.transpose[1]}</transposeDiatonic><transposeChromatic>${st.transpose[0]}</transposeChromatic>` : ""}` +
+      `<Channel><program value="${st.program ?? 0}"/></Channel></Instrument></Part>`);
   }
   score.staves.forEach((st, s) => {
     x.push(`<Staff id="${s + 1}">`);
@@ -254,13 +268,13 @@ export function exportMSCX(score) {
         x.push("<voice>");
         if (v === 0) {
           if (b === 0) x.push(`<Clef><concertClefType>${CLEF_OUT[st.clef]}</concertClefType><transposingClefType>${CLEF_OUT[st.clef]}</transposingClefType><isHeader>1</isHeader></Clef>`);
-          if (b === 0 || m.key !== undefined) x.push(`<KeySig><concertKey>${a.key}</concertKey></KeySig>`);
+          if (b === 0 || m.key !== undefined) x.push(`<KeySig><concertKey>${a.key}</concertKey>${st.transpose ? `<actualKey>${keyAt(score, s, b)}</actualKey>` : ""}</KeySig>`);
           if (b === 0 || m.time) x.push(`<TimeSig>${a.sym ? `<subtype>${a.sym === "common" ? 1 : 2}</subtype>` : ""}<sigN>${a.time[0]}</sigN><sigD>${a.time[1]}</sigD></TimeSig>`);
           if (b === 0 && s === 0) x.push(`<Tempo><tempo>${score.tempo / 60}</tempo><followText>1</followText><text><sym>metNoteQuarterUp</sym> = ${score.tempo}</text></Tempo>`);
         }
         const bar = layers[v][b];
         if (v === 0 && !bar.length) x.push(`<Rest><durationType>measure</durationType><duration>${frac(cap)}</duration></Rest>`);
-        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0));
+        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st));
         x.push("</voice>");
       }
       x.push("</Measure>");
@@ -291,7 +305,7 @@ function tieMap(bars) {
 }
 
 // One voice's events; a first voice is padded with rests to `cap`.
-function voiceXml(bar, ties, b, cap) {
+function voiceXml(bar, ties, b, cap, st) {
   const x = [];
   let open = null; // {tup, left: ticks still to fill}
   bar.forEach((e, i) => {
@@ -308,10 +322,10 @@ function voiceXml(bar, ties, b, cap) {
       const t = ties[b + ":" + i] || { next: {}, prev: {} };
       const arts = (e.marks || []).filter((m) => ARTIC_OUT[m]).map((m) => `<Articulation><subtype>${ARTIC_OUT[m]}</subtype></Articulation>`).join("");
       const notes = e.pitches.map((p) => {
-        const mm = midi(p);
+        const mm = midi(p), [tc, td] = st.transpose || [0, 0]; // pitch and tpc concert, tpc2 written
         const sp = (t.next[mm] ? `<Spanner type="Tie"><Tie/><next>${t.next[mm]}</next></Spanner>` : "") +
           (t.prev[mm] ? `<Spanner type="Tie"><prev>${t.prev[mm]}</prev></Spanner>` : "");
-        return `<Note>${sp}<pitch>${mm}</pitch><tpc>${tpcOf(p)}</tpc></Note>`;
+        return `<Note>${sp}<pitch>${mm + tc}</pitch><tpc>${tpcOf(tc || td ? shiftPitch(p, tc, td) : p)}</tpc>${tc || td ? `<tpc2>${tpcOf(p)}</tpc2>` : ""}</Note>`;
       }).join("");
       x.push(`<Chord>${head}${arts}${notes}</Chord>`);
     }

@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -120,7 +120,8 @@ export function exportMusicXML(score) {
       const a = attrsAt(score, b);
       const attrs = [];
       if (b === 0) attrs.push(`<divisions>${PPQ}</divisions>`);
-      if (b === 0 || m.key !== undefined) attrs.push(`<key><fifths>${a.key}</fifths></key>`);
+      // the written key; <transpose> says how it sounds (DESIGN §21)
+      if (b === 0 || m.key !== undefined) attrs.push(`<key><fifths>${keyAt(score, g[0], b)}</fifths></key>`);
       if (b === 0 || m.time) attrs.push(`<time${a.sym ? ` symbol="${a.sym}"` : ""}><beats>${a.time[0]}</beats><beat-type>${a.time[1]}</beat-type></time>`);
       if (b === 0) {
         if (g.length > 1) attrs.push(`<staves>${g.length}</staves>`);
@@ -128,6 +129,11 @@ export function exportMusicXML(score) {
           const [sign, line] = CLEF_OUT[score.staves[s].clef];
           attrs.push(`<clef${g.length > 1 ? ` number="${k + 1}"` : ""}><sign>${sign}</sign><line>${line}</line></clef>`);
         });
+        const t = score.staves[g[0]].transpose;
+        if (t) {
+          const oc = Math.trunc(t[1] / 7);
+          attrs.push(`<transpose><diatonic>${t[1] - 7 * oc}</diatonic><chromatic>${t[0] - 12 * oc}</chromatic>${oc ? `<octave-change>${oc}</octave-change>` : ""}</transpose>`);
+        }
       }
       if (attrs.length) x.push(`<attributes>${attrs.join("")}</attributes>`);
       if (b === 0 && gi === 0) {
@@ -201,7 +207,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
       bars: [],
     }));
     if (nStaves > 2) report.add(`A part with ${nStaves} staves was split into separate staves without a brace`);
-    let divisions = 1, key = 0, time = [4, 4], sym;
+    let divisions = 1, key = 0, time = [4, 4], sym, tr = null;
     // staff -> MusicXML voice ids in layer order: numeric order, so voice 1 is always layer 1
     const voiceOf = {};
     for (const n of part.querySelectorAll("note")) {
@@ -239,6 +245,17 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
             sym = TIME_SYMS[s] && TIME_SYMS[s][0] === time[0] && TIME_SYMS[s][1] === time[1] ? s : undefined;
             if (TIME_SYMS[s] && !sym) report.count("Common/cut time symbols on other meters shown as numbers");
           }
+          const tx = kid(el, "transpose"); // written → sounding (DESIGN §21)
+          if (tx) {
+            const oc = parseInt(txt(tx, "octave-change"), 10) || 0;
+            const t = [(parseInt(txt(tx, "chromatic"), 10) || 0) + 12 * oc, (parseInt(txt(tx, "diatonic"), 10) || 0) + 7 * oc];
+            if (kids(el, "transpose").length > 1) report.count("Different transpositions on staves of one part (first one used)");
+            if (tr === null && t.every(Number.isInteger) && Math.abs(t[0]) <= 36 && Math.abs(t[1]) <= 21) {
+              tr = t[0] || t[1] ? t : [0, 0];
+              if (t[0] || t[1]) staves.forEach((st) => { st.transpose = [...t]; });
+            } else if (tr === null) { tr = [0, 0]; report.count("Transpositions out of range (ignored)"); }
+            else if (tr[0] !== t[0] || tr[1] !== t[1]) report.count("Transposition changes mid-part (first one kept)");
+          }
           for (const c of kids(el, "clef")) {
             const n = +(c.getAttribute("number") || 1);
             const st = staves[n - 1];
@@ -268,7 +285,8 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
-      if (pi === 0) firstPartAttrs.push({ key, time: [...time], sym });
+      // the file's key is written; the score keeps concert pitch
+      if (pi === 0) firstPartAttrs.push({ key: tr ? wrapKey(key + fifthsOf(tr[0], tr[1])) : key, time: [...time], sym });
     });
     staves.forEach((st) => { if (!st.clef) st.clef = "treble"; });
     score.staves.push(...staves);

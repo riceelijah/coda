@@ -61,7 +61,7 @@ Ordered roughly by how often they come up for students, teachers and hobbyists.
 | Feature | Notes | Size |
 |---|---|---|
 | **Transpose the whole score** (by interval or to a new key) | A teacher must-have. | S |
-| **Transposing instruments** and a concert-pitch toggle | Needed for band (Bb clarinet, trumpet, F horn, alto sax). | M |
+| **Transposing instruments** and a concert-pitch toggle | **Done (Phase 24):** set per part in Parts and instruments; read and written in MusicXML and MuseScore files. Still to do: a concert-pitch view toggle, `.musx` transpositions. | S |
 | **Chord symbols** above the staff | Lead sheets; NotePad couldn't do this. | M |
 | **Part extraction** (print one staff on its own) | | M |
 | **Better playback sounds** | **Done (Phase 13):** all 128 General MIDI sounds, downloaded on demand. Your own sounds: done (Phase 21). Still to do: a note-level playback cursor. | — |

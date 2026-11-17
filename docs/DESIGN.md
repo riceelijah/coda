@@ -468,7 +468,7 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
 ## 8. Things deliberately not in the first version
 
 Lyrics, dynamics, slurs, grace notes, other articulations, repeats
-and endings, mid-score clef changes, transposing instruments, page-layout controls. (Sampled General MIDI sounds: §13.3.) (Tuplet entry, inserting mid-bar and copy/paste: §11.)
+and endings, mid-score clef changes, page-layout controls. (Transposing instruments: §21.) (Sampled General MIDI sounds: §13.3.) (Tuplet entry, inserting mid-bar and copy/paste: §11.)
 
 All are additive on this model. Importers must **count and report** anything in these
 categories that they skip (§9.6).
@@ -1051,4 +1051,26 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   anything changes; an empty list or a repeated part is refused. A lone staff never keeps
   `brace`. Sounds are then set by position.
 - **Removing a part with notes** asks first. The selection is cleared; the caret is clamped.
+
+## 21. Transposing instruments (Phase 24)
+
+- **Model:** a staff may carry `transpose: [chromatic, diatonic]`, the interval from written to
+  sounding, same sign as MusicXML (B♭ clarinet `[-2, -1]`, F horn `[-7, -4]`, tenor sax
+  `[-14, -8]`). Both staves of a grand staff share it. Notes are stored as **written**;
+  `measures[].key` stays the **concert** key.
+- **Written key:** `keyAt(score, staff, bar)` = concert key − `7c − 12d` fifths, wrapped into
+  −7…7. Rendering, accidentals, letter entry and click entry all use it.
+- **Sound:** playback, MIDI and audio export add the chromatic interval (`soundingMidi`).
+- **Setting it** (Parts and instruments, a menu under each part: concert pitch, B♭, A, F, E♭
+  alto, E♭ high, B♭ low, E♭ low, octave lower/higher; other values from files show as "Other"):
+  `setStaffTranspose` moves the written notes so the music sounds the same, and keeps the part's
+  sound. Part of the same Apply `edit()`. The key dialog says "Key (concert)" when any part
+  transposes.
+- **MusicXML:** import reads `<transpose>` (chromatic, diatonic, octave-change) per part; part 1's
+  written key is turned into the concert key. Different transpositions on staves of one part,
+  later changes, and out-of-range values are counted. Export writes each part's written key and
+  `<transpose>`, octaves as `<octave-change>`.
+- **MuseScore:** `Instrument > transposeChromatic/transposeDiatonic` (full interval). Notes:
+  `pitch` and `tpc` are concert, `tpc2` written; KeySig `concertKey` and `actualKey`.
+- Not yet: a concert-pitch view toggle, and `.musx` transpositions (still shown at concert pitch).
 

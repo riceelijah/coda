@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, nextEventPos, tupletRuns, allLayers, timeLabel } from "./model.js";
+import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel } from "./model.js";
 
 const VF = () => Vex.Flow;
 
@@ -31,12 +31,14 @@ function minWidth(score, b) {
 }
 
 function prefixW(key) { return 55 + 13 * Math.abs(key) + 35; }
+// The most accidentals any staff's key shows at bar b (staves can differ: DESIGN §21).
+const widestKey = (score, b) => Math.max(...score.staves.map((_, s) => Math.abs(keyAt(score, s, b))));
 
 // Extra width for a mid-system key/time change.
 function changeW(score, b) {
   const m = score.measures[b];
   let w = 0;
-  if (b > 0 && m.key !== undefined) w += 13 * Math.max(Math.abs(m.key), Math.abs(attrsAt(score, b - 1).key)) + 10;
+  if (b > 0 && m.key !== undefined) w += 13 * Math.max(widestKey(score, b), widestKey(score, b - 1)) + 10;
   if (b > 0 && m.time) w += 35;
   return w;
 }
@@ -48,7 +50,7 @@ export function layout(score) {
   let cur = null;
   for (let b = 0; b < score.measures.length; b++) {
     const first = !cur;
-    const pre = prefixW(attrsAt(score, b).key);
+    const pre = prefixW(widestKey(score, b));
     const w = minWidth(score, b) + (first ? pre : changeW(score, b));
     if (cur && cur.used + w > avail) {
       systems.push(cur);
@@ -191,14 +193,15 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
   const staves = []; // [k][s]
   let x = LEFT_PAD;
   sys.bars.forEach((b, k) => {
-    const at = attrsAt(score, b), { key } = at;
+    const at = attrsAt(score, b);
     const m = score.measures[b];
     const firstInSys = k === 0;
     const row = score.staves.map((st, s) => {
       const stave = new VFl.Stave(x, SYS_TOP + s * STAFF_GAP, sys.widths[k]);
+      const key = keyAt(score, s, b);
       if (firstInSys) stave.addClef(st.clef).addKeySignature(keyName(key));
       if (firstInSys && si > 0 && s === 0) stave.setMeasure(b + 1); // bar number (DESIGN §11.4)
-      else if (b > 0 && m.key !== undefined) stave.addKeySignature(keyName(key), keyName(attrsAt(score, b - 1).key));
+      else if (b > 0 && m.key !== undefined) stave.addKeySignature(keyName(key), keyName(keyAt(score, s, b - 1)));
       if (b === 0 || (m.time && b > 0)) stave.addTimeSignature(timeLabel(at));
       if (b === lastBar) stave.setEndBarType(VFl.Barline.type.END);
       return stave;
@@ -228,7 +231,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
 
   // 3. notes, per bar across all staves
   sys.bars.forEach((b, k) => {
-    const { key, time } = attrsAt(score, b);
+    const { time } = attrsAt(score, b);
     const voices = [], beams = [], tuplets = [], drawn = [];
     const fmt = new VFl.Formatter();
     score.staves.forEach((st, s) => {
@@ -270,7 +273,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
       }
       // accidentals look across all layers of the staff
       const withNotes = staffVoices.filter((_, i) => used[i].bar.length);
-      if (withNotes.length) VFl.Accidental.applyAccidentals(withNotes, keyName(key));
+      if (withNotes.length) VFl.Accidental.applyAccidentals(withNotes, keyName(keyAt(score, s, b)));
       fmt.joinVoices(staffVoices);
       voices.push(...staffVoices);
     });
