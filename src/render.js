@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, nextEventPos, tupletRuns, allLayers } from "./model.js";
+import { attrsAt, nextEventPos, tupletRuns, allLayers, timeLabel } from "./model.js";
 
 const VF = () => Vex.Flow;
 
@@ -185,7 +185,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
   const staves = []; // [k][s]
   let x = LEFT_PAD;
   sys.bars.forEach((b, k) => {
-    const { key, time } = attrsAt(score, b);
+    const at = attrsAt(score, b), { key } = at;
     const m = score.measures[b];
     const firstInSys = k === 0;
     const row = score.staves.map((st, s) => {
@@ -193,7 +193,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
       if (firstInSys) stave.addClef(st.clef).addKeySignature(keyName(key));
       if (firstInSys && si > 0 && s === 0) stave.setMeasure(b + 1); // bar number (DESIGN §11.4)
       else if (b > 0 && m.key !== undefined) stave.addKeySignature(keyName(key), keyName(attrsAt(score, b - 1).key));
-      if (b === 0 || (m.time && b > 0)) stave.addTimeSignature(`${time[0]}/${time[1]}`);
+      if (b === 0 || (m.time && b > 0)) stave.addTimeSignature(timeLabel(at));
       if (b === lastBar) stave.setEndBarType(VFl.Barline.type.END);
       return stave;
     });

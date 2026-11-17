@@ -47,6 +47,19 @@ export async function run({ check, eq, brief, fetchBytes, importBytes }) {
     return (brief(st) === "C4:w" && l2 === "r:h E4:h") || `${brief(st)} / ${l2}`;
   });
 
+  await check("MuseScore fermata, articulations and cut time (DESIGN §16, §17)", () => {
+    const x = `<museScore version="4.20"><Score><Part><Staff id="1"/><trackName>P</trackName></Part>
+      <Staff id="1"><Measure><voice><TimeSig><subtype>2</subtype><sigN>2</sigN><sigD>2</sigD></TimeSig>
+      <Fermata><subtype>fermataAbove</subtype></Fermata><Chord><durationType>half</durationType><Articulation><subtype>articStaccatoBelow</subtype></Articulation><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+      <Rest><durationType>half</durationType></Rest></voice></Measure>
+      <Measure><voice><Fermata><subtype>fermataAbove</subtype></Fermata><Rest><durationType>measure</durationType></Rest></voice></Measure></Staff></Score></museScore>`;
+    const { score, report } = importMSCX(x, "x.mscx");
+    const b = score.staves[0].bars[0];
+    if (!eq(score.measures[0], { key: 0, time: [2, 2], sym: "cut" })) return JSON.stringify(score.measures[0]);
+    if (!eq(b[0].marks, ["fermata", "staccato"]) || b[1].marks) return JSON.stringify(b);
+    return JSON.stringify(report).includes("Fermatas on whole-bar rests") || "whole-bar fermata not counted";
+  });
+
   await check("MuseScore archive without a score gives a message", async () => {
     const zip = fflate.zipSync({ "META-INF/container.xml": new TextEncoder().encode("<container/>"), "a.mscx": new Uint8Array(0) });
     const files = fflate.unzipSync(zip);

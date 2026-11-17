@@ -990,3 +990,15 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
   whole-bar rest is counted (an empty bar holds no event). MuseScore: `<Fermata>` before the
   chord or rest, `<Articulation>` subtypes inside it (`markOf`). `.musx` articulations are
   still counted, not read.
+
+## 17. Common and cut time (Phase 20)
+
+- **Model:** optional `measures[b].sym`, "common" or "cut", only next to a `time` of 4/4 or 2/2
+  (`TIME_SYMS`); `attrsAt` returns it. `setAttrs` treats 4/4 and C as different, drops a symbol
+  that doesn't match the meter, and `clearAttrs`/`deleteMeasure(0)` handle it like `time`.
+- **UI:** both time menus offer "C (common time)" and "¢ (cut time)"; `parseTime`/`timeLabel`
+  convert between the menu value ("C", "C|", "n/d", also what VexFlow draws) and the model.
+- **Files:** MusicXML `<time symbol="common|cut">` both ways; MuseScore `TimeSig` subtype 1 =
+  common, 2 = cut. Importers build `measures` with the shared `measuresFrom`. `.musx` time
+  symbols are not read yet (drawn as numbers).
+

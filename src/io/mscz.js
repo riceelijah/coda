@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
 
@@ -87,7 +87,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   kids(sc, "Staff").forEach((stEl, si) => {
     const d = decl[si] || { name: "", brace: false };
     const staff = { name: d.name, clef: null, brace: d.brace, bars: [], ...(d.program !== undefined ? { program: d.program } : {}) };
-    let key = 0, time = [4, 4];
+    let key = 0, time = [4, 4], sym;
     const tuplets = {}; // MuseScore 3: id -> ratio
     kids(stEl, "Measure").forEach((meas, mi) => {
       const voices = kids(meas, "voice");
@@ -120,6 +120,9 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
           case "TimeSig": {
             const n = +txt(el, "sigN"), dd = +txt(el, "sigD");
             if (n > 0 && [1, 2, 4, 8, 16, 32].includes(dd)) time = [n, dd];
+            // subtype 1 = common time (4/4), 2 = cut time (2/2)
+            const st = { 1: "common", 2: "cut" }[txt(el, "subtype")];
+            sym = st && TIME_SYMS[st][0] === time[0] && TIME_SYMS[st][1] === time[1] ? st : undefined;
             break;
           }
           case "Tempo":
@@ -197,20 +200,14 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
         staff.layers[vi - 1][mi] = bar;
       }
       });
-      if (si === 0) firstAttrs.push({ key, time: [...time] });
+      if (si === 0) firstAttrs.push({ key, time: [...time], sym });
     });
     if (!staff.clef) staff.clef = "treble";
     score.staves.push(staff);
   });
   if (!score.staves.length) throw new Error("This MuseScore file has no staves.");
 
-  firstAttrs.forEach((a, i) => {
-    const prev = i ? firstAttrs[i - 1] : null;
-    const m = {};
-    if (!prev || prev.key !== a.key) m.key = a.key;
-    if (!prev || prev.time[0] !== a.time[0] || prev.time[1] !== a.time[1]) m.time = a.time;
-    score.measures.push(m);
-  });
+  score.measures.push(...measuresFrom(firstAttrs));
   score.tempo = Math.max(20, Math.min(400, score.tempo || 100));
   padBars(score);
   report.notes = noteCount(score);

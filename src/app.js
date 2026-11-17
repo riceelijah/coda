@@ -810,10 +810,9 @@ function closeSetup() {
   const composer = $("f-composer").value.trim();
   const tempo = Math.max(20, Math.min(400, +$("f-tempo").value || 100));
   if (d.dataset.mode === "new") {
-    const [n, dd] = $("f-time").value.split("/").map(Number);
     replaceScore(M.newScore({
       title, composer, tempo, preset: $("f-preset").value, key: +$("f-key").value,
-      time: [n, dd], bars: +$("f-bars").value || 16, program: +$("f-sound").value,
+      ...M.parseTime($("f-time").value), bars: +$("f-bars").value || 16, program: +$("f-sound").value,
     }), { save: false });
   } else {
     edit((sc) => { sc.title = title; sc.composer = composer; sc.tempo = tempo; return null; });
@@ -898,11 +897,11 @@ function tupletSel(tup) {
 
 function openAttrs() {
   const b = state.caret.bar, sc = state.score;
-  const { key, time } = M.attrsAt(sc, b);
+  const at = M.attrsAt(sc, b);
   const m = sc.measures[b];
   $("attrs-head").textContent = `Key and time from bar ${b + 1}`;
-  $("a-key").value = key;
-  const ts = $("a-time"), t = `${time[0]}/${time[1]}`;
+  $("a-key").value = at.key;
+  const ts = $("a-time"), t = M.timeLabel(at);
   if (![...ts.options].some((o) => o.value === t)) ts.add(new Option(t, t));
   ts.value = t;
   $("attrs-remove").hidden = b === 0 || (m.key === undefined && !m.time);
@@ -914,10 +913,10 @@ function closeAttrs() {
   const how = $("attrs").returnValue, b = state.caret.bar;
   if (how === "remove") edit((sc) => M.clearAttrs(sc, b));
   else if (how === "ok") {
-    const time = $("a-time").value.split("/").map(Number), cur = M.attrsAt(state.score, b).time;
-    const changed = time[0] !== cur[0] || time[1] !== cur[1];
+    const t = M.parseTime($("a-time").value);
+    const changed = $("a-time").value !== M.timeLabel(M.attrsAt(state.score, b));
     // only pass time when it changes, so a key change never trips the bar-fit check
-    edit((sc) => M.setAttrs(sc, b, changed ? { key: +$("a-key").value, time } : { key: +$("a-key").value }));
+    edit((sc) => M.setAttrs(sc, b, changed ? { key: +$("a-key").value, ...t } : { key: +$("a-key").value }));
   }
 }
 

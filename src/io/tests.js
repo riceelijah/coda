@@ -35,7 +35,7 @@ export function roundTripFixture() {
   // Every bar exactly full or empty; braced pair shares a name; tuplets obey the integer rule.
   return {
     title: "Round & Trip <test>", composer: "Tester \"Q\"", tempo: 84,
-    measures: [{ key: -3, time: [4, 4] }, {}, { key: 2 }, { time: [6, 8] }, {}],
+    measures: [{ key: -3, time: [4, 4], sym: "common" }, {}, { key: 2 }, { time: [6, 8] }, {}],
     staves: [
       { name: "Keys", clef: "treble", brace: true, program: 4, bars: [
         [ev("q", "C4 E4 G4", { marks: ["staccato", "accent"] }), ev("8", "D5", { dots: 1 }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
@@ -96,6 +96,22 @@ export async function run({ check, eq }) {
     if (!JSON.stringify(report).includes("Fermatas on whole-bar rests")) return "whole-bar fermata not counted";
     const got = ["fermataAbove", "articAccentStaccatoBelow", "sforzato", "articStaccatissimoAbove", "articMarcatoAbove"].map((x) => markOf(x).join("+"));
     return eq(got, ["fermata", "staccato+accent", "accent", "", "marcato"]) || got.join(",");
+  });
+
+  await check("time symbols: parse, set, clear, carried when bar 1 is deleted, validation (DESIGN §17)", () => {
+    if (!eq(M.parseTime("C|"), { time: [2, 2], sym: "cut" }) || !eq(M.parseTime("6/8"), { time: [6, 8] })) return "parseTime";
+    const s = M.newScore({ bars: 3, ...M.parseTime("C") });
+    if (M.timeLabel(M.attrsAt(s, 2)) !== "C") return "newScore sym";
+    M.setAttrs(s, 1, { time: [4, 4] });
+    if (!eq(s.measures[1], { time: [4, 4] })) return "4/4 after C is a change: " + JSON.stringify(s.measures[1]);
+    M.setAttrs(s, 1, { time: [4, 4], sym: "common" });
+    if (s.measures[1].time) return "C after C is no change";
+    M.setAttrs(s, 2, { time: [3, 4], sym: "cut" });
+    if (s.measures[2].sym) return "cut kept on 3/4";
+    M.deleteMeasure(s, 0);
+    if (s.measures[0].sym !== "common") return "sym not carried to the new bar 1";
+    s.measures[0].sym = "cut";
+    return !M.isValidScore(s) || "cut on 4/4 accepted";
   });
 
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {

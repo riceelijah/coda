@@ -84,13 +84,36 @@ export function tupletRuns(bar) {
 // ---------- attributes ----------
 
 export function attrsAt(score, i) {
-  let key = 0, time = [4, 4];
+  let key = 0, time = [4, 4], sym;
   for (let j = 0; j <= i && j < score.measures.length; j++) {
     const m = score.measures[j];
     if (m.key !== undefined) key = m.key;
-    if (m.time) time = m.time;
+    if (m.time) { time = m.time; sym = m.sym; }
   }
-  return { key, time };
+  return { key, time, sym };
+}
+
+// Common and cut time (DESIGN §17): `measures[b].sym`, only beside a `time` it stands for.
+export const TIME_SYMS = { common: [4, 4], cut: [2, 2] };
+const symOk = (sym, time) => sym === undefined || (TIME_SYMS[sym]?.[0] === time[0] && TIME_SYMS[sym]?.[1] === time[1]);
+// Menu value <-> {time, sym}: "C", "C|" (also what VexFlow draws) or "n/d".
+export function parseTime(v) {
+  for (const [sym, t] of Object.entries(TIME_SYMS)) if (v === timeLabel({ time: t, sym })) return { time: [...t], sym };
+  const [n, d] = v.split("/").map(Number);
+  return { time: [n, d] };
+}
+export const timeLabel = ({ time, sym }) => (sym === "common" ? "C" : sym === "cut" ? "C|" : `${time[0]}/${time[1]}`);
+// Importers: per-bar {key, time, sym} -> measures holding only the changes.
+export function measuresFrom(attrs) {
+  return attrs.map((a, i) => {
+    const prev = attrs[i - 1], m = {};
+    if (!prev || prev.key !== a.key) m.key = a.key;
+    if (!prev || prev.time[0] !== a.time[0] || prev.time[1] !== a.time[1] || prev.sym !== a.sym) {
+      m.time = a.time;
+      if (a.sym) m.sym = a.sym;
+    }
+    return m;
+  });
 }
 
 // ---------- pitch ----------
@@ -347,17 +370,20 @@ export function deleteMeasure(score, idx) {
   if (idx === 0) {
     const m = score.measures[0];
     if (m.key === undefined) m.key = a0.key;
-    if (!m.time) m.time = a0.time;
+    if (!m.time) { m.time = a0.time; if (a0.sym) m.sym = a0.sym; }
   }
   return null;
 }
 
 // Set key and/or time from bar b on. A value equal to the previous bar's is stored as "no change".
-export function setAttrs(score, b, { key, time }) {
+export function setAttrs(score, b, { key, time, sym }) {
   const m = score.measures[b], prev = b > 0 ? attrsAt(score, b - 1) : null;
   if (key !== undefined) { if (prev && prev.key === key) delete m.key; else m.key = key; }
   if (time) {
-    if (prev && prev.time[0] === time[0] && prev.time[1] === time[1]) delete m.time; else m.time = time;
+    if (!symOk(sym, time)) sym = undefined;
+    delete m.sym;
+    if (prev && prev.time[0] === time[0] && prev.time[1] === time[1] && prev.sym === sym) delete m.time;
+    else { m.time = time; if (sym) m.sym = sym; }
     for (let j = b; j < score.measures.length; j++) {
       if (j > b && score.measures[j].time) break;
       for (const st of score.staves) for (const bars of allLayers(st)) if (!fits(score, j, bars[j])) return `Bar ${j + 1} would overflow`;
@@ -372,7 +398,7 @@ export function clearAttrs(score, b) {
   const m = score.measures[b];
   if (m.key === undefined && !m.time) return "This bar has no key or time change";
   const hadTime = !!m.time;
-  delete m.key; delete m.time;
+  delete m.key; delete m.time; delete m.sym;
   if (hadTime) for (let j = b; j < score.measures.length; j++) {
     if (j > b && score.measures[j].time) break;
     for (const st of score.staves) for (const bars of allLayers(st)) if (!fits(score, j, bars[j])) return `Bar ${j + 1} would overflow`;
@@ -410,11 +436,11 @@ export const PRESETS = {
 };
 
 export function newScore({ title = "Untitled", composer = "", tempo = 100, preset = "treble",
-  key = 0, time = [4, 4], bars = 16, program = 0 } = {}) {
+  key = 0, time = [4, 4], sym, bars = 16, program = 0 } = {}) {
   const n = Math.max(1, Math.min(999, bars | 0));
   return {
     title, composer, tempo,
-    measures: Array.from({ length: n }, (_, i) => (i === 0 ? { key, time } : {})),
+    measures: Array.from({ length: n }, (_, i) => (i === 0 ? { key, time, ...(symOk(sym, time) && sym ? { sym } : {}) } : {})),
     staves: PRESETS[preset].map((st) => ({
       name: st.name, clef: st.clef, brace: !!st.brace, ...(program ? { program } : {}),
       bars: Array.from({ length: n }, () => []),
@@ -444,6 +470,7 @@ export function isValidScore(sc) {
     if (!sc || !Array.isArray(sc.measures) || !Array.isArray(sc.staves) || !sc.staves.length) return false;
     const n = sc.measures.length;
     if (!n || !sc.measures[0].time) return false;
+    if (!sc.measures.every((m) => m.sym === undefined || (m.time && TIME_SYMS[m.sym] && symOk(m.sym, m.time)))) return false;
     const okBars = (bars) => Array.isArray(bars) && bars.length === n && bars.every((bar) => Array.isArray(bar) && bar.every((e) =>
       DURS.includes(e.dur) && Array.isArray(e.pitches) &&
       e.pitches.every((p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2) &&

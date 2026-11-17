@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -121,7 +121,7 @@ export function exportMusicXML(score) {
       const attrs = [];
       if (b === 0) attrs.push(`<divisions>${PPQ}</divisions>`);
       if (b === 0 || m.key !== undefined) attrs.push(`<key><fifths>${a.key}</fifths></key>`);
-      if (b === 0 || m.time) attrs.push(`<time><beats>${a.time[0]}</beats><beat-type>${a.time[1]}</beat-type></time>`);
+      if (b === 0 || m.time) attrs.push(`<time${a.sym ? ` symbol="${a.sym}"` : ""}><beats>${a.time[0]}</beats><beat-type>${a.time[1]}</beat-type></time>`);
       if (b === 0) {
         if (g.length > 1) attrs.push(`<staves>${g.length}</staves>`);
         g.forEach((s, k) => {
@@ -201,7 +201,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
       bars: [],
     }));
     if (nStaves > 2) report.add(`A part with ${nStaves} staves was split into separate staves without a brace`);
-    let divisions = 1, key = 0, time = [4, 4];
+    let divisions = 1, key = 0, time = [4, 4], sym;
     // staff -> MusicXML voice ids in layer order: numeric order, so voice 1 is always layer 1
     const voiceOf = {};
     for (const n of part.querySelectorAll("note")) {
@@ -222,11 +222,13 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           const k = kid(el, "key");
           if (k && txt(k, "fifths") !== null) key = Math.max(-7, Math.min(7, parseInt(txt(k, "fifths"), 10) || 0));
           const t = kid(el, "time");
-          if (t && ["common", "cut"].includes(t.getAttribute("symbol"))) report.add("Common and cut time symbols are shown as 4/4 and 2/2.");
           if (t && txt(t, "beats")) {
             const beats = txt(t, "beats"), bt = +txt(t, "beat-type");
             if (/^\d+$/.test(beats) && [1, 2, 4, 8, 16, 32].includes(bt)) time = [+beats, bt];
             else report.count("Unusual time signatures replaced");
+            const s = t.getAttribute("symbol");
+            sym = TIME_SYMS[s] && TIME_SYMS[s][0] === time[0] && TIME_SYMS[s][1] === time[1] ? s : undefined;
+            if (TIME_SYMS[s] && !sym) report.count("Common/cut time symbols on other meters shown as numbers");
           }
           for (const c of kids(el, "clef")) {
             const n = +(c.getAttribute("number") || 1);
@@ -257,20 +259,14 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
-      if (pi === 0) firstPartAttrs.push({ key, time: [...time] });
+      if (pi === 0) firstPartAttrs.push({ key, time: [...time], sym });
     });
     staves.forEach((st) => { if (!st.clef) st.clef = "treble"; });
     score.staves.push(...staves);
   });
   if (!score.staves.length) throw new Error("This MusicXML file has no parts.");
 
-  firstPartAttrs.forEach((a, i) => {
-    const prev = i ? firstPartAttrs[i - 1] : null;
-    const m = {};
-    if (!prev || prev.key !== a.key) m.key = a.key;
-    if (!prev || prev.time[0] !== a.time[0] || prev.time[1] !== a.time[1]) m.time = a.time;
-    score.measures.push(m);
-  });
+  score.measures.push(...measuresFrom(firstPartAttrs));
 
   score.title = (root.querySelector("work > work-title")?.textContent || txt(root, "movement-title") ||
     fileName.replace(/\.[^.]+$/, "") || "Untitled").trim();
