@@ -226,7 +226,9 @@ function setTool(t) {
   $("systems").classList.toggle("select-tool", t === "select");
   $("ghost").style.display = "none";
   document.querySelectorAll(".pal[data-tool]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.tool === t)));
-  message(t === "select" ? "Selection tool: click a note, drag across notes, Shift+click to extend" : "Note entry: click a staff to add a note");
+  $("status-hint").textContent = t === "select"
+    ? "Selection tool: click a note, drag across notes, Shift+click to extend · right-click for actions · V for note entry"
+    : "Click a staff to add a note · A–G to type · Shift+A–G or Shift+click for chords · ? for help";
 }
 
 function buildPalette() {
@@ -268,7 +270,7 @@ function buildPalette() {
   const toggles = [
     ["rest", "Rest (R enters one)", () => { state.armed.rest = !state.armed.rest; updatePalette(); updateStatus(); }],
     ["dot", "Dot (.)", () => toggleDot()],
-    ["tup", "Tuplet: triplets and other groups (9 or ; for the last one)", () => openTuplet()],
+    ["tup", "Tuplet: triplets and other groups (9 or ; for the last one)", () => (state.armed.tup ? toggleTuplet() : openTuplet())],
     ["sharp", "Sharp (+)", () => accidental(1)],
     ["flat", "Flat (-)", () => accidental(-1)],
     ["natural", "Natural (N)", () => accidental(0)],
@@ -308,9 +310,25 @@ function eachSel(fn) {
   });
 }
 
+// Change the length of every selected event, then check each bar once, so swapping values
+// around inside a full bar works.
+function retime(fn) {
+  const s = state.sel, r = range();
+  return edit((sc) => {
+    const bars = sc.staves[s.staff].bars;
+    for (const p of r) {
+      const e = bars[p.bar][p.idx];
+      fn(e);
+      if (e.tup && !M.tupletOk(e.dur, e.dots, e.tup)) delete e.tup;
+    }
+    for (const b of new Set(r.map((p) => p.bar))) if (M.barTicks(bars[b]) > M.barCapacity(M.attrsAt(sc, b).time)) return "Bar is full";
+    return null;
+  });
+}
+
 function setDuration(d) {
   state.armed.dur = d;
-  if (state.sel) eachSel((sc, st, p, ev) => M.setDuration(sc, st, p.bar, p.idx, d, ev.dots));
+  if (state.sel) retime((e) => (e.dur = d));
   else { updatePalette(); updateStatus(); }
 }
 
@@ -322,7 +340,7 @@ function toggleDot() {
     // if a second dot doesn't fit, go back to none rather than getting stuck at one
     if (dots === 2 && M.setDuration(JSON.parse(JSON.stringify(state.score)), s.staff, s.bar, s.idx, ev.dur, 2)) dots = 0;
     state.armed.dots = dots;
-    eachSel((sc, st, p, e) => M.setDuration(sc, st, p.bar, p.idx, e.dur, dots));
+    retime((e) => (e.dots = dots));
   } else {
     state.armed.dots = (state.armed.dots + 1) % 3;
     updatePalette(); updateStatus();
@@ -641,6 +659,7 @@ function onDown(e) {
 
 function onDrag(e) {
   if (!drag) return;
+  if (!e.buttons) { drag = null; return; } // released outside the window
   if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
   drag.moved = true;
   const L = locate(e, drag.staff);
@@ -832,7 +851,16 @@ function tupletSel(tup) {
   const s = state.sel;
   if (!s) { message("Select notes first", true); return; }
   const r = range();
-  edit((sc) => { for (const p of r) { const e = M.setTuplet(sc, s.staff, p.bar, p.idx, tup); if (e) return e; } return null; });
+  edit((sc) => {
+    for (const p of r) { const e = M.setTuplet(sc, s.staff, p.bar, p.idx, tup); if (e) return e; }
+    // a group cut short mid-bar can't be written to a file correctly (DESIGN §14.4)
+    for (const b of new Set(r.map((p) => p.bar))) {
+      const bar = sc.staves[s.staff].bars[b];
+      if (M.tupletRuns(bar).some((run) => run.ticks % run.unit && run.idx[run.idx.length - 1] !== bar.length - 1))
+        return tup ? `Select a whole group: ${tup[0]} notes of the same value, or the same total length` : "That would leave part of a tuplet group";
+    }
+    return null;
+  });
 }
 
 // ---------- key / time change at a bar (DESIGN §11.3) ----------
@@ -1056,7 +1084,8 @@ function setupMenus() {
       if (document.activeElement?.closest?.("#menubar")) document.activeElement.blur();
     });
   });
-  document.addEventListener("mousedown", (e) => { if (!e.target.closest("#menubar, #ctx")) closeMenus(); });
+  // capture pointerdown: the Selection tool cancels pointerdown, which would swallow mousedown
+  document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#menubar, #ctx")) closeMenus(); }, true);
 }
 
 // View zoom: the sheet's width; the SVGs scale with it and clicks map through their real size.
