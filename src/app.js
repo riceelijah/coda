@@ -25,7 +25,7 @@ const state = {
   sel: null,
   selEnd: null, // other end of a range on the same staff, {bar, idx} (DESIGN §11.7)
   clip: null,
-  armed: { dur: "q", dots: 0, rest: false, alter: null, chord: false, tup: null },
+  armed: { dur: "q", dots: 0, rest: false, alter: null, chord: false, grace: false, tup: null },
   lastTup: [3, 2], // ratio 9 / ; re-arms (DESIGN §14.4)
   tool: "entry", // or "select" (DESIGN §14.2)
   layer: 0, // active layer 0–3 (NotePad's layers 1–4, DESIGN §15)
@@ -208,6 +208,7 @@ function updateStatus() {
   if (n > 1) parts.push(`${n} notes selected`);
   else if (ev) parts.push("Selected: " + (ev.pitches.length ? ev.pitches.map(M.pitchName).join(" ") : "rest") + " " + DUR_NAMES[ev.dur].toLowerCase());
   else parts.push(["", "Dotted ", "Double-dotted "][a.dots] + (a.dots ? DUR_NAMES[a.dur].toLowerCase() : DUR_NAMES[a.dur]) + (a.rest ? " rest" : "") + (a.tup ? ` · ${a.tup[0]}:${a.tup[1]} tuplet` : "") + (a.chord ? " · chord mode" : ""));
+  if (a.grace) parts.push("grace notes (Esc to stop)");
   $("status-pos").textContent = parts.join(" · ");
 }
 
@@ -243,6 +244,7 @@ const ICONS = {
   select: '<path d="M6 3 l12 10 l-5.5 1 l3.2 6.2 l-2.4 1.2 l-3.2 -6.2 l-4.1 3.6z" fill="currentColor"/>',
   entry: '<path d="M4 20 l1.2-4.6 l10.6-10.6 l3.4 3.4 l-10.6 10.6z M14.6 6 l3.4 3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>',
   chord: '<g fill="currentColor"><ellipse cx="9" cy="19" rx="4.4" ry="3.1" transform="rotate(-20 9 19)"/><ellipse cx="9" cy="12" rx="4.4" ry="3.1" transform="rotate(-20 9 12)"/></g><line x1="13" y1="18" x2="13" y2="2" stroke="currentColor" stroke-width="1.4"/>',
+  grace: '<ellipse cx="9" cy="18" rx="3.4" ry="2.4" transform="rotate(-20 9 18)" fill="currentColor"/><path d="M12 17.5 V5 q3 2 5 5" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="7" y1="14" x2="17" y2="7" stroke="currentColor" stroke-width="1.3"/>',
 };
 const svg = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>`;
 
@@ -300,7 +302,8 @@ function buildPalette() {
     ["flat", "Flat (-)", () => accidental(-1)],
     ["natural", "Natural (N)", () => accidental(0)],
     ["tie", "Tie to next note (T)", () => tie()],
-    ["chord", "Chord mode: clicks add notes to the selected note (or Shift+A–G)", () => { state.armed.chord = !state.armed.chord; updatePalette(); updateStatus(); }],
+    ["chord", "Chord mode: clicks add notes to the selected note (or Shift+A–G)", () => { state.armed.chord = !state.armed.chord; state.armed.grace = false; updatePalette(); updateStatus(); }],
+    ["grace", "Grace notes: clicks or A–G add one before the selected note; Delete removes them", () => graceMode(!state.armed.grace)],
   ];
   toggles.forEach(([k, title, fn], i) => {
     if (i === 3 || i === 6) pal.appendChild(document.createElement("hr"));
@@ -320,7 +323,7 @@ function updatePalette() {
   const dur = ev ? ev.dur : a.dur, dots = ev ? ev.dots : a.dots;
   document.querySelectorAll(".pal[data-dur]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.dur === dur)));
   // accidental buttons show what is armed for the next note, not the selection
-  const pressed = { rest: a.rest, dot: dots > 0, sharp: a.alter === 1, flat: a.alter === -1, natural: a.alter === 0, tie: !!(ev && ev.tie), chord: a.chord, tup: !!a.tup };
+  const pressed = { rest: a.rest, dot: dots > 0, sharp: a.alter === 1, flat: a.alter === -1, natural: a.alter === 0, tie: !!(ev && ev.tie), chord: a.chord, grace: a.grace, tup: !!a.tup };
   document.querySelectorAll(".pal[data-tog]").forEach((b) => b.setAttribute("aria-pressed", String(pressed[b.dataset.tog])));
 }
 
@@ -538,6 +541,34 @@ function hear(ev) {
 }
 
 // Shift+A–G: add that letter above the selected note's top pitch (DESIGN §11.1).
+// ---------- grace notes (DESIGN §26) ----------
+function graceMode(on) {
+  state.armed.grace = on;
+  if (on) { state.armed.chord = false; message("Click a note, or select one and type A–G, to put a grace note before it"); }
+  updatePalette(); updateStatus();
+}
+
+function addGrace(s, pitch) {
+  if (edit((sc) => M.addGrace(sc.staves[s.staff].bars[s.bar][s.idx], pitch))) { hear({ pitches: [pitch] }); message(M.pitchName(pitch) + " grace note added"); }
+}
+
+// A–G in grace mode: the nearest such note to the last grace note, else to the note's top
+function graceLetter(letter) {
+  const s = state.sel, ev = selEvent();
+  if (!s || !ev?.pitches.length) { message("Select the note the grace note goes before", true); return; }
+  const ref = M.diatonic(ev.grace?.[ev.grace.length - 1] || ev.pitches[ev.pitches.length - 1]);
+  const step = "CDEFGAB".indexOf(letter);
+  let d = Math.round((ref - step) / 7) * 7 + step;
+  const p = M.fromDiatonic(d);
+  addGrace(s, { ...p, alter: state.armed.alter ?? M.keyAlter(M.keyAt(state.score, s.staff, s.bar), p.step) });
+}
+
+function clearGrace() {
+  const r = range().filter((p) => lb(state.sel.staff)[p.bar][p.idx].grace);
+  if (!r.length) { message("No grace notes on the selection", true); return; }
+  edit((sc) => { for (const p of r) delete sc.staves[state.sel.staff].bars[p.bar][p.idx].grace; return null; });
+}
+
 function chordLetter(letter) {
   const s = state.sel;
   if (!s) { message("Select a note first, then Shift+letter adds to it", true); return; }
@@ -613,7 +644,8 @@ function paste() {
   edit((sc) => {
     const placed = [], [c, d] = state.clipTr || [0, 0], [c2, d2] = sc.staves[staff].transpose || [0, 0];
     const clip = c === c2 && d === d2 ? state.clip
-      : state.clip.map((e) => ({ ...e, pitches: e.pitches.map((p) => M.shiftPitch(p, c - c2, d - d2)) }));
+      : state.clip.map((e) => ({ ...e, pitches: e.pitches.map((p) => M.shiftPitch(p, c - c2, d - d2)),
+        ...(e.grace ? { grace: e.grace.map((p) => M.shiftPitch(p, c - c2, d - d2)) } : {}) }));
     const r = M.pasteEvents(sc, staff, bar, idx, clip, placed);
     if (r) return r;
     const first = placed[0], last = placed[placed.length - 1];
@@ -691,6 +723,12 @@ function onClick(e) {
   if (!L) return;
   state.caret = { staff: L.staff, bar: L.bar };
   state.selEnd = null;
+  if (state.armed.grace) { // grace mode: a click on a note adds a grace note at the clicked pitch
+    if (!L.near) { message("Click a note to put a grace note before it", true); return; }
+    state.sel = { staff: L.staff, bar: L.bar, idx: L.near.idx };
+    addGrace(state.sel, withAlter(L.pitch.step, L.pitch.oct));
+    return;
+  }
   const chord = e.shiftKey || state.armed.chord;
   const s = state.sel;
   // chord target: the clicked note, else (chord mode) the selection in this staff and bar
@@ -722,7 +760,7 @@ function onMove(e) {
   const g = $("ghost");
   if (state.tool === "select") { g.style.display = "none"; return; }
   const L = locate(e);
-  const chordish = state.armed.chord || e.shiftKey;
+  const chordish = state.armed.chord || state.armed.grace || e.shiftKey;
   if (!L || (L.near && !chordish) || (state.armed.rest && !chordish)) { g.style.display = "none"; return; }
   const sheet = $("sheet").getBoundingClientRect(), r = L.svgEl.getBoundingClientRect();
   const k = r.width / SHEET_W;
@@ -795,6 +833,7 @@ function onKey(e) {
   const durKey = { 7: "w", 6: "h", 5: "q", 4: "8", 3: "16", 2: "32" }[k];
   let handled = true;
   if (e.shiftKey && /^[A-G]$/.test(k)) chordLetter(k);
+  else if (state.armed.grace && /^[a-gA-G]$/.test(k)) graceLetter(k.toUpperCase());
   else if (/^[a-gA-G]$/.test(k)) typeLetter(k.toUpperCase());
   else if (k === "r" || k === "R" || k === "0") enterAtCaret(null); // 0: NotePad's rest key
   else if (durKey) setDuration(durKey);
@@ -810,7 +849,9 @@ function onKey(e) {
   else if (k === "ArrowLeft") e.shiftKey ? extendSel(-1) : moveSel(-1);
   else if (k === "ArrowRight") e.shiftKey ? extendSel(1) : moveSel(1);
   else if (k === ";" || k === "9") toggleTuplet();
+  else if ((k === "Delete" || k === "Backspace") && state.armed.grace && state.sel) clearGrace();
   else if (k === "Delete" || k === "Backspace") deleteSel();
+  else if (k === "Escape" && state.armed.grace) graceMode(false);
   else if (k === "Escape") { state.sel = null; state.selEnd = null; refresh(); }
   else if (k === " ") togglePlay();
   else if (k === "?") $("help").showModal();
@@ -1178,6 +1219,8 @@ const CMD = {
   "d-none": { run: () => dynamic(null), on: hasSel },
   "n-slur": { run: () => span("slur", true), on: hasSel },
   "n-lyrics": { run: () => openLyrics(), on: hasSel },
+  "n-grace": { run: () => graceMode(!state.armed.grace) },
+  "n-nograce": { run: () => clearGrace(), on: hasSel },
   "n-cresc": { run: () => span("hp", "<"), on: hasSel },
   "n-dim": { run: () => span("hp", ">"), on: hasSel },
   "n-layer1": { run: () => setLayer(0) },

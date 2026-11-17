@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, finishClefs } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, finishClefs, MAX_GRACE } from "../model.js";
 import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
@@ -102,6 +102,20 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     const tuplets = {}; // MuseScore 3: id -> ratio
     const pendDyn = []; // per voice: dynamic waiting for its chord or rest (DESIGN §22)
     const pendHp = [], lastEv = []; // per voice: hairpin waiting for its first note; last event (DESIGN §23)
+    // a <Note>'s written pitch: pitch and tpc are concert; Coda keeps the written note (tpc2)
+    const notePitch = (n) => {
+      const pm = parseInt(txt(n, "pitch"), 10);
+      const tpc = parseInt(txt(n, "tpc"), 10), tpc2 = parseInt(txt(n, "tpc2"), 10);
+      if (!Number.isFinite(pm)) return null;
+      const wm = pm - tc;
+      let p = Number.isFinite(tpc2) && tc ? tpcToPitch(tpc2, wm)
+        : Number.isFinite(tpc) ? (tc || td ? shiftPitch(tpcToPitch(tpc, pm), -tc, -td) : tpcToPitch(tpc, pm)) : null;
+      if (!p || p.alter < -2 || p.alter > 2 || midi(p) !== wm) {
+        p = spellMidi(wm, wrapKey(key - fifthsOf(tc, td)));
+        report.count("Note spellings guessed from pitch");
+      }
+      return p;
+    };
     kids(stEl, "Measure").forEach((meas, mi) => {
       const voices = kids(meas, "voice");
       for (const L of staff.layers || []) L.push([]);
@@ -110,6 +124,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       if (vi >= MAX_LAYERS) { report.count(`Notes in voices beyond ${MAX_LAYERS} per staff skipped`, kids(vEl, "Chord").length); return; }
       const bar = [];
       let tup = null, cur = 0, fermata = false; // cur: time cursor in ticks; <location> moves it either way
+      const pendG = { notes: [], kinds: [] }; // grace notes waiting for their note (DESIGN §26)
       for (const el of vEl.children) {
         switch (el.localName) {
           case "location": {
@@ -171,7 +186,17 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
           case "Chord":
           case "Rest": {
             const isRest = el.localName === "Rest";
-            if (GRACE.some((g) => kid(el, g))) { report.count("Grace notes skipped"); break; }
+            const gk = GRACE.find((g) => kid(el, g));
+            if (gk) { // held for the next chord; doesn't move the cursor
+              const ns = kids(el, "Note"), p = ns.length && notePitch(ns[0]);
+              if (/after$/.test(gk)) { report.count("Grace notes after a note (not imported)"); break; }
+              if (isRest || !p) break;
+              if (ns.length > 1) report.count("Grace-note chords reduced to their first note");
+              if (kids(el, "Articulation").length || kids(el, "Lyrics").length || kids(el, "Spanner").length || ns.some((n) => kid(n, "Spanner") || kid(n, "Tie")))
+                report.count("Marks, slurs, ties and lyrics on grace notes (not imported)");
+              pendG.notes.push(p); pendG.kinds.push(gk);
+              break;
+            }
             const dt = txt(el, "durationType");
             const marks = fermata ? ["fermata"] : [];
             fermata = false;
@@ -196,17 +221,8 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             }
             if (!isRest) {
               for (const n of kids(el, "Note")) {
-                const pm = parseInt(txt(n, "pitch"), 10);
-                const tpc = parseInt(txt(n, "tpc"), 10), tpc2 = parseInt(txt(n, "tpc2"), 10);
-                if (!Number.isFinite(pm)) continue;
-                // pitch and tpc are concert; Coda keeps the written note (tpc2)
-                const wm = pm - tc;
-                let p = Number.isFinite(tpc2) && tc ? tpcToPitch(tpc2, wm)
-                  : Number.isFinite(tpc) ? (tc || td ? shiftPitch(tpcToPitch(tpc, pm), -tc, -td) : tpcToPitch(tpc, pm)) : null;
-                if (!p || p.alter < -2 || p.alter > 2 || midi(p) !== wm) {
-                  p = spellMidi(wm, wrapKey(key - fifthsOf(tc, td)));
-                  report.count("Note spellings guessed from pitch");
-                }
+                const p = notePitch(n);
+                if (!p) continue;
                 if (!ev.pitches.some((q) => q.step === p.step && q.oct === p.oct)) ev.pitches.push(p);
                 const tieSp = kids(n, "Spanner").find((s) => s.getAttribute("type") === "Tie" && kid(s, "next"));
                 if (tieSp || kid(n, "Tie")) ev.tie = true;
@@ -222,6 +238,15 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               else if (kid(sp, "next")) report.count(`Lines (${sp.getAttribute("type")}) not imported`);
             }
             lyricIn(el, ev, report);
+            if (pendG.notes.length) {
+              const g = pendG.notes.splice(0), kinds = pendG.kinds.splice(0);
+              if (isRest) report.count("Grace notes before rests (not imported)", g.length);
+              else {
+                if (g.length > MAX_GRACE) report.count(`Grace notes beyond ${MAX_GRACE} before a note (not imported)`, g.length - MAX_GRACE);
+                ev.grace = g.slice(0, MAX_GRACE);
+                if (ev.grace.length === 1 ? kinds[0] !== "acciaccatura" : kinds.some((k) => k !== "grace16")) report.count("Grace notes redrawn: one as a slashed eighth, more as sixteenths");
+              }
+            }
             lastEv[vi] = ev;
             // a chord or rest that starts past where this voice has got to: rests in front
             const gap = Math.floor((cur - barTicks(bar)) / 60) * 60;
@@ -236,6 +261,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
           default: break;
         }
       }
+      if (pendG.notes.length) report.count("Grace notes with no note after them in the bar (not imported)", pendG.notes.length);
       if (vi === 0) staff.bars.push(bar);
       else if (bar.length) {
         staff.layers ||= [];
@@ -395,12 +421,17 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
     else {
       const t = ties[b + ":" + i] || { next: {}, prev: {} };
       const arts = (e.marks || []).filter((m) => ARTIC_OUT[m]).map((m) => `<Articulation><subtype>${ARTIC_OUT[m]}</subtype></Articulation>`).join("");
+      const [tc, td] = st.transpose || [0, 0]; // pitch and tpc concert, tpc2 written
+      const pitchXml = (p) => `<pitch>${midi(p) + tc}</pitch><tpc>${tpcOf(tc || td ? shiftPitch(p, tc, td) : p)}</tpc>${tc || td ? `<tpc2>${tpcOf(p)}</tpc2>` : ""}`;
       const notes = e.pitches.map((p) => {
-        const mm = midi(p), [tc, td] = st.transpose || [0, 0]; // pitch and tpc concert, tpc2 written
+        const mm = midi(p);
         const sp = (t.next[mm] ? `<Spanner type="Tie"><Tie/><next>${t.next[mm]}</next></Spanner>` : "") +
           (t.prev[mm] ? `<Spanner type="Tie"><prev>${t.prev[mm]}</prev></Spanner>` : "");
-        return `<Note>${sp}<pitch>${mm + tc}</pitch><tpc>${tpcOf(tc || td ? shiftPitch(p, tc, td) : p)}</tpc>${tc || td ? `<tpc2>${tpcOf(p)}</tpc2>` : ""}</Note>`;
+        return `<Note>${sp}${pitchXml(p)}</Note>`;
       }).join("");
+      // grace notes (DESIGN §26), as MuseScore writes them: one acciaccatura, or grace16s
+      const one = e.grace?.length === 1;
+      for (const p of e.grace || []) x.push(`<Chord><durationType>${one ? "eighth" : "16th"}</durationType>${one ? "<acciaccatura/>" : "<grace16/>"}<Note>${pitchXml(p)}</Note></Chord>`);
       // ponytail: MuseScore slurs need chords at both ends; one on a rest is left out of this file
       const slurs = (sp.slurNext ? `<Spanner type="Slur"><Slur/><next>${sp.slurNext}</next></Spanner>` : "") +
         (sp.slurPrev ? `<Spanner type="Slur"><prev>${sp.slurPrev}</prev></Spanner>` : "");

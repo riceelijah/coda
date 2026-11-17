@@ -22,6 +22,7 @@ const ev = (dur, names, o = {}) => ({
   ...(o.slur ? { slur: true } : {}), ...(o.slurEnd ? { slurEnd: true } : {}),
   ...(o.hp ? { hp: o.hp } : {}), ...(o.hpEnd ? { hpEnd: true } : {}),
   ...(o.lyric ? { lyric: o.lyric } : {}), ...(o.lyricHyph ? { lyricHyph: true } : {}),
+  ...(o.grace ? { grace: o.grace.split(" ").map(P) } : {}),
 });
 
 // Compact text form of a staff's bars, for readable expected values.
@@ -44,10 +45,10 @@ export function roundTripFixture() {
     measures: [{ key: -3, time: [4, 4], sym: "common" }, {}, { key: 2 }, { time: [6, 8] }, {}],
     staves: [
       { name: "Keys", clef: "treble", brace: true, program: 4, bars: [
-        [ev("q", "C4 E4 G4", { marks: ["staccato", "accent"], dyn: "p" }), ev("8", "D5", { dots: 1, slur: true }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
+        [ev("q", "C4 E4 G4", { marks: ["staccato", "accent"], dyn: "p" }), ev("8", "D5", { dots: 1, slur: true, grace: "C5" }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
         [ev("q", "F#5", { slurEnd: true }), ev("8", "G5", { tup: [3, 2] }), ev("8", "A5", { tup: [3, 2] }), ev("8", "Bb5", { tup: [3, 2] }), ev("h", null, { marks: ["fermata"], dyn: "mf" })],
         [],
-        [ev("q", "D5", { dots: 1, lyric: "Hal", lyricHyph: true }), ev("8", "C#5", { lyric: "le", lyricHyph: true }), ev("16", "B4", { lyric: "lu" }), ev("16", "A4", { lyric: "<you> & me" }), ev("8", "G4")],
+        [ev("q", "D5", { dots: 1, lyric: "Hal", lyricHyph: true }), ev("8", "C#5", { lyric: "le", lyricHyph: true, grace: "E5 Eb5" }), ev("16", "B4", { lyric: "lu" }), ev("16", "A4", { lyric: "<you> & me" }), ev("8", "G4")],
         [ev("h", "D4 F#4 A4", { dots: 1 })],
       ] },
       { name: "Keys", clef: "bass", brace: false, program: 4, bars: [
@@ -334,6 +335,33 @@ export async function run({ check, eq }) {
     return (/inside a bar moved to its start: 1/.test(r) && /after the last bar \(not imported\): 1/.test(r)) || r;
   });
 
+  await check("grace notes: add, limit, rest refused, transposition, play on the beat, import counts (DESIGN §26)", () => {
+    const s = M.newScore({ preset: "treble", bars: 1 });
+    s.staves[0].bars[0] = [ev("q", "C5"), ev("q"), ev("h", "E5")];
+    const [a, r, c] = s.staves[0].bars[0];
+    if (M.addGrace(a, P("D5")) || !M.addGrace(r, P("D5")) || r.grace) return "rest";
+    for (let i = 0; i < M.MAX_GRACE; i++) M.addGrace(c, P("F5"));
+    if (!M.addGrace(c, P("G5")) || c.grace.length !== M.MAX_GRACE) return "limit";
+    c.grace = [P("F#5"), P("G5")];
+    M.transpose(s, 0, 0, 0, 1); // the note and its grace move together
+    if (a.pitches[0].step !== 1 || a.grace[0].step !== 2) return "transpose " + JSON.stringify(a);
+    // a quarter (480) with one grace: grace 0–60, note 60–480; a half with two: 0–60, 60–120, note 120–1920/2
+    const got = schedule(s).notes.map((n) => [n.start, n.end, n.midi].join(":")).join(" ");
+    if (got !== "0:60:76 60:480:74 960:1020:78 1020:1080:79 1080:1920:76") return got;
+    if (M.setStaffTranspose(s, 0, [-2, -1]) || c.grace[0].step !== 4 || c.grace[0].oct !== 5 || c.grace[0].alter !== 1) return "part transposition " + JSON.stringify(c.grace);
+    if (!M.isValidScore(s) || M.isValidScore({ ...s, staves: [{ ...s.staves[0], bars: [[{ ...ev("w"), grace: [P("C4")] }]] }] })) return "validation";
+    M.toggleChordPitch(s, 0, 0, 0, a.pitches[0]);
+    if ("grace" in a) return "grace left on a rest";
+    const N = (x, extra = "") => `<note>${extra}<pitch><step>${x}</step><octave>5</octave></pitch>${extra ? "" : "<duration>1</duration>"}<type>${extra ? "16th" : "quarter"}</type></note>`;
+    const xml = `<score-partwise><part-list><score-part id="P1"><part-name>V</part-name></score-part></part-list><part id="P1"><measure number="1">
+      <attributes><divisions>1</divisions><time><beats>2</beats><beat-type>4</beat-type></time></attributes>
+      ${N("D", "<grace/>")}${N("E", "<grace/>")}<note><grace/><chord/><pitch><step>G</step><octave>5</octave></pitch><type>16th</type></note>${N("C")}
+      ${N("F", "<grace/>")}<note><rest/><duration>1</duration><type>quarter</type></note>${N("A", "<grace/>")}</measure></part></score-partwise>`;
+    const { score: g, report } = importMusicXML(xml, "g.musicxml"), w = report.warnings.join("; ");
+    if (!eq(g.staves[0].bars[0][0].grace, [P("D5"), P("E5")]) || g.staves[0].bars[0].length !== 2) return JSON.stringify(g.staves[0].bars[0]);
+    return w === "Grace-note chords reduced to their first note: 1; Grace notes before rests (not imported): 1; Grace notes with no note after them in the bar (not imported): 1" || w;
+  });
+
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {
     const s = M.newScore({ preset: "piano", bars: 1 });
     if (M.setStaffProgram(s, 1, 40) || s.staves[0].program !== 40 || s.staves[1].program !== 40) return "pair";
@@ -486,8 +514,9 @@ export async function run({ check, eq }) {
     if (!eq(score.measures[0], { key: -2, time: [3, 4] }) || score.title !== "Piano Sample") return "attrs";
     const l2 = (score.staves[0].layers || []).map((L) => brief({ bars: L })).join();
     if (l2 !== "F4:h. | " || score.staves[1].layers) return "layer 2: " + l2; // voice 2 kept as layer 2 (DESIGN §15)
-    const w = report.warnings.join("; ");
-    return w === "Grace notes skipped: 1" || "warnings: " + w;
+    if (!eq(score.staves[0].bars[0][0].grace, [{ step: 5, oct: 4, alter: 0 }])) return "grace " + JSON.stringify(score.staves[0].bars[0][0]);
+    const w = report.warnings.join("; "); // an unslashed grace eighth is drawn slashed (DESIGN §26)
+    return w === "Grace notes redrawn: one as a slashed eighth, more as sixteenths: 1" || "warnings: " + w;
   });
 
   await check("sniffing", () => {

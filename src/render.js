@@ -28,7 +28,7 @@ export function keyName(k) { return KEY_NAMES[k + 7]; }
 
 function minWidth(score, b) {
   // 30 per note, more under a long lyric (DESIGN §24)
-  const need = (bar) => bar.reduce((w, e) => w + (e.lyric ? Math.max(30, e.lyric.length * 8.5 + 12) : 30), 0);
+  const need = (bar) => bar.reduce((w, e) => w + (e.lyric ? Math.max(30, e.lyric.length * 8.5 + 12) : 30) + (e.grace ? 6 + 10 * e.grace.length : 0), 0);
   return Math.max(150, 50 + Math.max(30, ...score.staves.flatMap((s) => allLayers(s).map((bars) => need(bars[b])))));
 }
 
@@ -94,6 +94,13 @@ function makeNote(ev, clef, stem = 0) {
   const note = stem ? new VFl.StaveNote({ clef, keys, duration, stem_direction: stem })
     : new VFl.StaveNote({ clef, keys, duration, auto_stem: true });
   if (ev.dots) VFl.Dot.buildAndAttach([note], { all: true });
+  if (ev.grace) { // DESIGN §26: one is a slashed eighth, more are beamed sixteenths; accidentals come from applyAccidentals
+    const one = ev.grace.length === 1;
+    const gs = ev.grace.map((p) => new VFl.GraceNote({ keys: ["cdefgab"[p.step] + ACC[p.alter] + "/" + p.oct], duration: one ? "8" : "16", slash: one, clef }));
+    const group = new VFl.GraceNoteGroup(gs, true);
+    if (!one) group.beamNotes();
+    note.addModifier(group, 0);
+  }
   if (ev.marks) {
     // Layers sharing a bar: every mark on the stem side, away from the other layer. Otherwise a
     // fermata goes above and the rest on the notehead side.

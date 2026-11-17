@@ -24,14 +24,18 @@ export function schedule(score, from = 0) {
       let at = tick;
       for (const ev of bars[bar]) {
         const len = eventTicks(ev);
-        const nextOpen = new Map();
+        const nextOpen = new Map(), tr = st.transpose?.[0] || 0, base = { vel: velAt(si, at), program: st.program ?? 0, staff: si, ...(st.sound ? { sound: st.sound } : {}) };
+        // grace notes (DESIGN §26) take a 32nd each, at most half the note, from the start of the beat
+        const g = ev.grace ? Math.min(60, Math.floor(len / 2 / ev.grace.length)) : 0;
+        (ev.grace || []).forEach((p, k) => notes.push({ start: at + k * g, end: at + (k + 1) * g, midi: midi(p) + tr, ...base }));
+        const on = at + g * (ev.grace?.length || 0);
         for (const p of ev.pitches) {
-          const m = midi(p) + (st.transpose?.[0] || 0); // sounding pitch (DESIGN §21)
+          const m = midi(p) + tr; // sounding pitch (DESIGN §21)
           let n = open.get(m);
-          if (n && n.end === at) n.end = at + len;
-          else { n = { start: at, end: at + len, midi: m, vel: velAt(si, at), program: st.program ?? 0, staff: si, ...(st.sound ? { sound: st.sound } : {}) }; notes.push(n); }
+          if (n && n.end === at && !g) n.end = at + len;
+          else { n = { start: on, end: at + len, midi: m, ...base }; notes.push(n); }
           if (ev.tie) nextOpen.set(m, n);
-          else if (ev.marks?.includes("staccato")) n.end = at + len / 2; // sounds half its length
+          else if (ev.marks?.includes("staccato")) n.end = (Math.max(n.start, at) + at + len) / 2; // sounds half its length (after any grace notes)
         }
         open.clear();
         nextOpen.forEach((v, k) => open.set(k, v));

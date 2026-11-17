@@ -257,7 +257,7 @@ export function toggleChordPitch(score, s, b, i, pitch) {
   const at = ev.pitches.findIndex((p) => samePitch(p, pitch));
   if (at >= 0) {
     ev.pitches.splice(at, 1);
-    if (!ev.pitches.length) ev.tie = false;
+    if (!ev.pitches.length) { ev.tie = false; delete ev.lyric; delete ev.lyricHyph; delete ev.grace; }
   } else {
     ev.pitches.push({ ...pitch });
     sortPitches(ev.pitches);
@@ -307,10 +307,13 @@ export function setStaffTranspose(score, s, t) {
   const group = partGroups(score).find((g) => g.includes(s));
   const dc = (score.staves[s].transpose?.[0] || 0) - (nt?.[0] || 0);
   for (const i of group) for (const bars of allLayers(score.staves[i])) for (const bar of bars) for (const ev of bar)
-    if (ev.pitches.some((p) => midi(p) + dc < 0 || midi(p) + dc > 127)) return "Some notes would be written too high or too low";
+    if ([...ev.pitches, ...(ev.grace || [])].some((p) => midi(p) + dc < 0 || midi(p) + dc > 127)) return "Some notes would be written too high or too low";
   for (const i of group) {
     const st = score.staves[i], ot = st.transpose || [0, 0], dc = ot[0] - (nt?.[0] || 0), dd = ot[1] - (nt?.[1] || 0);
-    if (dc || dd) for (const bars of allLayers(st)) for (const bar of bars) for (const ev of bar) ev.pitches = sortPitches(ev.pitches.map((p) => shiftPitch(p, dc, dd)));
+    if (dc || dd) for (const bars of allLayers(st)) for (const bar of bars) for (const ev of bar) {
+      ev.pitches = sortPitches(ev.pitches.map((p) => shiftPitch(p, dc, dd)));
+      if (ev.grace) ev.grace = ev.grace.map((p) => shiftPitch(p, dc, dd));
+    }
     if (nt) st.transpose = nt; else delete st.transpose;
   }
   return null;
@@ -320,10 +323,9 @@ export function transpose(score, s, b, i, steps) {
   const ev = score.staves[s].bars[b][i];
   if (!ev.pitches.length) return "Rests have no pitch";
   const key = keyAt(score, s, b);
-  ev.pitches = ev.pitches.map((p) => {
-    const np = fromDiatonic(diatonic(p) + steps);
-    return { ...np, alter: keyAlter(key, np.step) };
-  });
+  const move = (p) => { const np = fromDiatonic(diatonic(p) + steps); return { ...np, alter: keyAlter(key, np.step) }; };
+  ev.pitches = ev.pitches.map(move);
+  if (ev.grace) ev.grace = ev.grace.map(move); // grace notes move with their note
   sortPitches(ev.pitches);
   // drop duplicates created by collisions
   ev.pitches = ev.pitches.filter((p, k, a) => k === 0 || !samePitch(p, a[k - 1]));
@@ -402,6 +404,17 @@ export function clearBrokenSpans(score) {
 // ---------- lyrics (DESIGN §24) ----------
 // One verse: ev.lyric is the syllable, ev.lyricHyph a hyphen to the next one. Notes only.
 export const MAX_LYRIC = 40;
+// ---------- grace notes (DESIGN §26) ----------
+// ev.grace = [pitch, …]: single grace notes before a note, played on the beat. One draws as a
+// slashed eighth, more as beamed sixteenths.
+export const MAX_GRACE = 8;
+export function addGrace(ev, pitch) {
+  if (!ev.pitches.length) return "Grace notes go before a note, not a rest";
+  if ((ev.grace || []).length >= MAX_GRACE) return `At most ${MAX_GRACE} grace notes before a note`;
+  ev.grace = [...(ev.grace || []), { step: pitch.step, oct: pitch.oct, alter: pitch.alter || 0 }]; // a new array: pasted copies share none
+  return null;
+}
+
 // MusicXML/MuseScore <syllabic> for every lyric in the score, keyed by event: a hyphen after a
 // syllable makes it begin/middle, one before it makes it middle/end.
 export function syllabics(score) {
@@ -664,9 +677,10 @@ export function isValidScore(sc) {
     const n = sc.measures.length;
     if (!n || !sc.measures[0].time) return false;
     if (!sc.measures.every((m) => m.sym === undefined || (m.time && TIME_SYMS[m.sym] && symOk(m.sym, m.time)))) return false;
+    const okPitch = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2;
     const okBars = (bars) => Array.isArray(bars) && bars.length === n && bars.every((bar) => Array.isArray(bar) && bar.every((e) =>
-      DURS.includes(e.dur) && Array.isArray(e.pitches) &&
-      e.pitches.every((p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2) &&
+      DURS.includes(e.dur) && Array.isArray(e.pitches) && e.pitches.every(okPitch) &&
+      (e.grace === undefined || (Array.isArray(e.grace) && e.grace.length > 0 && e.grace.length <= MAX_GRACE && e.pitches.length > 0 && e.grace.every(okPitch))) &&
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m)))) &&
       (e.dyn === undefined || DYNS.includes(e.dyn)) &&
       (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&

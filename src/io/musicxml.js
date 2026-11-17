@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, finishClefs,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, finishClefs, MAX_GRACE,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -51,6 +51,13 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl
   return x.join("");
 }
 
+// Grace notes (DESIGN §26): one is a slashed eighth, more are sixteenths, before their note.
+function graceXml(grace, staffNo, voice) {
+  const one = grace.length === 1;
+  return grace.map((p) => `<note><grace${one ? ' slash="yes"' : ""}/><pitch><step>${"CDEFGAB"[p.step]}</step>${p.alter ? `<alter>${p.alter}</alter>` : ""}<octave>${p.oct}</octave></pitch>` +
+    `<voice>${voice}</voice><type>${one ? "eighth" : "16th"}</type>${staffNo ? `<staff>${staffNo}</staff>` : ""}</note>`).join("");
+}
+
 function restXml(ticks, staffNo, voice, whole) {
   if (whole) {
     return `<note><rest measure="yes"/><duration>${ticks}</duration><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</note>`;
@@ -89,6 +96,7 @@ function barXml(score, s, b, staffNo, voice, v, syl) {
     const dir = (body) => `<direction placement="below"><direction-type>${body}</direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`;
     if (ev.dyn) out.push(dir(`<dynamics><${ev.dyn}/></dynamics>`));
     if (ev.hp) out.push(dir(`<wedge type="${ev.hp === "<" ? "crescendo" : "diminuendo"}"/>`));
+    if (ev.grace) out.push(graceXml(ev.grace, staffNo, voice));
     if (!ev.pitches.length) out.push(noteXml(ev, null, flags));
     else ev.pitches.forEach((p, k) => out.push(noteXml(ev, p, { ...flags, chord: k > 0, tieStop: tied(p) })));
     if (ev.hpEnd) out.push(dir('<wedge type="stop"/>')); // after the note it ends on
@@ -240,6 +248,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     measures.forEach((meas, mi) => {
       staves.forEach((st) => allLayers(st).forEach((bars) => bars.push([])));
       const lastEvent = {}; // staff:layer -> last kept event in this bar
+      const pendGrace = {}; // staff:layer -> grace notes waiting for their note (DESIGN §26)
       const pos = { t: 0 }; // time cursor in ticks: notes advance it, <backup> and <forward> move it
       for (const el of meas.children) {
         const tag = el.localName;
@@ -316,10 +325,11 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
         } else if (tag === "note") {
           const start = pos.t;
-          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny });
+          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace });
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
+      for (const k in pendGrace) report.count("Grace notes with no note after them in the bar (not imported)", pendGrace[k].notes.length);
       // the file's key is written; the score keeps concert pitch
       if (pi === 0) firstPartAttrs.push({ key: tr ? wrapKey(key + fifthsOf(tr[0], tr[1])) : key, time: [...time], sym });
     });
@@ -361,9 +371,10 @@ const MARKS = {
   glissando: "Glissandos (not imported)", slide: "Glissandos (not imported)",
 };
 
-function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny }) {
+function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace }) {
   const isRest = !!kid(el, "rest");
-  if (kid(el, "grace")) { if (!isRest) report.count("Grace notes skipped"); return; }
+  const grace = kid(el, "grace");
+  if (grace && isRest) { report.count("Grace rests (not imported)"); return; }
   const staffNo = +(txt(el, "staff") || 1);
   const st = staves[staffNo - 1];
   if (!st) return;
@@ -403,6 +414,16 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     if (step < 0 || !Number.isFinite(oct)) return;
     pitch = { step, oct, alter: Math.max(-2, Math.min(2, alter)) };
     if (p.localName === "unpitched") report.count("Percussion notes shown at their staff position");
+  }
+
+  if (grace) { // held until the note it comes before; before the chord branch so it can't join the last note
+    if (!pitch) return;
+    if (kid(el, "chord")) { report.count("Grace-note chords reduced to their first note"); return; }
+    if (marks.length || slur.start || slur.stop || tieStart || kids(el, "lyric").length) report.count("Marks, slurs, ties and lyrics on grace notes (not imported)");
+    const g = (pendGrace[lk] ||= { notes: [], types: [] });
+    g.notes.push(pitch);
+    g.types.push((grace.getAttribute("slash") === "yes" ? "/" : "") + (txt(el, "type") || ""));
+    return;
   }
 
   if (kid(el, "chord") && lastEvent[lk]) {
@@ -464,6 +485,17 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   if (slur.start) ev.slur = true;
   if (slur.stop) ev.slurEnd = true;
   lyricIn(el, ev, report);
+  const g = pendGrace[lk];
+  if (g) {
+    delete pendGrace[lk];
+    if (!pitch) report.count("Grace notes before rests (not imported)", g.notes.length);
+    else {
+      if (g.notes.length > MAX_GRACE) report.count(`Grace notes beyond ${MAX_GRACE} before a note (not imported)`, g.notes.length - MAX_GRACE);
+      ev.grace = g.notes.slice(0, MAX_GRACE);
+      const want = ev.grace.length === 1 ? ["/eighth"] : ev.grace.map(() => "16th");
+      if (g.types.some((t, k) => t !== want[k])) report.count("Grace notes redrawn: one as a slashed eighth, more as sixteenths");
+    }
+  }
   lastAny[staffNo] = ev;
   bar.push(ev);
   lastEvent[lk] = ev;
