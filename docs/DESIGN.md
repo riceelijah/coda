@@ -846,7 +846,7 @@ dependency is needed.
 - **File:** New…, Open file…, Scores in this browser…, Save as MusicXML, Print…
 - **Edit:** Undo, Redo, Cut, Copy, Paste, Delete
 - **View:** Zoom in, Zoom out, Actual size
-- **Score:** Add bar, Delete bar, Key/Time…, Score details…, Instruments…
+- **Score:** Add bar, Delete bar, Key/Time…, Score details…, Parts and instruments…
 - **Help:** Keyboard shortcuts, About Coda
 
 Play, Stop and tempo stay as visible buttons. Existing element ids are kept on the menu items.
@@ -878,7 +878,7 @@ item runs. Zoom sets the sheet width (menu items only; Ctrl +/− stays the brow
 - Audition: sampled when loaded, else the triangle voice now and a background fetch. Sounds are
   prefetched after a file opens and after an instrument change.
 - Notes longer than the 3.16 s recordings: sustained families loop 0.8–2.4 s; others ring out.
-- Pickers: Score ▸ Instruments… (one row per part), and a Sound select in New. SATB defaults to
+- Pickers: Score ▸ Parts and instruments… (one row per part, §20), and a Sound select in New. SATB defaults to
   Choir Aahs (52).
 - Credits: FluidR3_GM (MIT; CC BY 3.0 per the gleitz README) in the README and Help ▸ About.
 - Your own sounds: §18.
@@ -937,8 +937,8 @@ New **Notes** menu: Select all (mod+A), Transpose up/down a step (↑/↓), up/d
 
 Right-click (or Shift+F10 / the Menu key) opens `#ctx`, built from clones of menu items.
 On a note (selected first if outside the range): Cut, Copy, Paste, Delete · Transpose up/down ·
-Tie · Tuplet… · Key and time… · Instruments…. Elsewhere on a staff: Paste · Add bar · Delete bar ·
-Key and time… · Instruments…. Clamped to the viewport; Esc, a click outside, or scrolling closes it.
+Tie · Tuplet… · Key and time… · Parts and instruments…. Elsewhere on a staff: Paste · Add bar · Delete bar ·
+Key and time… · Parts and instruments…. Clamped to the viewport; Esc, a click outside, or scrolling closes it.
 
 ### 14.4 Tuplets (Phase 17)
 
@@ -1012,7 +1012,7 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
   `program` stays as the fallback and is what MusicXML saves.
 - **Playback:** each sound is decoded once and repitched from its root. Notes outside its range,
   or a sound no longer in this browser, play the part's instrument, with one status line.
-- **UI:** Instruments ▸ Your sounds… adds and deletes sounds; each part's menu lists them under
+- **UI:** Parts and instruments ▸ Your sounds… adds and deletes sounds; each part's menu lists them under
   "Your sounds". Names go into the page with `textContent` / `Option` text only.
 
 ## 19. Export (Phase 22)
@@ -1039,4 +1039,16 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   encoder browsers have built in); the item shows the type this browser records (WebM/Ogg Opus or
   M4A) and is hidden where there is none. MP3 would need an encoder library.
 - **Not exported:** Finale `.musx` (closed format; nothing here could check the result).
+
+## 20. Parts: add, remove, rename, reorder (Phase 23)
+
+- **Dialog:** Score ▸ Parts and instruments… lists one row per part (name, sound, up, down,
+  remove) and adds new parts (treble, bass, alto, tenor staff, or grand staff). The rows are the
+  draft; Cancel discards it, Apply makes one `edit()`, so one undo step.
+- **Model:** `arrangeParts(score, rows)`, rows in the new order as `{from, name, kind?}`. `from`
+  is an existing part's first staff index: its staff objects are reused, so layers, sounds and
+  anything added later travel with them. New parts get empty bars. Everything is checked before
+  anything changes; an empty list or a repeated part is refused. A lone staff never keeps
+  `brace`. Sounds are then set by position.
+- **Removing a part with notes** asks first. The selection is cleared; the caret is clamped.
 

@@ -47,6 +47,7 @@ only says what to build in what order and how to know each phase is finished.
 | 20 | Common and cut time symbols (DESIGN §17) | done |
 | 21 | Your own sounds (DESIGN §18) | done |
 | 22 | Export menu: PDF, MusicXML, .mxl, .mscz, MIDI, WAV, compressed audio (DESIGN §19) | done |
+| 23 | Parts: add, remove, rename, reorder (DESIGN §20) | done |
 
 ---
 

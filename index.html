@@ -131,6 +131,12 @@
   }
   dialog::backdrop { background: rgba(0,0,0,.35); }
   dialog h2 { margin: 0 0 12px; font-size: 18px; }
+  #inst-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; max-height: 50vh; overflow: auto; }
+  .part-row { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(120px, 1.4fr) auto auto auto; gap: 6px; align-items: center; }
+  .part-row .kind { grid-column: 1 / -1; font-size: 12px; opacity: .7; margin-top: -4px; }
+  .part-row button { padding: 2px 8px; min-width: 28px; }
+  .part-row button:disabled { opacity: .35; cursor: default; }
+  .part-add { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .form { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
   .form input, .form select { padding: 5px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--desk); width: 100%; }
   .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
@@ -241,7 +247,7 @@
         <hr>
         <button role="menuitem" id="b-attrs">Key and time…</button>
         <button role="menuitem" id="m-details">Title, composer, tempo…</button>
-        <button role="menuitem" id="m-instruments">Instruments…</button>
+        <button role="menuitem" id="m-instruments">Parts and instruments…</button>
       </div></div>
     <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Help</button>
       <div class="mlist" role="menu" hidden>
@@ -340,8 +346,17 @@
 
 <dialog id="instruments">
   <form method="dialog">
-    <h2>Instruments</h2>
-    <div class="form" id="inst-rows"></div>
+    <h2>Parts and instruments</h2>
+    <div id="inst-rows" role="list"></div>
+    <div class="part-add">
+      <label for="inst-kind">Add a part</label>
+      <select id="inst-kind">
+        <option value="treble">Treble staff</option><option value="bass">Bass staff</option>
+        <option value="alto">Alto staff</option><option value="tenor">Tenor staff</option>
+        <option value="grand">Grand staff (two staves)</option>
+      </select>
+      <button class="btn" type="button" id="inst-add">Add</button>
+    </div>
     <p class="note">Sounds download the first time a part uses them, then stay in this browser. Without a connection, parts play a plain tone.</p>
     <div class="actions">
       <button class="btn" type="button" id="inst-own">Your sounds…</button>
@@ -439,7 +454,8 @@
       <tr><td>Shift+click</td><td>Add or remove a chord note on the clicked note</td></tr>
       <tr><td>Notes ▸ Fermata…Marcato</td><td>Add or remove a fermata or articulation on the selected notes (also on right-click)</td></tr>
       <tr><td>File ▸ Export</td><td>PDF (<kbd>Ctrl/Cmd</kbd>+<kbd>P</kbd>, through the print dialog), MusicXML, .mxl, MuseScore, MIDI, WAV or compressed audio</td></tr>
-      <tr><td>Score ▸ Instruments… ▸ Your sounds…</td><td>Use your own recording for a part; saved files keep only the part's instrument</td></tr>
+      <tr><td>Score ▸ Parts and instruments…</td><td>Add, remove, rename and reorder parts, and pick each part's sound</td></tr>
+      <tr><td>Score ▸ Parts and instruments… ▸ Your sounds…</td><td>Use your own recording for a part; saved files keep only the part's instrument</td></tr>
       <tr><td>Layer 1–4 (lower left)</td><td>Pick which layer you enter and edit in (Notes ▸ Layer); other layers show grey</td></tr>
       <tr><td>Chord button</td><td>Clicks add notes to the selected note instead of after it</td></tr>
     </table>

@@ -841,7 +841,7 @@ const soundValue = (st) => (st.sound ? "u:" + st.sound : String(st.program ?? 0)
 // Your sounds as an extra group in each part's menu; `picks` keeps choices made before a refresh.
 async function fillOwnSounds(picks = null) {
   const own = await usnd.listSounds();
-  for (const sel of $("inst-rows").querySelectorAll("select")) {
+  for (const sel of $("inst-rows").querySelectorAll("select.snd")) {
     const keep = picks?.get(sel) ?? sel.value;
     sel.querySelector("optgroup.own")?.remove();
     const g = document.createElement("optgroup");
@@ -853,32 +853,84 @@ async function fillOwnSounds(picks = null) {
   }
 }
 
+const KIND_LABEL = { treble: "Treble staff", bass: "Bass staff", alto: "Alto staff", tenor: "Tenor staff", grand: "Grand staff" };
+
+// One row of the parts list (DESIGN §20). The rows are the draft: Apply reads them in order.
+function partRow({ from, kind, name, value }) {
+  const row = document.createElement("div"), nm = document.createElement("input"), sel = document.createElement("select");
+  row.className = "part-row"; row.setAttribute("role", "listitem");
+  row.dataset.from = from ?? ""; row.dataset.kind = kind;
+  nm.className = "nm"; nm.maxLength = 60; nm.value = name; nm.placeholder = "Part name"; nm.setAttribute("aria-label", "Part name");
+  sel.className = "snd"; sel.setAttribute("aria-label", "Sound");
+  fillSounds(sel, 0);
+  sel.dataset.want = value;
+  const btn = (text, label, fn) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = text; b.title = label; b.setAttribute("aria-label", label);
+    b.onclick = () => { fn(); updatePartButtons(); };
+    return b;
+  };
+  const up = btn("↑", "Move up", () => row.previousElementSibling?.before(row));
+  const down = btn("↓", "Move down", () => row.nextElementSibling?.after(row));
+  const del = btn("✕", "Remove part", () => row.remove());
+  const k = document.createElement("div");
+  k.className = "kind";
+  k.textContent = KIND_LABEL[kind] + (from === null ? " (new)" : "");
+  row.append(nm, sel, up, down, del, k);
+  return row;
+}
+const updatePartButtons = () => {
+  const rows = [...$("inst-rows").children];
+  rows.forEach((r, i) => {
+    const [up, down, del] = r.querySelectorAll("button");
+    up.disabled = i === 0; down.disabled = i === rows.length - 1; del.disabled = rows.length === 1;
+  });
+};
+const kindOf = (sc, g) => (g.length > 1 ? "grand" : sc.staves[g[0]].clef);
+
 function openInstruments() {
   const sc = state.score, box = $("inst-rows");
-  box.textContent = "";
-  M.partGroups(sc).forEach((g, i) => {
-    const lab = document.createElement("label"), sel = document.createElement("select");
-    lab.textContent = sc.staves[g[0]].name || `Part ${i + 1}`;
-    lab.htmlFor = sel.id = "inst-" + i;
-    sel.dataset.staff = g[0];
-    fillSounds(sel, sc.staves[g[0]].program ?? 0);
-    box.append(lab, sel);
-  });
-  const want = new Map([...box.querySelectorAll("select")].map((x) => [x, soundValue(sc.staves[+x.dataset.staff])]));
+  box.replaceChildren(...M.partGroups(sc).map((g) => partRow({
+    from: g[0], kind: kindOf(sc, g), name: sc.staves[g[0]].name || "", value: soundValue(sc.staves[g[0]]) })));
+  const want = new Map([...box.querySelectorAll("select.snd")].map((x) => [x, x.dataset.want]));
+  updatePartButtons();
   $("instruments").returnValue = "";
   $("instruments").showModal();
   fillOwnSounds(want);
 }
 
+function addPartRow() {
+  const kind = $("inst-kind").value, row = partRow({ from: null, kind, name: "", value: "0" });
+  $("inst-rows").appendChild(row);
+  fillOwnSounds(new Map([[row.querySelector("select.snd"), "0"]]));
+  updatePartButtons();
+  row.querySelector("input").focus();
+}
+
 function closeInstruments() {
   if ($("instruments").returnValue !== "ok") return;
-  const picks = [...$("inst-rows").querySelectorAll("select")].map((x) => [+x.dataset.staff, x.value])
-    .filter(([s, v]) => soundValue(state.score.staves[s]) !== v);
-  if (!picks.length) return;
-  const ok = edit((sc) => {
-    for (const [s, v] of picks) {
-      const e = v.startsWith("u:") ? M.setStaffSound(sc, s, v.slice(2)) : M.setStaffSound(sc, s, null) || M.setStaffProgram(sc, s, +v);
-      if (e) return e;
+  const sc = state.score, groups = M.partGroups(sc);
+  const rows = [...$("inst-rows").children].map((r) => ({
+    from: r.dataset.from === "" ? null : +r.dataset.from, kind: r.dataset.kind,
+    name: r.querySelector("input.nm").value, value: r.querySelector("select.snd").value }));
+  const same = rows.length === groups.length && rows.every((r, i) => r.from === groups[i][0] &&
+    r.name.trim() === (sc.staves[r.from].name || "") && r.value === soundValue(sc.staves[r.from]));
+  if (same) return;
+  // removed parts that hold notes (any layer): ask first, as Delete bar does
+  const kept = new Set(rows.map((r) => r.from));
+  const lost = groups.filter((g) => !kept.has(g[0]) && g.some((s) => M.allLayers(sc.staves[s]).some((bars) => bars.some((b) => b.length))));
+  if (lost.length && !confirm(`Remove ${lost.length === 1 ? `"${sc.staves[lost[0][0]].name || "a part"}"` : `${lost.length} parts`} and the notes in ${lost.length === 1 ? "it" : "them"}? (Undo brings ${lost.length === 1 ? "it" : "them"} back.)`)) return;
+  state.sel = null; state.selEnd = null; // the selection's staff index may not survive
+  const ok = edit((score) => {
+    const e = M.arrangeParts(score, rows.map((r) => ({ from: r.from, kind: r.kind, name: r.name })));
+    if (e) return e;
+    // sounds, by position in the new order
+    let s = 0;
+    for (const r of rows) {
+      const err = r.value.startsWith("u:") ? M.setStaffSound(score, s, r.value.slice(2))
+        : M.setStaffSound(score, s, null) || M.setStaffProgram(score, s, +r.value);
+      if (err) return err;
+      s += r.kind === "grand" ? 2 : 1;
     }
     return null;
   });
@@ -1410,6 +1462,7 @@ function init() {
   $("instruments").addEventListener("close", closeInstruments);
   $("inst-cancel").onclick = () => $("instruments").close("cancel");
   $("inst-own").onclick = () => openOwnSounds();
+  $("inst-add").onclick = () => addPartRow();
   $("us-add").onclick = () => addOwnSound();
   $("usounds").addEventListener("close", () => fillOwnSounds());
   fillSounds($("f-sound"), 0);

@@ -433,6 +433,40 @@ export function setStaffSound(score, s, id) {
   return null;
 }
 
+// Kinds of part the Instruments dialog can add (DESIGN §20).
+export const PART_KINDS = {
+  treble: [{ clef: "treble" }], bass: [{ clef: "bass" }], alto: [{ clef: "alto" }], tenor: [{ clef: "tenor" }],
+  grand: [{ clef: "treble", brace: true }, { clef: "bass" }],
+};
+
+// Rebuild the part list (DESIGN §20). rows, in the new order: {from, name, kind?, program?}, where
+// `from` is the first staff index of an existing part (its staves, layers and sounds are kept, as
+// the same objects) or null for a new part of `kind`. Parts left out are removed.
+export function arrangeParts(score, rows) {
+  if (!rows.length) return "A score needs at least one part";
+  const groups = partGroups(score), seen = new Set();
+  for (const r of rows) { // check everything before changing anything
+    if (r.from === null || r.from === undefined) { if (!PART_KINDS[r.kind]) return "Unknown kind of part"; continue; }
+    if (!groups.some((x) => x[0] === r.from) || seen.has(r.from)) return "Unknown part";
+    seen.add(r.from);
+  }
+  const staves = [];
+  for (const r of rows) {
+    const name = String(r.name ?? "").trim().slice(0, 60);
+    let part;
+    if (r.from === null || r.from === undefined) {
+      const program = Number.isInteger(r.program) && r.program > 0 && r.program <= 127 ? r.program : 0;
+      part = PART_KINDS[r.kind].map((k) => ({ name, clef: k.clef, brace: !!k.brace, ...(program ? { program } : {}),
+        bars: score.measures.map(() => []) }));
+    } else part = groups.find((x) => x[0] === r.from).map((i) => score.staves[i]);
+    for (const st of part) st.name = name;
+    if (part.length === 1) part[0].brace = false; // a lone staff never pairs with whatever follows
+    staves.push(...part);
+  }
+  score.staves = staves;
+  return null;
+}
+
 export const PRESETS = {
   treble: [{ name: "Staff", clef: "treble" }],
   bass: [{ name: "Staff", clef: "bass" }],

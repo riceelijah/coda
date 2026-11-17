@@ -181,6 +181,26 @@ export async function run({ check, eq }) {
     return (tag(0) === "RIFF" && tag(8) === "WAVE" && v.getUint32(24, true) === 8000 && v.getUint16(22, true) === 2 && w.length === 44 + want * 4) || "header";
   });
 
+  await check("parts: add a grand staff mid-score, move, rename a pair, remove, refuse none; layers survive; MusicXML (DESIGN §20)", () => {
+    const s = M.newScore({ preset: "satb", bars: 2 });
+    s.staves[1].bars[0] = [ev("w", "E4")];
+    s.staves[1].layers = [[[ev("w", "C4")], []]];
+    s.staves[3].sound = "x";
+    // order: Bass, new grand staff "Keys", Alto (renamed "Alto 1"); Soprano and Tenor removed
+    let e = M.arrangeParts(s, [{ from: 3, name: "Bass" }, { from: null, kind: "grand", name: " Keys ", program: 4 }, { from: 1, name: "Alto 1" }]);
+    if (e) return e;
+    const names = s.staves.map((st) => `${st.name}/${st.clef}/${st.brace}`).join(" ");
+    if (names !== "Bass/bass/false Keys/treble/true Keys/bass/false Alto 1/treble/false") return names;
+    if (s.staves[0].sound !== "x" || s.staves[1].program !== 4 || s.staves[1].bars.length !== 2) return "kept fields";
+    if (!eq(s.staves[3].layers, [[[ev("w", "C4")], []]]) || brief(s.staves[3]) !== "E4:w | ") return "layers moved with their part";
+    if (!M.isValidScore(s)) return "invalid";
+    M.arrangeParts(s, [{ from: 1, name: "Piano" }, { from: 0, name: "Bass" }, { from: 3, name: "Alto 1" }]);
+    if (s.staves[0].name !== "Piano" || s.staves[1].name !== "Piano" || !s.staves[0].brace) return "rename pair / move";
+    if (M.arrangeParts(s, []) === null || M.arrangeParts(s, [{ from: 0 }, { from: 0 }]) === null) return "refusals";
+    const b = importMusicXML(exportMusicXML(s), "x.musicxml").score;
+    return b.staves.map((st) => st.name + "/" + st.clef).join(" ") === "Piano/treble Piano/bass Bass/bass Alto 1/treble" || b.staves.map((st) => st.name).join();
+  });
+
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {
     const s = M.newScore({ preset: "piano", bars: 1 });
     if (M.setStaffProgram(s, 1, 40) || s.staves[0].program !== 40 || s.staves[1].program !== 40) return "pair";
