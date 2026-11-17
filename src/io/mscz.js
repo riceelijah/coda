@@ -1,6 +1,7 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE } from "../model.js";
+import { completeTuplet } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
 
@@ -212,4 +213,119 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   padBars(score);
   report.notes = noteCount(score);
   return { score, report: report.done() };
+}
+
+// ---------- export (DESIGN §19) ----------
+// MuseScore 4 format, modelled on what MuseScore writes. Layers are voices; ties are Tie spanners
+// pointing at the next note; marks are Fermata/Articulation elements.
+
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const TYPE_NAME = { w: "whole", h: "half", q: "quarter", 8: "eighth", 16: "16th", 32: "32nd" };
+const CLEF_OUT = { treble: "G", bass: "F", alto: "C3", tenor: "C4" };
+const ARTIC_OUT = { staccato: "articStaccatoAbove", accent: "articAccentAbove", tenuto: "articTenutoAbove", marcato: "articMarcatoAbove" };
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+const frac = (ticks) => { const g = gcd(Math.abs(ticks), 1920) || 1; return `${ticks / g}/${1920 / g}`; };
+const tpcOf = (p) => [14, 16, 18, 13, 15, 17, 19][p.step] + 7 * p.alter;
+const loc = (dm, dt) => `<location>${dm ? `<measures>${dm}</measures>` : ""}${dt ? `<fractions>${frac(dt)}</fractions>` : ""}</location>`;
+
+export function exportMSCX(score) {
+  const x = ['<?xml version="1.0" encoding="UTF-8"?>', '<museScore version="4.20">', "<Score>", "<Division>480</Division>"];
+  x.push(`<metaTag name="workTitle">${esc(score.title || "")}</metaTag>`, `<metaTag name="composer">${esc(score.composer || "")}</metaTag>`);
+  let id = 0;
+  for (const g of partGroups(score)) {
+    const st = score.staves[g[0]];
+    x.push("<Part>");
+    g.forEach((s, k) => x.push(`<Staff id="${++id}"><StaffType group="pitched"><name>stdNormal</name></StaffType>` +
+      (g.length > 1 && k === 0 ? '<bracket type="1" span="2" col="0"/><barLineSpan>1</barLineSpan>' : "") + "</Staff>"));
+    x.push(`<trackName>${esc(st.name || "")}</trackName><Instrument><longName>${esc(st.name || "")}</longName>` +
+      `<trackName>${esc(st.name || "")}</trackName>${g.map((s, k) => `<clef staff="${k + 1}">${CLEF_OUT[score.staves[s].clef]}</clef>`).join("")}<Channel><program value="${st.program ?? 0}"/></Channel></Instrument></Part>`);
+  }
+  score.staves.forEach((st, s) => {
+    x.push(`<Staff id="${s + 1}">`);
+    if (s === 0) x.push(`<VBox><height>10</height><Text><style>title</style><text>${esc(score.title || "")}</text></Text>` +
+      (score.composer ? `<Text><style>composer</style><text>${esc(score.composer)}</text></Text>` : "") + "</VBox>");
+    const layers = allLayers(st);
+    const ties = layers.map((bars) => tieMap(bars)); // per layer: "b:i" -> {next, prev} locations by midi
+    score.measures.forEach((m, b) => {
+      const a = attrsAt(score, b), cap = barCapacity(a.time);
+      x.push("<Measure>");
+      const last = Math.max(0, ...layers.map((bars, v) => (bars[b].length ? v : 0)));
+      for (let v = 0; v <= last; v++) {
+        x.push("<voice>");
+        if (v === 0) {
+          if (b === 0) x.push(`<Clef><concertClefType>${CLEF_OUT[st.clef]}</concertClefType><transposingClefType>${CLEF_OUT[st.clef]}</transposingClefType><isHeader>1</isHeader></Clef>`);
+          if (b === 0 || m.key !== undefined) x.push(`<KeySig><concertKey>${a.key}</concertKey></KeySig>`);
+          if (b === 0 || m.time) x.push(`<TimeSig>${a.sym ? `<subtype>${a.sym === "common" ? 1 : 2}</subtype>` : ""}<sigN>${a.time[0]}</sigN><sigD>${a.time[1]}</sigD></TimeSig>`);
+          if (b === 0 && s === 0) x.push(`<Tempo><tempo>${score.tempo / 60}</tempo><followText>1</followText><text><sym>metNoteQuarterUp</sym> = ${score.tempo}</text></Tempo>`);
+        }
+        const bar = layers[v][b];
+        if (v === 0 && !bar.length) x.push(`<Rest><durationType>measure</durationType><duration>${frac(cap)}</duration></Rest>`);
+        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0));
+        x.push("</voice>");
+      }
+      x.push("</Measure>");
+    });
+    x.push("</Staff>");
+  });
+  x.push("</Score>", "</museScore>");
+  return x.join("\n");
+}
+
+// Where each tied note's partner is: for event b:i, {next: {midi: loc}, prev: {midi: loc}}.
+function tieMap(bars) {
+  const pos = [];
+  bars.forEach((bar, b) => { let t = 0; bar.forEach((e, i) => { pos.push({ b, i, t, e }); t += eventTicks(e); }); });
+  const map = {};
+  const at = (p) => (map[p.b + ":" + p.i] ||= { next: {}, prev: {} });
+  pos.forEach((p, k) => {
+    const q = pos[k + 1];
+    if (!p.e.tie || !q || q.b > p.b + 1) return;
+    for (const pi of p.e.pitches) {
+      const mm = midi(pi);
+      if (!q.e.pitches.some((r) => midi(r) === mm)) continue;
+      at(p).next[mm] = loc(q.b - p.b, q.t - p.t);
+      at(q).prev[mm] = loc(p.b - q.b, p.t - q.t);
+    }
+  });
+  return map;
+}
+
+// One voice's events; a first voice is padded with rests to `cap`.
+function voiceXml(bar, ties, b, cap) {
+  const x = [];
+  let open = null; // {tup, left: ticks still to fill}
+  bar.forEach((e, i) => {
+    if (open && (!e.tup || e.tup[0] !== open.tup[0] || e.tup[1] !== open.tup[1])) { x.push("<endTuplet/>"); open = null; }
+    if (e.tup && !open) {
+      open = { tup: e.tup, left: BASE[e.dur] * e.tup[1] }; // the group's real length: normal × base note
+      x.push(`<Tuplet><normalNotes>${e.tup[1]}</normalNotes><actualNotes>${e.tup[0]}</actualNotes><baseNote>${TYPE_NAME[e.dur]}</baseNote>` +
+        `<Number><style>tuplet</style><text>${e.tup[0]}</text></Number></Tuplet>`);
+    }
+    if (e.marks?.includes("fermata")) x.push("<Fermata><subtype>fermataAbove</subtype></Fermata>");
+    const head = `${e.dots ? `<dots>${e.dots}</dots>` : ""}<durationType>${TYPE_NAME[e.dur]}</durationType>`;
+    if (!e.pitches.length) x.push(`<Rest>${head}</Rest>`);
+    else {
+      const t = ties[b + ":" + i] || { next: {}, prev: {} };
+      const arts = (e.marks || []).filter((m) => ARTIC_OUT[m]).map((m) => `<Articulation><subtype>${ARTIC_OUT[m]}</subtype></Articulation>`).join("");
+      const notes = e.pitches.map((p) => {
+        const mm = midi(p);
+        const sp = (t.next[mm] ? `<Spanner type="Tie"><Tie/><next>${t.next[mm]}</next></Spanner>` : "") +
+          (t.prev[mm] ? `<Spanner type="Tie"><prev>${t.prev[mm]}</prev></Spanner>` : "");
+        return `<Note>${sp}<pitch>${mm}</pitch><tpc>${tpcOf(p)}</tpc></Note>`;
+      }).join("");
+      x.push(`<Chord>${head}${arts}${notes}</Chord>`);
+    }
+    if (open) { open.left -= eventTicks(e); if (open.left <= 0) { x.push("<endTuplet/>"); open = null; } }
+  });
+  if (open) x.push("<endTuplet/>");
+  if (cap) for (const d of splitTicks(Math.max(0, cap - barTicks(bar)))) x.push(`<Rest>${d.dots ? `<dots>${d.dots}</dots>` : ""}<durationType>${TYPE_NAME[d.dur]}</durationType></Rest>`);
+  return x.join("");
+}
+
+export function exportMSCZ(score) {
+  const enc = (t) => new TextEncoder().encode(t);
+  return fflate.zipSync({
+    "META-INF/container.xml": enc('<?xml version="1.0" encoding="UTF-8"?><container><rootfiles><rootfile full-path="score.mscx"/></rootfiles></container>'),
+    "score.mscx": enc(exportMSCX(score)),
+  });
 }

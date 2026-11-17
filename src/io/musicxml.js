@@ -57,7 +57,7 @@ function restXml(ticks, staffNo, voice, whole) {
 
 // A bar ending part-way through a tuplet group gets tuplet rests to finish the group, so the
 // padding after it is in whole ticks (DESIGN §11.6).
-function completeTuplet(bar, cap) {
+export function completeTuplet(bar, cap) {
   const runs = tupletRuns(bar), run = runs[runs.length - 1];
   if (!run || run.idx[run.idx.length - 1] !== bar.length - 1 || run.ticks % run.unit === 0) return bar;
   const first = bar[run.idx[0]];
@@ -419,4 +419,15 @@ export function importMXL(bytes, fileName) {
   if (!path || !files[path]) path = Object.keys(files).find((n) => !n.startsWith("META-INF/") && /\.(xml|musicxml)$/i.test(n));
   if (!path) throw new Error("This .mxl file doesn't contain a MusicXML score.");
   return importMusicXML(decodeText(files[path]), fileName, "MusicXML (compressed)");
+}
+
+// Compressed MusicXML (DESIGN §19): the same export in a zip with the standard container file.
+export function exportMXL(score) {
+  const enc = (s) => new TextEncoder().encode(s);
+  return fflate.zipSync({
+    mimetype: [enc("application/vnd.recordare.musicxml"), { level: 0 }],
+    "META-INF/container.xml": enc('<?xml version="1.0" encoding="UTF-8"?><container><rootfiles>' +
+      '<rootfile full-path="score.musicxml" media-type="application/vnd.recordare.musicxml+xml"/></rootfiles></container>'),
+    "score.musicxml": enc(exportMusicXML(score)),
+  });
 }

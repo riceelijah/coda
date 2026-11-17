@@ -60,7 +60,11 @@
   }
   .mlist button:hover:not(:disabled), .mlist button:focus-visible { background: var(--accent); color: #fff; outline: none; }
   .mlist button:disabled { opacity: .4; cursor: default; }
+  .mlist button[hidden] { display: none; }
   .mlist kbd { font: inherit; opacity: .65; }
+  .sub { position: relative; display: flex; flex-direction: column; }
+  .submenu { display: none; top: -5px; left: calc(100% - 4px); }
+  .sub:hover > .submenu, .sub:focus-within > .submenu { display: flex; }
   #tempo-wrap { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
   #tempo { width: 4.2em; padding: 3px 4px; border: 1px solid var(--border); border-radius: 5px; background: transparent; }
 
@@ -177,7 +181,18 @@
         <button role="menuitem" id="b-lib">Scores in this browser…</button>
         <hr>
         <button role="menuitem" id="b-save" data-short="mod+S">Save as MusicXML</button>
-        <button role="menuitem" id="b-print" data-short="mod+P">Print…</button>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Export<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitem" id="x-pdf" data-short="mod+P">PDF or printer…</button>
+            <hr>
+            <button role="menuitem" id="x-musicxml">MusicXML (.musicxml)</button>
+            <button role="menuitem" id="x-mxl">Compressed MusicXML (.mxl)</button>
+            <button role="menuitem" id="x-mscz">MuseScore (.mscz)</button>
+            <button role="menuitem" id="x-midi">MIDI (.mid)</button>
+            <hr>
+            <button role="menuitem" id="x-wav">Audio, WAV (.wav)</button>
+            <button role="menuitem" id="x-audio">Audio, compressed</button>
+          </div></div>
       </div></div>
     <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Edit</button>
       <div class="mlist" role="menu" hidden>
@@ -423,6 +438,7 @@
       <tr><td><kbd>Shift</kbd>+<kbd>A</kbd>–<kbd>G</kbd></td><td>Add that note above the selected note (build a chord)</td></tr>
       <tr><td>Shift+click</td><td>Add or remove a chord note on the clicked note</td></tr>
       <tr><td>Notes ▸ Fermata…Marcato</td><td>Add or remove a fermata or articulation on the selected notes (also on right-click)</td></tr>
+      <tr><td>File ▸ Export</td><td>PDF (<kbd>Ctrl/Cmd</kbd>+<kbd>P</kbd>, through the print dialog), MusicXML, .mxl, MuseScore, MIDI, WAV or compressed audio</td></tr>
       <tr><td>Score ▸ Instruments… ▸ Your sounds…</td><td>Use your own recording for a part; saved files keep only the part's instrument</td></tr>
       <tr><td>Layer 1–4 (lower left)</td><td>Pick which layer you enter and edit in (Notes ▸ Layer); other layers show grey</td></tr>
       <tr><td>Chord button</td><td>Clicks add notes to the selected note instead of after it</td></tr>

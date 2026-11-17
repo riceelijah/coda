@@ -1,6 +1,7 @@
 // MuseScore import checks (Phase 5). Samples were made by converting the MusicXML samples
 // with MuseScore 4 (`mscore -o samples/x.mscz samples/x.musicxml`).
-import { tpcToPitch, importMSCX } from "./mscz.js";
+import { tpcToPitch, importMSCX, exportMSCX } from "./mscz.js";
+import { roundTripFixture } from "./tests.js";
 
 export async function run({ check, eq, brief, fetchBytes, importBytes }) {
   await check("MuseScore tpc spelling", () => {
@@ -58,6 +59,17 @@ export async function run({ check, eq, brief, fetchBytes, importBytes }) {
     if (!eq(score.measures[0], { key: 0, time: [2, 2], sym: "cut" })) return JSON.stringify(score.measures[0]);
     if (!eq(b[0].marks, ["fermata", "staccato"]) || b[1].marks) return JSON.stringify(b);
     return JSON.stringify(report).includes("Fermatas on whole-bar rests") || "whole-bar fermata not counted";
+  });
+
+  await check("MuseScore export opens back equal (layers, ties, tuplets, marks, cut/common time) (DESIGN §19)", () => {
+    const a = roundTripFixture();
+    const b = importMSCX(exportMSCX(a), "x.mscx").score;
+    // the reader names a part's sound from its name when the file says program 0, so compare programs only where set
+    b.staves.forEach((st, i) => { if (a.staves[i] && a.staves[i].program === undefined) delete st.program; });
+    const canon = (o) => JSON.stringify(o, (k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v));
+    if (canon(a) === canon(b)) return true;
+    for (let s = 0; s < a.staves.length; s++) if (canon(a.staves[s]) !== canon(b.staves[s])) return `staff ${s}\n  want ${brief(a.staves[s])}\n  got  ${brief(b.staves[s])}`;
+    return canon({ ...b, staves: [] });
   });
 
   await check("MuseScore archive without a score gives a message", async () => {

@@ -1,7 +1,7 @@
 // Coda — UI wiring. See docs/DESIGN.md §4 and §6.
 import * as M from "./model.js";
 import { render, SHEET_W } from "./render.js";
-import { play, stop, isPlaying, audition, prefetch, noteName, forgetUserSound } from "./play.js";
+import { play, stop, isPlaying, audition, prefetch, noteName, forgetUserSound, renderAudio, wavBytes, recordType, recordCompressed } from "./play.js";
 import * as usnd from "./usersounds.js";
 import { GM, FAMILIES } from "./gm.js";
 import { demoScore } from "./demo.js";
@@ -1011,7 +1011,9 @@ const CMD = {
   "b-open": { run: () => $("file").click() },
   "b-lib": { run: () => openLibrary() },
   "b-save": { run: () => saveFile() },
-  "b-print": { run: () => window.print() },
+  "x-pdf": { run: () => window.print() },
+  "x-musicxml": { run: () => saveFile() },
+  ...Object.fromEntries(["x-mxl", "x-mscz", "x-midi", "x-wav", "x-audio"].map((id) => [id, { run: () => exportAs(id), on: () => !exporting && (id !== "x-audio" || !!recordType()) }])),
   "b-undo": { run: () => undo(), on: () => state.undo.length > 0 },
   "b-redo": { run: () => redo(), on: () => state.redo.length > 0 },
   "m-cut": { run: () => copySel(true), on: hasSel },
@@ -1196,7 +1198,7 @@ function setupMenus() {
     };
     // after an item's own onclick runs: close, and take focus off the menu so Space plays again
     list.addEventListener("click", (e) => {
-      if (!e.target.closest("button")) return;
+      if (!e.target.closest("button") || e.target.closest("[aria-haspopup]")) return;
       closeMenus();
       if (document.activeElement?.closest?.("#menubar")) document.activeElement.blur();
     });
@@ -1279,11 +1281,48 @@ function libDelete(e) {
 
 // ---------- files (implemented in src/io, Phase 3+) ----------
 
+const fileBase = () => (state.score.title || "score").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 100);
+
+// ---------- export (DESIGN §19) ----------
+// id -> how to make the file. `note` is said after saving, for formats that leave things out.
+const EXPORTS = {
+  "x-mxl": { ext: "mxl", mime: "application/vnd.recordare.musicxml", make: async () => (await import("./io/musicxml.js")).exportMXL(state.score) },
+  "x-mscz": { ext: "mscz", mime: "application/zip", make: async () => (await import("./io/mscz.js")).exportMSCZ(state.score) },
+  "x-midi": { ext: "mid", mime: "audio/midi", make: async () => (await import("./io/midi.js")).exportMIDI(state.score),
+    note: "MIDI keeps notes, tempo, key, time and instruments; note spellings, marks and layers are not kept." },
+  "x-wav": { ext: "wav", mime: "audio/wav", audio: true, make: async () => wavBytes((await audioBuffer()).buffer) },
+  "x-audio": { audio: true, make: async () => {
+    const { buffer } = await audioBuffer();
+    return recordCompressed(buffer, (f) => message(`Recording audio… ${Math.round(f * 100)}% (it takes as long as the piece)`, false, true));
+  } },
+};
+let exporting = false, audioNote = "";
+async function audioBuffer() {
+  const r = await renderAudio(state.score, (t) => message(t || "Rendering audio…", false, true));
+  audioNote = r.status;
+  return r;
+}
+
+async function exportAs(id) {
+  const x = EXPORTS[id];
+  if (exporting) return;
+  exporting = true; audioNote = "";
+  if (x.audio) stopPlay();
+  try {
+    const data = await x.make();
+    const ext = x.ext || { "audio/ogg": "ogg", "audio/webm": "webm", "audio/mp4": "m4a" }[data.type] || "audio";
+    const name = `${fileBase()}.${ext}`;
+    download(data instanceof Blob ? data : new Blob([data], { type: x.mime }), name);
+    message([`Exported ${name}.`, x.note, audioNote].filter(Boolean).join(" "));
+  } catch (e) { console.error(e); message("Export failed: " + (e.message || e), true); }
+  finally { exporting = false; }
+}
+
 async function saveFile() {
   try {
     const { exportMusicXML } = await import("./io/musicxml.js");
     const xml = exportMusicXML(state.score);
-    const name = (state.score.title || "score").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 100) + ".musicxml";
+    const name = fileBase() + ".musicxml";
     download(new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" }), name);
     message("Saved " + name);
   } catch (e) { console.error(e); message("Saving is not available yet", true); }
@@ -1368,6 +1407,11 @@ function init() {
   $("tuplet").addEventListener("close", closeTuplet);
   $("tuplet-cancel").onclick = () => $("tuplet").close("cancel");
   setupMenus();
+  { // compressed audio: whatever this browser can record, or no item at all
+    const t = recordType();
+    $("x-audio").hidden = !t;
+    if (t) $("x-audio").textContent = `Audio, compressed (.${{ "audio/ogg": "ogg", "audio/webm": "webm", "audio/mp4": "m4a" }[t.split(";")[0]]})`;
+  }
   $("report-close").onclick = () => ($("report").style.display = "none");
   $("tempo").onchange = (e) => {
     const v = Math.max(20, Math.min(400, Math.round(+e.target.value) || 100));

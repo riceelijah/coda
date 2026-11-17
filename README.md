@@ -16,7 +16,8 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 - The **Selection tool** (arrow, top of the left palette, or `V`) selects instead of adding notes: click a note, drag across notes, Shift+click to extend. Duration, dot, accidentals, tie, transpose and tuplets then apply to all the selected notes. Right-click a note or bar for a menu of actions.
 - **Score ▸ Key and time** changes the key or time signature from the current bar on. **View** zooms the score.
 - **Score ▸ Instruments** picks a sound for each part from the 128 General MIDI instruments (New also asks for one). Sounds download the first time a part uses them and are then kept in your browser; without a connection, parts play a plain tone.
-- **Play** plays from the current bar. **File ▸ Print** prints the score, or saves it as a PDF from your browser's print dialog.
+- **Play** plays from the current bar.
+- **File ▸ Export** saves the score as a PDF (through your browser's print dialog), MusicXML, compressed MusicXML (`.mxl`), MuseScore (`.mscz`), MIDI, WAV audio, or compressed audio (WebM, Ogg or M4A, whichever your browser can record; it takes as long as the piece).
 - Your work is saved automatically in this browser. **File ▸ Scores in this browser** lists everything saved here: open, duplicate or delete. Scores stay only in this browser, so use **File ▸ Save as MusicXML** to keep a file (MusicXML) you can back up or open anywhere.
 
 ### Keyboard shortcuts
@@ -60,7 +61,7 @@ Coda keeps up to four layers (voices) per staff. When a file contains things Cod
 ## Not supported yet
 
 Lyrics, articulations other than staccato/accent/tenuto/marcato/fermata, dynamics, slurs, grace notes, septuplets, repeats and endings, mid-score clef changes, transposing instruments, page layout
-controls, and MIDI export. See [docs/ROADMAP.md](docs/ROADMAP.md).
+controls, and a one-click PDF (PDF export uses the browser's print dialog). See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Running it locally
 

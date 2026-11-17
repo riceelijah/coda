@@ -1,7 +1,8 @@
 // File-format checks, loaded by test.html. Each phase adds its checks here.
-import { exportMusicXML, importMusicXML } from "./musicxml.js";
+import { exportMusicXML, importMusicXML, exportMXL, importMXL } from "./musicxml.js";
+import { exportMIDI, importMIDI } from "./midi.js";
 import { importBytes, sniff, LEGACY_MUS } from "./open.js";
-import { schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES } from "../play.js";
+import { renderAudio, wavBytes, schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES } from "../play.js";
 import { GM } from "../gm.js";
 import * as M from "../model.js";
 import * as store from "../store.js";
@@ -146,6 +147,38 @@ export async function run({ check, eq }) {
     if (s.staves[0].sound || s.staves[1].sound) return "cleared";
     s.staves[0].sound = 5;
     return !M.isValidScore(s) || "a non-string sound accepted";
+  });
+
+  await check("export: .mxl opens back equal; MIDI keeps notes, programs, tempo, key and time (DESIGN §19)", () => {
+    const a = roundTripFixture();
+    const m = importMXL(exportMXL(a), "x.mxl").score;
+    if (!eq(m, a)) return "mxl round trip";
+    const s = M.newScore({ preset: "piano", bars: 3, tempo: 90, key: -2, time: [3, 4], program: 40 });
+    s.staves[0].bars[0] = [ev("q", "C5"), ev("q", "D5 F5"), ev("q", "Bb4", { tie: true })];
+    s.staves[0].bars[1] = [ev("h", "Bb4", { dots: 1 })];
+    s.staves[1].bars[0] = [ev("h", "C3", { dots: 1 })];
+    s.staves[1].bars[2] = [ev("8", "G2"), ev("8", "A2"), ev("h", "Bb2")];
+    const { score: b } = importMIDI(exportMIDI(s), "x.mid");
+    const want = schedule(s).notes.map((n) => [n.start, n.end, n.midi, n.staff]).sort().join(";");
+    const got = schedule(b).notes.map((n) => [n.start, n.end, n.midi, n.staff]).sort().join(";");
+    if (want !== got) return `notes\n  want ${want}\n  got  ${got}`;
+    if (b.tempo !== 90 || b.staves.some((st) => st.program !== 40)) return `tempo ${b.tempo} / programs ${b.staves.map((st) => st.program)}`;
+    return eq(b.measures, s.measures) || JSON.stringify(b.measures); // the reader takes only the first time and key
+  });
+
+  await check("export: WAV renders the score offline (triangle voice), with a valid header (DESIGN §19)", async () => {
+    const s = M.newScore({ bars: 1, tempo: 240 });
+    s.staves[0].bars[0] = [ev("q", "A4"), ev("q", "C5"), ev("h")];
+    const { buffer } = await renderAudio(s, () => {}, 8000);
+    const want = Math.ceil((1 + 2.5) * 8000);
+    if (buffer.length !== want) return `length ${buffer.length}, want ${want}`;
+    const d = buffer.getChannelData(0);
+    let peak = 0;
+    for (const x of d) peak = Math.max(peak, Math.abs(x));
+    if (!(peak > 0.01 && peak < 1)) return "peak " + peak;
+    const w = wavBytes(buffer), v = new DataView(w.buffer);
+    const tag = (o) => String.fromCharCode(...w.subarray(o, o + 4));
+    return (tag(0) === "RIFF" && tag(8) === "WAVE" && v.getUint32(24, true) === 8000 && v.getUint16(22, true) === 2 && w.length === 44 + want * 4) || "header";
   });
 
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {

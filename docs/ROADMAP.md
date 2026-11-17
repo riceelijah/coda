@@ -34,7 +34,7 @@ Smart Shape, Lyrics, Repeat, Key Signature, Mass Mover).
 | **Pickup bar** (anacrusis) | NotePad couldn't do this either; very common in songs and hymns. | S |
 | **Grace notes** | NotePad couldn't do this either. | M |
 | **MIDI keyboard entry** | Browsers can read a MIDI keyboard directly (Web MIDI API), so no dependency is needed. Chrome and Edge support it; Firefox asks for permission; Safari doesn't. | S |
-| **MIDI export** | NotePad had it. The playback scheduler already has the note list. | S |
+| **MIDI export** | **Done (Phase 22):** File ▸ Export ▸ MIDI. | — |
 | **Up to 8 staves with instrument names** | **Instrument sounds done (Phases 12–13):** Score ▸ Instruments. Adding/renaming staves after New is still to do. | S |
 
 ## 3. What people praise in other editors (worth copying)
@@ -65,7 +65,7 @@ Ordered roughly by how often they come up for students, teachers and hobbyists.
 | **Chord symbols** above the staff | Lead sheets; NotePad couldn't do this. | M |
 | **Part extraction** (print one staff on its own) | | M |
 | **Better playback sounds** | **Done (Phase 13):** all 128 General MIDI sounds, downloaded on demand. Your own sounds: done (Phase 21). Still to do: a note-level playback cursor. | — |
-| **Export PDF / PNG / audio** | Printing to PDF works today; direct PDF/PNG and WAV export are the next steps. | M |
+| **Export PDF / audio** | **Done (Phase 22):** File ▸ Export: PDF via the print dialog, MusicXML, .mxl, .mscz, MIDI, WAV, compressed audio. Still to do: one-click PDF without the print dialog (needs a PDF library), PNG. | — |
 | **Page and system breaks**, staff size, page size | A small set of controls, not full engraving. | M |
 | **Multi-measure rests** | Mostly matters for parts. | S |
 | **Enharmonic respell** (F# ⇄ Gb) | Shortcut key. | S |

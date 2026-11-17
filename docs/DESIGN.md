@@ -468,7 +468,7 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
 ## 8. Things deliberately not in the first version
 
 Lyrics, dynamics, slurs, grace notes, other articulations, repeats
-and endings, mid-score clef changes, transposing instruments, page-layout controls, MIDI export. (Sampled General MIDI sounds: §13.3.) (Tuplet entry, inserting mid-bar and copy/paste: §11.)
+and endings, mid-score clef changes, transposing instruments, page-layout controls. (Sampled General MIDI sounds: §13.3.) (Tuplet entry, inserting mid-bar and copy/paste: §11.)
 
 All are additive on this model. Importers must **count and report** anything in these
 categories that they skip (§9.6).
@@ -1014,4 +1014,29 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
   or a sound no longer in this browser, play the part's instrument, with one status line.
 - **UI:** Instruments ▸ Your sounds… adds and deletes sounds; each part's menu lists them under
   "Your sounds". Names go into the page with `textContent` / `Option` text only.
+
+## 19. Export (Phase 22)
+
+File ▸ Export is a submenu (CSS: it opens on hover or focus inside the File menu); it replaces
+Print, and ⌘/Ctrl+P is now its PDF item.
+
+- **PDF or printer…:** `window.print()` with the print stylesheet; the browser's dialog saves PDF.
+  A one-click PDF needs a PDF library (a new dependency), so it isn't done.
+- **MusicXML / .mxl:** the existing export; `.mxl` zips it with `META-INF/container.xml` and an
+  uncompressed `mimetype` entry.
+- **MuseScore .mscz:** `exportMSCX` writes MuseScore 4 format modelled on MuseScore's own output:
+  parts and instruments (program, clefs), a title box, header clef (`isHeader`), key, time
+  (subtype for C/¢), tempo, voices = layers, `Tuplet`/`endTuplet` per group, `Tie` spanners
+  with `next`/`prev` locations, `Fermata` before the chord, `Articulation` inside it. Layer 1 is
+  padded to the bar; an empty layer-1 bar is a measure rest. Checked two ways: Coda reads it back
+  equal, and MuseScore 4 opens it and its MusicXML re-export reads back equal.
+- **MIDI:** format 1, PPQ 480. A conductor track (title, tempo, time and key at their bars), then
+  one track per staff (name, program; channel 10 skipped) from `schedule()`, note-offs before
+  note-ons at equal ticks. A status line says what MIDI doesn't keep.
+- **Audio:** `renderAudio` renders the whole score in an `OfflineAudioContext` through the same
+  `scheduleNotes` as Play, after waiting for every sound (no time limit). WAV is 16-bit PCM.
+  Compressed audio plays that buffer silently through `MediaRecorder` in real time (the only
+  encoder browsers have built in); the item shows the type this browser records (WebM/Ogg Opus or
+  M4A) and is hidden where there is none. MP3 would need an encoder library.
+- **Not exported:** Finale `.musx` (closed format; nothing here could check the result).
 

@@ -2,6 +2,7 @@
 // MIDI holds performance data, not notation, so the result is a transcription.
 import { barCapacity, splitTicks, spellMidi, padBars, noteCount, PPQ } from "../model.js";
 import { Report } from "./util.js";
+import { schedule } from "../play.js";
 
 const GRID = 120; // 16th note
 
@@ -193,4 +194,44 @@ export function importMIDI(bytes, fileName = "") {
   padBars(score);
   report.notes = noteCount(score);
   return { score, report: report.done() };
+}
+
+// ---------- export (DESIGN §19) ----------
+// Format 1: a conductor track (tempo, time and key at the bars where they change), then one track
+// per staff with its name and instrument. MIDI is performance data: marks, spellings and the
+// split into layers are not kept.
+export function exportMIDI(score) {
+  const { notes, barStart } = schedule(score);
+  const vlq = (n) => { const b = [n & 0x7f]; while ((n >>= 7)) b.unshift((n & 0x7f) | 0x80); return b; };
+  const track = (evs) => { // evs: [{tick, bytes}], sorted
+    const out = [];
+    let last = 0;
+    for (const e of evs) { out.push(...vlq(e.tick - last), ...e.bytes); last = e.tick; }
+    out.push(0, 0xff, 0x2f, 0);
+    return [0x4d, 0x54, 0x72, 0x6b, out.length >>> 24, (out.length >> 16) & 255, (out.length >> 8) & 255, out.length & 255, ...out];
+  };
+  const meta = (type, data) => [0xff, type, ...vlq(data.length), ...data];
+  const text = (s) => [...String(s)].map((c) => (c.charCodeAt(0) < 256 ? c.charCodeAt(0) : 63)); // latin1, else "?"
+
+  const usPerQ = Math.round(60000000 / (score.tempo || 100));
+  const cond = [{ tick: 0, bytes: meta(0x51, [usPerQ >> 16, (usPerQ >> 8) & 255, usPerQ & 255]) }];
+  if (score.title) cond.unshift({ tick: 0, bytes: meta(0x03, text(score.title)) });
+  for (const { bar, tick } of barStart) {
+    const m = score.measures[bar];
+    if (m.time) cond.push({ tick, bytes: meta(0x58, [m.time[0], Math.log2(m.time[1]), 24, 8]) });
+    if (m.key !== undefined) cond.push({ tick, bytes: meta(0x59, [m.key & 255, 0]) });
+  }
+  const tracks = [track(cond)];
+  score.staves.forEach((st, s) => {
+    const ch = s % 15 < 9 ? s % 15 : s % 15 + 1; // skip channel 10 (percussion)
+    const evs = [{ tick: 0, bytes: meta(0x03, text(st.name || `Staff ${s + 1}`)) }, { tick: 0, bytes: [0xc0 | ch, st.program ?? 0] }];
+    const ons = [];
+    for (const n of notes) if (n.staff === s) {
+      ons.push({ tick: n.start, on: 1, bytes: [0x90 | ch, n.midi, 80] }, { tick: n.end, on: 0, bytes: [0x80 | ch, n.midi, 0] });
+    }
+    ons.sort((a, b) => a.tick - b.tick || a.on - b.on); // note-offs first at equal ticks
+    tracks.push(track(evs.concat(ons)));
+  });
+  const head = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, tracks.length >> 8, tracks.length & 255, PPQ >> 8, PPQ & 255];
+  return new Uint8Array(head.concat(...tracks));
 }

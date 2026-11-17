@@ -46,6 +46,7 @@ only says what to build in what order and how to know each phase is finished.
 | 19 | Fermatas and articulations (DESIGN §16) | done |
 | 20 | Common and cut time symbols (DESIGN §17) | done |
 | 21 | Your own sounds (DESIGN §18) | done |
+| 22 | Export menu: PDF, MusicXML, .mxl, .mscz, MIDI, WAV, compressed audio (DESIGN §19) | done |
 
 ---
 
