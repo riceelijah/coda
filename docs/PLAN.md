@@ -26,7 +26,7 @@ only says what to build in what order and how to know each phase is finished.
 |---|---|---|
 | 0 | Repo scaffold | done |
 | 1 | Model + rendering (read-only score on screen) | done |
-| 2 | Editing, playback, autosave, print | not started |
+| 2 | Editing, playback, autosave, print | done |
 | 3 | MusicXML / MXL open + save | not started |
 | 4 | MIDI import | not started |
 | 5 | MuseScore `.mscz` import | not started |
@@ -84,14 +84,14 @@ Build: `src/model.js` (DESIGN §3, all of it including edit commands), `src/rend
 
 Build: the rest of `src/app.js` (DESIGN §6), `src/play.js` (§7), all UI in `index.html` (§4).
 
-- [ ] Toolbar, palette with inline SVG icons, status bar, help dialog, setup dialog.
-- [ ] `edit(fn)` wrapper with undo/redo and autosave.
-- [ ] Mouse: coordinate conversion, staff/bar/pitch pick, select, shift-click chord, append,
+- [x] Toolbar, palette with inline SVG icons, status bar, help dialog, setup dialog.
+- [x] `edit(fn)` wrapper with undo/redo and autosave.
+- [x] Mouse: coordinate conversion, staff/bar/pitch pick, select, shift-click chord, append,
       ghost notehead.
-- [ ] Keyboard table from §6.3 in full.
-- [ ] Add/remove bar. Selection highlight.
-- [ ] Playback with bar highlight; Space toggles.
-- [ ] Autosave restore on load; print stylesheet.
+- [x] Keyboard table from §6.3 in full.
+- [x] Add/remove bar. Selection highlight.
+- [x] Playback with bar highlight; Space toggles.
+- [x] Autosave restore on load; print stylesheet.
 
 **Done when (do each by hand in the browser pane):**
 - New → Piano, G major, 4/4. Click a note onto **every line and space** of the treble staff from
