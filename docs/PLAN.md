@@ -27,7 +27,7 @@ only says what to build in what order and how to know each phase is finished.
 | 0 | Repo scaffold | done |
 | 1 | Model + rendering (read-only score on screen) | done |
 | 2 | Editing, playback, autosave, print | done |
-| 3 | MusicXML / MXL open + save | not started |
+| 3 | MusicXML / MXL open + save | done |
 | 4 | MIDI import | not started |
 | 5 | MuseScore `.mscz` import | not started |
 | 6 | `.musx` import | not started — **needs sample files from the user** |
@@ -117,13 +117,13 @@ Build: the rest of `src/app.js` (DESIGN §6), `src/play.js` (§7), all UI in `in
 Build: `src/io/open.js` (§9.1), `src/io/musicxml.js` (§9.2, §9.3), import report panel (§9.6),
 Save / Open / drag-and-drop.
 
-- [ ] Export, then import, then test check 5 (round trip deep-equal).
-- [ ] `.mxl` unzip path.
-- [ ] `samples/`: write by hand `simple.musicxml` (one staff, a few bars), `piano.musicxml`
+- [x] Export, then import, then test check 5 (round trip deep-equal).
+- [x] `.mxl` unzip path.
+- [x] `samples/`: write by hand `simple.musicxml` (one staff, a few bars), `piano.musicxml`
       (two-staff part with `<backup>`, two voices in the right hand, a grace note, a triplet),
       and build `simple.mxl` from the first. Add expected-event checks (test check 6).
-- [ ] File-size limits and `textContent`-only rule from DESIGN §1.6.
-- [ ] Sniffing table including the legacy `.mus` message and the `score-timewise` message.
+- [x] File-size limits and `textContent`-only rule from DESIGN §1.6.
+- [x] Sniffing table including the legacy `.mus` message and the `score-timewise` message.
       Leave the MIDI, MuseScore and `.musx` branches returning "not supported yet".
 
 **Done when:**

@@ -59,6 +59,26 @@ export function splitTicks(ticks) {
   return out;
 }
 
+// Group consecutive events with the same tuplet ratio into runs (DESIGN §5.5).
+// A run closes when its sounding length is a whole multiple of (first value × normal).
+export function tupletRuns(bar) {
+  const runs = [];
+  let run = null;
+  bar.forEach((ev, i) => {
+    const same = run && ev.tup && ev.tup[0] === run.tup[0] && ev.tup[1] === run.tup[1];
+    if (!same) {
+      if (run) runs.push(run);
+      run = ev.tup ? { tup: ev.tup, idx: [], ticks: 0, unit: BASE[ev.dur] * ev.tup[1] } : null;
+    }
+    if (!run) return;
+    run.idx.push(i);
+    run.ticks += eventTicks(ev);
+    if (run.ticks % run.unit === 0) { runs.push(run); run = null; }
+  });
+  if (run) runs.push(run);
+  return runs;
+}
+
 // ---------- attributes ----------
 
 export function attrsAt(score, i) {

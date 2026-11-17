@@ -553,10 +553,10 @@ async function saveFile() {
 
 async function openFile(file) {
   if (!file) return;
-  if (M.noteCount(state.score) > 0 && !confirm(`Open “${file.name}”? The current score will be replaced.`)) return;
   try {
     const { openFile: open } = await import("./io/open.js");
     const { score, report } = await open(file);
+    if (M.noteCount(state.score) > 0 && !confirm(`Open “${file.name}”? The current score will be replaced.`)) return;
     replaceScore(score);
     showReport(file.name, report);
   } catch (e) {

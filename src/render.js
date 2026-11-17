@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, eventTicks, BASE, nextEventPos } from "./model.js";
+import { attrsAt, nextEventPos, tupletRuns } from "./model.js";
 
 const VF = () => Vex.Flow;
 
@@ -70,26 +70,6 @@ function makeNote(ev, clef) {
   const note = new VFl.StaveNote({ clef, keys, duration, auto_stem: true });
   if (ev.dots) VFl.Dot.buildAndAttach([note], { all: true });
   return note;
-}
-
-// Group consecutive tuplet events into runs (DESIGN §5.5).
-function tupletRuns(bar) {
-  const runs = [];
-  let run = null;
-  bar.forEach((ev, i) => {
-    const same = run && ev.tup && ev.tup[0] === run.tup[0] && ev.tup[1] === run.tup[1];
-    if (!same) {
-      if (run) runs.push(run);
-      run = ev.tup ? { tup: ev.tup, idx: [], ticks: 0, unit: BASE[ev.dur] * ev.tup[1] } : null;
-    }
-    if (!run) return;
-    run.idx.push(i);
-    run.ticks += eventTicks(ev);
-    // closed when the sounding length is a whole multiple of (first value × normal)
-    if (run.ticks % run.unit === 0) { runs.push(run); run = null; }
-  });
-  if (run) runs.push(run);
-  return runs;
 }
 
 /**
