@@ -1,6 +1,6 @@
 // Detect a file's format by content (then extension) and import it. See docs/DESIGN.md §9.1.
 import { decodeText, MAX_FILE, zipNames } from "./util.js";
-import { isValidScore, noteCount } from "../model.js";
+import { isValidScore, noteCount, upgradeScore } from "../model.js";
 
 export const LEGACY_MUS =
   "This is a legacy Finale file (.mus, 2012 and earlier). The format is closed and undocumented, " +
@@ -53,7 +53,7 @@ export async function importBytes(bytes, name = "") {
       // A Coda autosave/backup copied to a file.
       let sc = null;
       try { sc = JSON.parse(decodeText(bytes)); } catch { /* fall through */ }
-      if (isValidScore(sc)) return { score: sc, report: { format: "Coda backup", notes: noteCount(sc), warnings: [] } };
+      if (sc && isValidScore(upgradeScore(sc))) return { score: sc, report: { format: "Coda backup", notes: noteCount(sc), warnings: [] } };
       throw new Error("Coda doesn't recognise this file.");
     }
     case "bad-zip": throw new Error("This archive is damaged and can't be opened.");

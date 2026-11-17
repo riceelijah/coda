@@ -314,7 +314,8 @@ function lyricIn(el, ev, report) {
   if (!ev.pitches.length) { report.count("Lyrics on rests (not imported)", ls.length); return; }
   for (const l of ls) {
     const v = parseInt(txt(l, "no") || "0", 10);
-    if (!(v >= 0 && v < MAX_VERSES) || ev.lyrics?.[v]) { report.count(`Lyrics beyond verse ${MAX_VERSES} (not imported)`); continue; }
+    if (!(v >= 0 && v < MAX_VERSES)) { report.count(`Lyrics beyond verse ${MAX_VERSES} (not imported)`); continue; }
+    if (ev.lyrics?.[v]) { report.count("Second lyrics in the same verse on one note (not imported)"); continue; }
     if (kid(l, "ticks_f") || kid(l, "ticks")) report.count("Lyric extender lines (not imported)");
     if (txt(l, "text").length > MAX_LYRIC) report.count("Long lyrics shortened");
     setLyric(ev, txt(l, "text"), ["begin", "middle"].includes(txt(l, "syllabic")), v);

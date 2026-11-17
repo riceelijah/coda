@@ -520,9 +520,12 @@ function lyricIn(el, ev, report) {
   const ls = kids(el, "lyric").filter((l) => kids(l, "text").some((t) => t.textContent.trim()));
   if (!ls.length) return;
   if (!ev.pitches.length) { report.count("Lyrics on rests (not imported)", ls.length); return; }
+  const seen = new Set();
   for (const l of ls) {
     const n = l.getAttribute("number") || "1", v = /^[1-9]\d*$/.test(n) ? +n - 1 : -1;
     if (v < 0 || v >= MAX_VERSES) { report.count(`Lyrics beyond verse ${MAX_VERSES} or not numbered by verse (not imported)`); continue; }
+    if (seen.has(v)) { report.count("Second lyrics in the same verse on one note (not imported)"); continue; }
+    seen.add(v);
     if (ev.lyrics?.[v]) continue;
     if (kid(l, "extend") && kid(l, "extend").getAttribute("type") !== "stop") report.count("Lyric extender lines (not imported)");
     const text = kids(l, "text").map((t) => t.textContent.trim()).join("‿"); // elided syllables share a note

@@ -378,7 +378,8 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
         const sy = syllable(a.key, a.syll), v = lines.indexOf(a.key);
         if (!sy) report.count("Lyrics with missing text (not imported)");
         else if (!ev.pitches.length) report.count("Lyrics on rests (not imported)");
-        else if (v >= MAX_VERSES || ev.lyrics?.[v]) report.count(`Lyrics beyond verse ${MAX_VERSES} (not imported)`);
+        else if (v >= MAX_VERSES) report.count(`Lyrics beyond verse ${MAX_VERSES} (not imported)`);
+        else if (ev.lyrics?.[v]) report.count("Second lyrics in the same verse on one note (not imported)");
         else {
           if (sy.text.length > MAX_LYRIC) report.count("Long lyrics shortened");
           if (sy.ext) report.count("Lyric extender lines (not imported)");
@@ -438,6 +439,11 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
       // each frame (layer 1–4) becomes a layer of the staff (DESIGN §15); voice-2 runs start where
       // their launching voice-1 entry starts and go to a layer no frame uses in this bar
       const used = new Set(), runs = [];
+      const extrasLost = (evs) => { // lyrics and grace notes go with the notes they were on
+        const ly = evs.reduce((n, e) => n + (e.lyrics || []).filter(Boolean).length, 0), gr = evs.reduce((n, e) => n + (e.grace || []).length, 0);
+        if (ly) report.count("Lyrics on skipped notes (not imported)", ly);
+        if (gr) report.count("Grace notes before skipped notes (not imported)", gr);
+      };
       for (const l of [1, 2, 3, 4]) {
         if (!has(g, `frame${l}`)) continue;
         const frame = frames.get(String(num(g, `frame${l}`)));
@@ -458,7 +464,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
             giveGraces(g2, ev);
             if (!ev && run && v2.last > 0) run.events.push(...rests(v2.last, t0));
             else if (ev && run) { run.events.push(at(ev, t0)); run.ids.push([id, ev]); }
-            else if (ev) report.count("Second-voice notes with no start skipped", Math.max(1, ev.pitches.length));
+            else if (ev) { report.count("Second-voice notes with no start skipped", Math.max(1, ev.pitches.length)); extrasLost([ev]); }
           } else {
             const start = t, ev = readEntry(e, id, mi, v1);
             t += v1.last;
@@ -479,7 +485,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
         if (!run.events.length) continue;
         target[run.src] ||= [1, 2, 3, 4].find((L) => !used.has(L) && L <= MAX_LAYERS);
         const L = target[run.src];
-        const lost = () => report.count("Notes in second voices skipped", run.events.reduce((n, e) => n + Math.max(1, e.pitches.length), 0));
+        const lost = () => { report.count("Notes in second voices skipped", run.events.reduce((n, e) => n + Math.max(1, e.pitches.length), 0)); extrasLost(run.events); };
         if (!L) { lost(); continue; }
         used.add(L);
         v2Layer.set(`${si}/${mi}/${run.src}`, L);
@@ -608,6 +614,8 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     const ev = eventAt(evs, t) || (t >= barTicks(evs) ? evs[evs.length - 1] : null);
     return ev ? { si, L: 1, ev } : null;
   };
+  const pos = new Map(), spans = {}; // event -> place in its layer; placed [from, to] by staff:layer:kind
+  for (const st of score.staves) for (const bars of allLayers(st)) bars.flat().forEach((ev, i) => pos.set(ev, i));
   for (const sh of others("smartShape")) {
     const type = str(sh, "shapeType") || "";
     const kind = SLURS.test(type) ? "slur" : type === "cresc" || type === "decresc" ? "hp" : null;
@@ -623,8 +631,10 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     else if (!a || !b) report.count(`${label} on notes not found (not imported)`);
     else if (a.si !== b.si || a.L !== b.L) report.count(`${label} across staves or voices (not imported)`);
     else if (a.ev === b.ev) report.count(kind === "hp" ? "Hairpins over a single note (not imported)" : "Slurs over a single note (not imported)");
-    else if (a.ev[kind] || b.ev[`${kind}End`]) report.count("Unfinished or overlapping slurs and hairpins (not imported)");
+    else if (pos.get(a.ev) > pos.get(b.ev) || (spans[`${a.si}:${a.L}:${kind}`] ||= []).some(([x, y]) => pos.get(a.ev) <= y && pos.get(b.ev) >= x))
+      report.count("Unfinished or overlapping slurs and hairpins (not imported)");
     else {
+      spans[`${a.si}:${a.L}:${kind}`].push([pos.get(a.ev), pos.get(b.ev)]);
       a.ev[kind] = kind === "hp" ? (type === "cresc" ? "<" : ">") : true;
       b.ev[`${kind}End`] = true;
       if (/^dash/.test(type)) report.count("Dashed slurs shown solid");

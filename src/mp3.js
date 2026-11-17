@@ -5,7 +5,7 @@ function load() {
   return (lib ||= new Promise((ok, fail) => {
     const s = document.createElement("script");
     s.src = new URL("../vendor/wasm-media-encoders.min.js", import.meta.url).href;
-    s.onload = () => ok(window.WasmMediaEncoder);
+    s.onload = () => window.WasmMediaEncoder ? ok(window.WasmMediaEncoder) : s.onerror();
     s.onerror = () => { lib = null; s.remove(); fail(new Error("Couldn't load the MP3 encoder")); };
     document.head.appendChild(s);
   }));

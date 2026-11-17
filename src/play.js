@@ -55,15 +55,15 @@ function dynamics(score, from) {
   const off = starts[from] || 0, byStaff = [];
   for (const g of partGroups(score)) {
     const levels = [], accents = new Map(), ramps = [];
-    for (const s of g) allLayers(score.staves[s]).forEach((bars) => {
-      let open = null; // hairpin started in this layer: {t0, dir}
+    for (const s of g) allLayers(score.staves[s]).forEach((bars, li) => {
+      let open = null; // hairpin started in this layer: {t0, dir, k}
       bars.forEach((bar, b) => {
         let at = starts[b] - off;
         for (const ev of bar) {
           if (DYN_VEL[ev.dyn]) levels.push([at, DYN_VEL[ev.dyn]]);
           else if (ev.dyn) { accents.set(at, ACCENT_VEL[ev.dyn]); if (ev.dyn === "fp") levels.push([at + 1, DYN_VEL.p]); }
           if (ev.hpEnd && open) { ramps.push({ ...open, t1: at + eventTicks(ev) }); open = null; } // an end first: a new one may start here
-          if (ev.hp) open = { t0: at, dir: ev.hp === "<" ? 1 : -1 };
+          if (ev.hp) open = { t0: at, dir: ev.hp === "<" ? 1 : -1, k: `${s}:${li}` };
           at += eventTicks(ev);
         }
       });
@@ -86,10 +86,11 @@ function dynamics(score, from) {
     };
     ramps.sort((a, b) => a.t0 - b.t0);
     ramps.forEach((r, i) => {
-      const next = dyns.find(([lt]) => lt > r.t0 && lt <= r.t1 + PPQ);
-      r.v0 = accents.has(r.t0) ? levelAt(r.t0) : at(r.t0); // an accent is one note, not the level
+      const s0 = accents.has(r.t0) ? r.t0 + 1 : r.t0; // an accent is one note, not the level (fp: the p after it)
+      const next = dyns.find(([lt]) => lt > s0 && lt <= r.t1 + PPQ);
+      r.v0 = accents.has(r.t0) ? levelAt(s0) : at(r.t0);
       r.v1 = next && (next[1] - r.v0) * r.dir > 0 ? next[1] : Math.max(16, Math.min(127, r.v0 + 16 * r.dir));
-      const nx = ramps[i + 1];
+      const nx = ramps.slice(i + 1).find((x) => x.k === r.k); // a swell's next half, same layer
       r.t1 = Math.min(r.t1, next && next[0] < r.t1 ? next[0] : Infinity, nx && nx.t0 > r.t0 ? nx.t0 : Infinity);
       done.push(r);
       levels.push([r.t1 - 0.5, r.v1]); // just before the end, so a dynamic there still wins
