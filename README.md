@@ -6,7 +6,7 @@ from other notation programs. Nothing is uploaded anywhere: your score stays in 
 
 Coda is an independent project and is not affiliated with or endorsed by MakeMusic, Inc.
 
-**Try it:** _(link added once the GitHub Pages site is published)_
+**Try it:** <https://riceelijah.github.io/coda/>
 
 ## Using Coda
 

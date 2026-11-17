@@ -31,7 +31,7 @@ only says what to build in what order and how to know each phase is finished.
 | 4 | MIDI import | done |
 | 5 | MuseScore `.mscz` import | done (4.x verified; 3.x untested) |
 | 6 | `.musx` import | done (checked on musxdom's test files; no real-world piece yet) |
-| 7 | Publish to GitHub Pages | README + subpath check done; **repo creation needs the user's go-ahead** |
+| 7 | Publish to GitHub Pages | done: https://riceelijah.github.io/coda/ |
 
 ---
 
@@ -204,14 +204,14 @@ corrupt `.musx` produces a message rather than an exception.
 **Ask the user before any step that creates or pushes to a remote.** The user said GitHub Pages
 is the target and approved a public repo named `coda`, but confirm at the time.
 
-- [x] Finish `README.md` (live link still a placeholder): what Coda is, the live link, how to run locally, keyboard shortcuts,
+- [x] Finish `README.md` : what Coda is, the live link, how to run locally, keyboard shortcuts,
       the format support table (what opens, what is approximated, the `.mus` situation), what is
       not supported yet (DESIGN §8), licence, not-affiliated line.
 - [x] Serve the project from a subpath and confirm everything loads (done via a scratch folder
       containing only a `coda` link, so other projects in the parent folder aren't served).
-- [ ] `gh auth status`. If not authenticated, or the repo name is taken, stop and ask.
-- [ ] `gh repo create coda --public --source=. --push`.
-- [ ] Enable Pages from `main`, root. Wait for the build, open the live URL, open a sample file there.
+- [x] `gh auth status`. If not authenticated, or the repo name is taken, stop and ask.
+- [x] `gh repo create coda --public --source=. --push`.
+- [x] Enable Pages from `main`, root. Wait for the build, open the live URL, open a sample file there.
 
 **Done when:** the live URL loads, a sample opens, and the README link points to it.
 
@@ -233,4 +233,3 @@ DESIGN.md before work starts.
 - **Undo history is per session**; it is not saved with the autosave.
 - **`.musx` has only been checked on small test files** (musxdom's). Ties, voice 2 and title/composer
   were not present in them; a real-world piece would confirm those.
-- **Phase 7 (publish) is waiting** for the user's go-ahead.
