@@ -24,7 +24,7 @@ only says what to build in what order and how to know each phase is finished.
 
 | Phase | What | State |
 |---|---|---|
-| 0 | Repo scaffold | not started |
+| 0 | Repo scaffold | done |
 | 1 | Model + rendering (read-only score on screen) | not started |
 | 2 | Editing, playback, autosave, print | not started |
 | 3 | MusicXML / MXL open + save | not started |
@@ -39,17 +39,17 @@ only says what to build in what order and how to know each phase is finished.
 
 - [x] `git init -b main` in the project root (done; the docs are already committed on `main`).
 - [x] `.gitignore` containing `.DS_Store`.
-- [ ] `LICENSE`: MIT, year 2026, copyright holder "Coda contributors".
-- [ ] `.nojekyll` (empty).
-- [ ] `vendor/vexflow.js` from `https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js`
+- [x] `LICENSE`: MIT, year 2026, copyright holder "Coda contributors".
+- [x] `.nojekyll` (empty).
+- [x] `vendor/vexflow.js` from `https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js`
       and `vendor/fflate.js` from `https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js`.
       `vendor/README.md` lists name, version, source URL and licence for each.
-- [ ] `.claude/launch.json` with one configuration named `coda`: `python3 -m http.server 8000`, port 8000.
-- [ ] `index.html` that loads both vendor scripts and `src/app.js` (module), and shows the page
+- [x] `.claude/launch.json` with one configuration named `coda`: `python3 -m http.server 8000`, port 8000.
+- [x] `index.html` that loads both vendor scripts and `src/app.js` (module), and shows the page
       skeleton from DESIGN.md §4.1 with empty regions.
-- [ ] `README.md` stub: one paragraph, plus "Coda is an independent project and is not affiliated
+- [x] `README.md` stub: one paragraph, plus "Coda is an independent project and is not affiliated
       with or endorsed by MakeMusic, Inc."
-- [ ] Commit `Phase 0: scaffold`.
+- [x] Commit `Phase 0: scaffold`.
 
 **Done when:** the page loads in the browser pane with no console errors, and
 `typeof Vex.Flow.StaveNote` and `typeof fflate.unzipSync` are both `"function"` in the console.
