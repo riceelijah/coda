@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS } from "./model.js";
+import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt } from "./model.js";
 
 const VF = () => Vex.Flow;
 
@@ -62,7 +62,7 @@ export function layout(score) {
   for (let b = 0; b < score.measures.length; b++) {
     const first = !cur;
     const pre = prefixW(widestKey(score, b));
-    const w = minWidth(score, b) + (first ? pre : changeW(score, b));
+    const w = minWidth(score, b) + (first ? pre : changeW(score, b)) + (score.staves.some((st) => st.clefs?.[b + 1]) ? 24 : 0);
     if (cur && cur.used + w > avail) {
       systems.push(cur);
       cur = null;
@@ -324,9 +324,11 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
     const row = score.staves.map((st, s) => {
       const stave = new VFl.Stave(x, staffTops(score)[s], sys.widths[k]);
       const key = keyAt(score, s, b);
-      if (firstInSys) stave.addClef(st.clef).addKeySignature(keyName(key));
+      if (firstInSys) stave.addClef(clefAt(st, b)).addKeySignature(keyName(key));
       if (firstInSys && si > 0 && s === 0) stave.setMeasure(b + 1); // bar number (DESIGN §11.4)
-      else if (b > 0 && m.key !== undefined) stave.addKeySignature(keyName(key), keyName(keyAt(score, s, b - 1)));
+      if (!firstInSys && m.key !== undefined) stave.addKeySignature(keyName(key), keyName(keyAt(score, s, b - 1)));
+      // a clef change is drawn small before the barline it starts at, also as the courtesy clef at a line end
+      if (st.clefs?.[b + 1]) stave.setEndClef(st.clefs[b + 1], "small");
       if (b === 0 || (m.time && b > 0)) stave.addTimeSignature(timeLabel(at));
       if (b === lastBar) stave.setEndBarType(VFl.Barline.type.END);
       return stave;
@@ -364,15 +366,15 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
       // layers with notes draw; when none has any, layer 1 draws a whole rest
       let used = allLayers(st).map((bars, v) => ({ v, bar: bars[b] })).filter(({ bar }) => bar.length);
       if (!used.length) used = [{ v: 0, bar: [] }];
-      const multi = used.length > 1;
+      const multi = used.length > 1, clef = clefAt(st, b);
       const staffVoices = [];
       for (const { v, bar } of used) {
         let notes;
         const stem = multi ? (v % 2 === 0 ? 1 : -1) : 0;
         if (!bar.length) {
-          notes = [new VFl.StaveNote({ clef: st.clef, keys: [REST_KEY[st.clef]], duration: "wr", align_center: !multi })];
+          notes = [new VFl.StaveNote({ clef, keys: [REST_KEY[clef]], duration: "wr", align_center: !multi })];
         } else {
-          notes = bar.map((ev) => makeNote(ev, st.clef, stem));
+          notes = bar.map((ev) => makeNote(ev, clef, stem));
           bar.forEach((ev, i) => {
             if (v === layer && sel && sel.staff === s && inSel(sel, b, i))
               notes[i].setStyle({ fillStyle: ACCENT, strokeStyle: ACCENT });

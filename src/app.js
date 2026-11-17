@@ -568,7 +568,7 @@ function lastPitchBefore() {
 function typeLetter(letter) {
   const step = "CDEFGAB".indexOf(letter);
   const prev = lastPitchBefore();
-  const target = prev ? M.diatonic(prev) : M.BOTTOM_LINE[state.score.staves[state.caret.staff].clef] + 4;
+  const target = prev ? M.diatonic(prev) : M.BOTTOM_LINE[M.clefAt(state.score.staves[state.caret.staff], state.caret.bar)] + 4;
   let best = null;
   for (let oct = 0; oct <= 8; oct++) {
     const d = oct * 7 + step;
@@ -676,7 +676,7 @@ function locate(e, forceStaff = null) {
   const row = cells.filter((c) => c.staff === staff);
   let cell = row.find((c) => x >= c.x0 && x < c.x1);
   if (!cell) cell = x < row[0].x0 ? row[0] : row[row.length - 1];
-  const clef = state.score.staves[staff].clef;
+  const clef = M.clefAt(state.score.staves[staff], cell.bar);
   const p = M.yToPitch(cell.yBottom, cell.spacing, clef, y);
   const near = cell.notes.reduce((best, n) => {
     const d = Math.abs(n.x + 5 - x);
@@ -1186,6 +1186,7 @@ const CMD = {
   "n-layer4": { run: () => setLayer(3) },
   "n-tuplet": { run: () => openTuplet() },
   "n-untup": { run: () => tupletSel(null), on: () => range().some((p) => lb(state.sel.staff)[p.bar][p.idx].tup) },
+  ...Object.fromEntries(M.CLEFS.map((c) => ["c-" + c, { run: () => edit((sc) => M.setClef(sc, state.caret.staff, state.caret.bar, c)) }])),
   "b-addbar": { run: () => edit((sc) => { M.addMeasure(sc, state.caret.bar); state.caret.bar++; return null; }) },
   "b-delbar": { run: () => {
     const b = state.caret.bar;

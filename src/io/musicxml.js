@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, finishClefs,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -131,12 +131,14 @@ export function exportMusicXML(score) {
       // the written key; <transpose> says how it sounds (DESIGN §21)
       if (b === 0 || m.key !== undefined) attrs.push(`<key><fifths>${keyAt(score, g[0], b)}</fifths></key>`);
       if (b === 0 || m.time) attrs.push(`<time${a.sym ? ` symbol="${a.sym}"` : ""}><beats>${a.time[0]}</beats><beat-type>${a.time[1]}</beat-type></time>`);
+      if (b === 0 && g.length > 1) attrs.push(`<staves>${g.length}</staves>`);
+      g.forEach((s, k) => {
+        const clef = b === 0 ? score.staves[s].clef : score.staves[s].clefs?.[b];
+        if (!clef) return;
+        const [sign, line] = CLEF_OUT[clef];
+        attrs.push(`<clef${g.length > 1 ? ` number="${k + 1}"` : ""}><sign>${sign}</sign><line>${line}</line></clef>`);
+      });
       if (b === 0) {
-        if (g.length > 1) attrs.push(`<staves>${g.length}</staves>`);
-        g.forEach((s, k) => {
-          const [sign, line] = CLEF_OUT[score.staves[s].clef];
-          attrs.push(`<clef${g.length > 1 ? ` number="${k + 1}"` : ""}><sign>${sign}</sign><line>${line}</line></clef>`);
-        });
         const t = score.staves[g[0]].transpose;
         if (t) {
           const oc = Math.trunc(t[1] / 7);
@@ -268,12 +270,17 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
             } else if (tr === null) { tr = [0, 0]; report.count("Transpositions out of range (ignored)"); }
             else if (tr[0] !== t[0] || tr[1] !== t[1]) report.count("Transposition changes mid-part (first one kept)");
           }
+          // clef changes (DESIGN §25) go at a barline: one at the end of a bar starts the next bar
           for (const c of kids(el, "clef")) {
             const n = +(c.getAttribute("number") || 1);
             const st = staves[n - 1];
             if (!st) continue;
-            if (st.clef === null) st.clef = clefFrom(c, report);
-            else if (mi > 0) report.count("Clef changes ignored");
+            const clef = clefFrom(c, report);
+            if (st.clef === null) { st.clef = clef; continue; }
+            let at = mi;
+            if (pos.t >= barCapacity(time)) at = mi + 1;
+            else if (pos.t > 0) report.count("Clef changes inside a bar moved to its start");
+            if (at === 0) st.clef = clef; else (st.clefs ||= {})[at] = clef;
           }
         } else if (tag === "barline") {
           if (kid(el, "repeat") || kid(el, "ending")) report.count("Repeat signs and endings (not imported)");
@@ -334,6 +341,8 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   if (!score.tempo) score.tempo = 100;
   score.tempo = Math.max(20, Math.min(400, score.tempo));
   padBars(score);
+  const lostClefs = finishClefs(score);
+  if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
   report.notes = noteCount(score);
   return { score, report: report.done() };
 }

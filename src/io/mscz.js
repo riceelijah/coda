@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, finishClefs } from "../model.js";
 import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
@@ -121,8 +121,12 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             const t = txt(el, "concertClefType") || txt(el, "subtype") || txt(el, "clefType") || "G";
             const clef = CLEF[t] || (t.startsWith("G") ? "treble" : t.startsWith("F") ? "bass" : null);
             if (!CLEF[t]) report.count(clef ? "Octave clefs shown as plain clefs" : `Unsupported clefs (${t}) shown as treble`);
-            if (staff.clef === null) staff.clef = clef || "treble";
-            else if (mi > 0 || bar.length) report.count("Clef changes ignored");
+            // clef changes (DESIGN §25): MuseScore writes one at a barline at the end of the bar before
+            if (staff.clef === null) { staff.clef = clef || "treble"; break; }
+            let at = mi;
+            if (cur >= barCapacity(time)) at = mi + 1;
+            else if (cur > 0) report.count("Clef changes inside a bar moved to its start");
+            if (at === 0) staff.clef = clef || "treble"; else (staff.clefs ||= {})[at] = clef || "treble";
             break;
           }
           case "KeySig": {
@@ -252,6 +256,8 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
   score.tempo = Math.max(20, Math.min(400, score.tempo || 100));
   padBars(score);
+  const lostClefs = finishClefs(score);
+  if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
   report.notes = noteCount(score);
   return { score, report: report.done() };
 }
@@ -317,6 +323,8 @@ export function exportMSCX(score) {
         const bar = layers[v][b];
         if (v === 0 && !bar.length) x.push(`<Rest><durationType>measure</durationType><duration>${frac(cap)}</duration></Rest>`);
         else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st, spans[v], syl));
+        const nc = v === 0 && st.clefs?.[b + 1]; // a clef change goes at the end of the bar before, as MuseScore writes it
+        if (nc) x.push(`<Clef><concertClefType>${CLEF_OUT[nc]}</concertClefType><transposingClefType>${CLEF_OUT[nc]}</transposingClefType></Clef>`);
         x.push("</voice>");
       }
       x.push("</Measure>");

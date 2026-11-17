@@ -455,9 +455,50 @@ export function clearBrokenTies(score) {
   }))));
 }
 
+// ---------- clef changes (DESIGN §25) ----------
+// st.clefs = {bar: clef}: changes at barlines, bar ≥ 1; st.clef is the clef at bar 0.
+export function clefAt(st, b) {
+  let c = st.clef, at = 0;
+  for (const k in st.clefs) if (+k <= b && +k >= at) { at = +k; c = st.clefs[k]; }
+  return c;
+}
+
+// Drop changes past the last bar or to the clef already in effect; no empty object.
+export function tidyClefs(st, n) {
+  if (!st.clefs) return;
+  const out = {};
+  let cur = st.clef;
+  for (const k of Object.keys(st.clefs).map(Number).sort((a, b) => a - b)) {
+    if (Number.isInteger(k) && k >= 1 && k < n && st.clefs[k] !== cur) cur = out[k] = st.clefs[k];
+  }
+  delete st.clefs; // re-added last, so saved files list it in one place
+  if (Object.keys(out).length) st.clefs = out;
+}
+
+// Importers: tidy every staff's clef changes once the bar count is known; returns how many fell
+// after the last bar (a clef written at the very end of a piece).
+export function finishClefs(score) {
+  let lost = 0;
+  for (const st of score.staves) {
+    lost += Object.keys(st.clefs || {}).filter((k) => +k >= score.measures.length).length;
+    tidyClefs(st, score.measures.length);
+  }
+  return lost;
+}
+
+// The clef from bar b on (bar 0 is the staff's own clef).
+export function setClef(score, s, b, clef) {
+  const st = score.staves[s];
+  if (!st || !CLEFS.includes(clef) || !(b >= 0 && b < score.measures.length)) return "Can't change the clef there";
+  if (b === 0) st.clef = clef; else (st.clefs ||= {})[b] = clef;
+  tidyClefs(st, score.measures.length);
+  return null;
+}
+
 export function addMeasure(score, after) {
   score.measures.splice(after + 1, 0, {});
   for (const st of score.staves) for (const bars of allLayers(st)) bars.splice(after + 1, 0, []);
+  for (const st of score.staves) if (st.clefs) st.clefs = Object.fromEntries(Object.entries(st.clefs).map(([k, c]) => [+k > after ? +k + 1 : +k, c]));
   return null;
 }
 
@@ -466,6 +507,16 @@ export function deleteMeasure(score, idx) {
   const a0 = attrsAt(score, 0);
   score.measures.splice(idx, 1);
   for (const st of score.staves) for (const bars of allLayers(st)) bars.splice(idx, 1);
+  // a clef change on the deleted bar moves to the bar after it, so that bar keeps its clef
+  for (const st of score.staves) if (st.clefs) {
+    const m = {};
+    for (const [k, c] of Object.entries(st.clefs)) {
+      if (+k < idx) m[k] = c; else if (+k > idx) m[+k - 1] = c; else if (!(idx + 1 in st.clefs)) m[idx] = c;
+    }
+    if (0 in m) { st.clef = m[0]; delete m[0]; }
+    st.clefs = m;
+    tidyClefs(st, score.measures.length);
+  }
   if (idx === 0) {
     const m = score.measures[0];
     if (m.key === undefined) m.key = a0.key;
@@ -622,7 +673,9 @@ export function isValidScore(sc) {
       (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true) &&
       (e.lyric === undefined || (typeof e.lyric === "string" && e.lyric.length > 0 && e.lyric.length <= MAX_LYRIC)) &&
       (e.lyricHyph === undefined || (e.lyricHyph === true && e.lyric !== undefined))));
-    return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) &&
+    const okClefs = (c) => c === undefined || (c && typeof c === "object" && Object.keys(c).length > 0 &&
+      Object.entries(c).every(([k, v]) => /^[1-9]\d*$/.test(k) && +k < n && CLEFS.includes(v)));
+    return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) && okClefs(st.clefs) &&
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
       (st.transpose === undefined || okTranspose(st.transpose)) &&
       (st.sound === undefined || (typeof st.sound === "string" && st.sound.length > 0 && st.sound.length <= 64)) &&

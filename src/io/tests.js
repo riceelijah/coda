@@ -58,12 +58,12 @@ export function roundTripFixture() {
         [ev("h", "D2 A2", { dots: 1, marks: ["fermata", "tenuto"] })],
       ], layers: [[ // layer 2 (DESIGN §15): bar 1 and a tie into bar 3
         [ev("h", "G2"), ev("h", "A2", { dyn: "sfz" })], [], [ev("w", "E2", { tie: true })], [ev("h", "E2", { dots: 1 })], [],
-      ]] },
+      ]], clefs: { 3: "tenor" } },
       { name: "Viola", clef: "alto", brace: false, bars: [
         [ev("w", "C4", { hp: ">" })],
         [ev("16", "C4", { tup: [5, 4] }), ev("16", "D4", { tup: [5, 4] }), ev("16", "E4", { tup: [5, 4] }), ev("16", "F4", { tup: [5, 4] }), ev("16", "G4", { tup: [5, 4] }), ev("h", "A4", { marks: ["marcato"], hpEnd: true }), ev("q", "B4")],
         [ev("w", "D4")], [ev("q", "A3", { dots: 1 }), ev("q", "B3", { dots: 1 })], [],
-      ] },
+      ], clefs: { 1: "treble", 4: "alto" } },
     ],
   };
 }
@@ -309,6 +309,29 @@ export async function run({ check, eq }) {
     const e = got.staves[0].bars[0], msg = JSON.stringify(report);
     if (e[0].lyric !== "la" || !e[0].lyricHyph || e[1].lyric !== "di" || e[1].lyricHyph) return JSON.stringify(e);
     return (/first verse.*1/.test(msg) && /extender.*1/.test(msg)) || msg;
+  });
+
+  await check("clef changes: setClef tidies, bars added and deleted keep them, validation, import placement (DESIGN §25)", () => {
+    const s = M.newScore({ preset: "treble", bars: 6 }), st = s.staves[0];
+    M.setClef(s, 0, 2, "bass"); M.setClef(s, 0, 4, "treble"); M.setClef(s, 0, 5, "treble");
+    if (!eq(st.clefs, { 2: "bass", 4: "treble" }) || [0, 1, 2, 3, 4, 5].map((b) => M.clefAt(st, b)).join() !== "treble,treble,bass,bass,treble,treble") return JSON.stringify(st.clefs);
+    M.addMeasure(s, 0);
+    if (!eq(st.clefs, { 3: "bass", 5: "treble" })) return "add " + JSON.stringify(st.clefs);
+    M.deleteMeasure(s, 3); // the bass change moves on to the bar after
+    if (!eq(st.clefs, { 3: "bass", 4: "treble" })) return "delete " + JSON.stringify(st.clefs);
+    M.setClef(s, 0, 3, "treble");
+    if ("clefs" in st || !M.isValidScore(s)) return "tidy " + JSON.stringify(st.clefs);
+    M.setClef(s, 0, 1, "alto"); M.deleteMeasure(s, 0);
+    if (st.clef !== "alto" || "clefs" in st) return "first bar " + st.clef;
+    if (M.isValidScore({ ...s, staves: [{ ...st, clefs: { 0: "bass" } }] }) || M.isValidScore({ ...s, staves: [{ ...st, clefs: { 9: "bass" } }] })) return "validation";
+    const N = '<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>';
+    const C = (sign, line) => `<attributes><clef><sign>${sign}</sign><line>${line}</line></clef></attributes>`;
+    const xml = `<score-partwise><part-list><score-part id="P1"><part-name>V</part-name></score-part></part-list><part id="P1">
+      <measure number="1"><attributes><divisions>1</divisions><time><beats>2</beats><beat-type>4</beat-type></time></attributes>${C("G", 2)}${N}${N}${C("F", 4)}</measure>
+      <measure number="2">${N}${C("C", 3)}${N}</measure><measure number="3">${C("C", 4)}${N}${N}${C("G", 2)}</measure></part></score-partwise>`;
+    const { score: got, report } = importMusicXML(xml, "c.musicxml"), r = JSON.stringify(report);
+    if (!eq(got.staves[0].clefs, { 1: "alto", 2: "tenor" }) || got.staves[0].clef !== "treble") return JSON.stringify(got.staves[0]);
+    return (/inside a bar moved to its start: 1/.test(r) && /after the last bar \(not imported\): 1/.test(r)) || r;
   });
 
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {
