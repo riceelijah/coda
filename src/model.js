@@ -174,17 +174,19 @@ export function deleteRange(score, s, a, z) {
   return null;
 }
 
-// Paste copies of events starting at (b, idx), moving to the start of following bars
-// (added at the end if needed) when a bar fills up. The last pasted event is not tied.
+// Paste copies of events starting at (b, idx), moving on to the next bar when one fills up, as
+// long as that bar is empty (added at the end if needed). The last pasted event is not tied.
 // `placed` receives the {bar, idx} of each pasted event.
 export function pasteEvents(score, s, b, idx, events, placed = []) {
   if (!events.length) return "Nothing to paste";
   for (const src of events) {
     const ev = JSON.parse(JSON.stringify(src));
-    while (barTicks(score.staves[s].bars[b]) + eventTicks(ev) > barCapacity(attrsAt(score, b).time)) {
-      if (eventTicks(ev) > barCapacity(attrsAt(score, b).time)) return "A copied note is longer than a bar";
+    if (barTicks(score.staves[s].bars[b]) + eventTicks(ev) > barCapacity(attrsAt(score, b).time)) {
+      // carry on only into an empty next bar (added at the end of the score if needed)
       b++; idx = 0;
       if (b >= score.measures.length) addMeasure(score, score.measures.length - 1);
+      if (score.staves[s].bars[b].length) return "Not enough room to paste here";
+      if (eventTicks(ev) > barCapacity(attrsAt(score, b).time)) return "A copied note is longer than a bar";
     }
     insertEvent(score, s, b, idx, ev);
     placed.push({ bar: b, idx });
@@ -262,6 +264,16 @@ export function toggleTie(score, s, b, i) {
     return "Nothing to tie to";
   ev.tie = true;
   return null;
+}
+
+// Drop ties whose next note no longer shares a pitch (after inserts, pastes, edits).
+export function clearBrokenTies(score) {
+  score.staves.forEach((st, s) => st.bars.forEach((bar, b) => bar.forEach((ev, i) => {
+    if (!ev.tie) return;
+    const n = nextEventPos(score, s, b, i);
+    const ne = n && (n.bar === b || n.bar === b + 1) ? st.bars[n.bar][n.idx] : null;
+    if (!ne || !ev.pitches.some((p) => ne.pitches.some((q) => samePitch(p, q) && p.alter === q.alter))) ev.tie = false;
+  })));
 }
 
 export function addMeasure(score, after) {

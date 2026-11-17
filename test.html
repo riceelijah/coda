@@ -171,6 +171,18 @@ check("insert, range, delete range, paste across bars (DESIGN §11.5, §11.7)", 
   return (names(s.staves[0].bars[0]) + "|" + names(s.staves[0].bars[1])) === "CDE|E" || "deleteRange";
 });
 
+check("broken ties cleared; paste refuses part-filled bars", () => {
+  const q = (step, tie = false) => ({ dur: "q", dots: 0, tie, pitches: [{ step, oct: 4, alter: 0 }] });
+  const s = M.newScore({ time: [4, 4], bars: 2 });
+  M.appendEvent(s, 0, 0, q(0, true)); M.appendEvent(s, 0, 0, q(0));
+  M.insertEvent(s, 0, 0, 1, q(4)); // C~ G C: the tie no longer reaches a C
+  M.clearBrokenTies(s);
+  if (s.staves[0].bars[0][0].tie) return "tie kept after insert";
+  M.appendEvent(s, 0, 1, q(2));
+  const r = M.pasteEvents(s, 0, 0, 3, [q(1), q(1)]); // one fits, the next bar already has a note
+  return r === "Not enough room to paste here" || `paste: ${r}`;
+});
+
 // Later phases append checks here via test modules.
 const extra = ["./src/io/tests.js"];
 for (const path of extra) {

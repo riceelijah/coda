@@ -51,7 +51,7 @@ function autosave() {
 function edit(fn, { keepRedo = false } = {}) {
   const snap = JSON.stringify(state.score);
   let reason;
-  try { reason = fn(state.score); } catch (e) { console.error(e); reason = "Something went wrong"; }
+  try { reason = fn(state.score); if (!reason) M.clearBrokenTies(state.score); } catch (e) { console.error(e); reason = "Something went wrong"; }
   if (reason) {
     state.score = JSON.parse(snap);
     message(reason, true);
@@ -669,8 +669,10 @@ function closeAttrs() {
   const how = $("attrs").returnValue, b = state.caret.bar;
   if (how === "remove") edit((sc) => M.clearAttrs(sc, b));
   else if (how === "ok") {
-    const time = $("a-time").value.split("/").map(Number);
-    edit((sc) => M.setAttrs(sc, b, { key: +$("a-key").value, time }));
+    const time = $("a-time").value.split("/").map(Number), cur = M.attrsAt(state.score, b).time;
+    const changed = time[0] !== cur[0] || time[1] !== cur[1];
+    // only pass time when it changes, so a key change never trips the bar-fit check
+    edit((sc) => M.setAttrs(sc, b, changed ? { key: +$("a-key").value, time } : { key: +$("a-key").value }));
   }
 }
 
