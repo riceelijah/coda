@@ -84,8 +84,8 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
       <entry entnum="3" prev="2" next="0"><dura>2048</dura><ignore/></entry></entries></finale>`;
     const r = await importBytes(new TextEncoder().encode(x), "inline.xml");
     const got = brief(r.score.staves[0]);
-    if (got !== "C4:q.~ C4+Eb4:8") return got;
-    return /articulations \(not imported\): 1/.test(warn(r)) && /placeholder entries skipped: 1/.test(warn(r)) || warn(r);
+    if (got !== "C4:q.~ C4+Eb4:8 r:h") return got; // the hidden entry keeps its time as a rest
+    return /articulations \(not imported\): 1/.test(warn(r)) && /placeholder entries shown as rests: 1/.test(warn(r)) || warn(r);
   });
 
   await check("musx sample: second voices go to a free layer from their launch point; cross-voice ties dropped", async () => {

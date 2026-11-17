@@ -382,7 +382,8 @@ export function toggleSpan(events, kind, type = true) {
   if (events.length < 2) return "Select two or more notes";
   const end = kind + "End", a = events[0], z = events[events.length - 1];
   if (a[kind] === type && z[end]) { delete a[kind]; delete z[end]; return null; }
-  for (const e of events) { delete e[kind]; delete e[end]; } // spans inside are replaced
+  // spans inside are replaced; a span ending on the first note or starting on the last is a neighbour, kept
+  for (const e of events.slice(1, -1)) { delete e[kind]; delete e[end]; }
   a[kind] = type; z[end] = true;
   return null;
 }

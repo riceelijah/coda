@@ -124,7 +124,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       if (vi >= MAX_LAYERS) { report.count(`Notes in voices beyond ${MAX_LAYERS} per staff skipped`, kids(vEl, "Chord").length); return; }
       const bar = [];
       let tup = null, cur = 0, fermata = false; // cur: time cursor in ticks; <location> moves it either way
-      const pendG = { notes: [], kinds: [] }; // grace notes waiting for their note (DESIGN §26)
+      const pendG = { notes: [], kinds: [], slurs: 0 }; // grace notes waiting for their note (DESIGN §26); slurs: theirs, ending on it
       for (const el of vEl.children) {
         switch (el.localName) {
           case "location": {
@@ -195,6 +195,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               if (kids(el, "Articulation").length || kids(el, "Lyrics").length || kids(el, "Spanner").length || ns.some((n) => kid(n, "Spanner") || kid(n, "Tie")))
                 report.count("Marks, slurs, ties and lyrics on grace notes (not imported)");
               pendG.notes.push(p); pendG.kinds.push(gk);
+              pendG.slurs += kids(el, "Spanner").filter((sp) => sp.getAttribute("type") === "Slur" && kid(sp, "next")).length;
               break;
             }
             const dt = txt(el, "durationType");
@@ -233,7 +234,10 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             for (const m of marks) if (!isRest || m === "fermata") setMark(ev, m, true);
             if (pendDyn[vi]) { ev.dyn = pendDyn[vi]; pendDyn[vi] = null; }
             if (pendHp[vi]) { ev.hp = pendHp[vi]; pendHp[vi] = null; }
+            let graceSlurs = pendG.slurs; // a grace note's slur ends here too; that end isn't this note's
+            pendG.slurs = 0;
             for (const sp of kids(el, "Spanner")) {
+              if (sp.getAttribute("type") === "Slur" && kid(sp, "prev") && graceSlurs > 0) { graceSlurs--; continue; }
               if (sp.getAttribute("type") === "Slur") { if (kid(sp, "next")) ev.slur = true; else if (kid(sp, "prev")) ev.slurEnd = true; }
               else if (kid(sp, "next")) report.count(`Lines (${sp.getAttribute("type")}) not imported`);
             }
@@ -272,6 +276,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       if (si === 0) firstAttrs.push({ key, time: [...time], sym });
     });
     if (pendDyn.some(Boolean)) report.count("Dynamics after the last note (not imported)");
+    if (pendHp.some(Boolean)) report.count("Hairpins with no notes (not imported)");
     if (!staff.clef) staff.clef = "treble";
     score.staves.push(staff);
   });

@@ -19,6 +19,7 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 // ---------- export ----------
 
+// Slur and wedge numbers: one per voice, so slurs in two hands or layers that overlap stay apart.
 function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl }) {
   const x = ["<note>"];
   if (chord) x.push("<chord/>");
@@ -38,8 +39,8 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl
   if (tieStart) nots.push('<tied type="start"/>');
   if (!chord && tupStart) nots.push('<tuplet type="start" bracket="yes"/>');
   if (!chord && tupStop) nots.push('<tuplet type="stop"/>');
-  if (!chord && ev.slurEnd) nots.push('<slur type="stop" number="1"/>'); // DESIGN §23
-  if (!chord && ev.slur) nots.push('<slur type="start" number="1"/>');
+  if (!chord && ev.slurEnd) nots.push(`<slur type="stop" number="${voice}"/>`); // DESIGN §23
+  if (!chord && ev.slur) nots.push(`<slur type="start" number="${voice}"/>`);
   if (!chord && ev.marks) {
     if (ev.marks.includes("fermata")) nots.push('<fermata type="upright"/>');
     const arts = p ? ev.marks.filter((m) => ARTIC_OUT[m]) : [];
@@ -95,11 +96,11 @@ function barXml(score, s, b, staffNo, voice, v, syl) {
     const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev) };
     const dir = (body) => `<direction placement="below"><direction-type>${body}</direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`;
     if (ev.dyn) out.push(dir(`<dynamics><${ev.dyn}/></dynamics>`));
-    if (ev.hp) out.push(dir(`<wedge type="${ev.hp === "<" ? "crescendo" : "diminuendo"}"/>`));
+    if (ev.hp) out.push(dir(`<wedge type="${ev.hp === "<" ? "crescendo" : "diminuendo"}" number="${voice}"/>`));
     if (ev.grace) out.push(graceXml(ev.grace, staffNo, voice));
     if (!ev.pitches.length) out.push(noteXml(ev, null, flags));
     else ev.pitches.forEach((p, k) => out.push(noteXml(ev, p, { ...flags, chord: k > 0, tieStop: tied(p) })));
-    if (ev.hpEnd) out.push(dir('<wedge type="stop"/>')); // after the note it ends on
+    if (ev.hpEnd) out.push(dir(`<wedge type="stop" number="${voice}"/>`)); // after the note it ends on
   });
   let ticks = barTicks(bar);
   if (ticks < cap) { out.push(restXml(cap - ticks, staffNo, voice, false)); ticks = cap; }
@@ -228,6 +229,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     let divisions = 1, key = 0, time = [4, 4], sym, tr = null;
     const pend = {}; // staff -> dynamic waiting for its note
     const pendHp = {}, lastAny = {}; // staff -> hairpin waiting for its note; last event read
+    const openHp = {}, openSlur = {}; // staff -> {ev: where the open hairpin starts, prev: one still open before it}; staff:layer -> open slur number
     // staff -> MusicXML voice ids in layer order: numeric order, so voice 1 is always layer 1
     const voiceOf = {};
     for (const n of part.querySelectorAll("note")) {
@@ -302,7 +304,12 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
                 else if (t === "stop") {
                   const last = lastAny[sn];
                   if (pendHp[sn] && (!last || pendHp[sn].mi === mi && pos.t <= pendHp[sn].at)) { report.count("Hairpins with no notes (not imported)"); pendHp[sn] = null; }
-                  else if (last) last.hpEnd = true;
+                  else if (last) {
+                    const o = openHp[sn];
+                    if (o?.prev) { last.hpEnd = true; o.prev = null; } // closes the one before; the newer stays open
+                    else if (o && o.ev === last) { delete last.hp; openHp[sn] = null; report.count("Hairpins over a single note (not imported)"); }
+                    else { last.hpEnd = true; openHp[sn] = null; }
+                  }
                 }
                 continue;
               }
@@ -325,7 +332,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
         } else if (tag === "note") {
           const start = pos.t;
-          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace });
+          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace, openHp, openSlur });
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
@@ -371,7 +378,7 @@ const MARKS = {
   glissando: "Glissandos (not imported)", slide: "Glissandos (not imported)",
 };
 
-function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace }) {
+function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace, openHp, openSlur }) {
   const isRest = !!kid(el, "rest");
   const grace = kid(el, "grace");
   if (grace && isRest) { report.count("Grace rests (not imported)"); return; }
@@ -394,9 +401,12 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
       } else if (c.localName === "ornaments" || c.localName === "technical") report.count(MARKS[c.localName], c.children.length);
       else if (c.localName === "slur") {
         const t = c.getAttribute("type");
-        if ((c.getAttribute("number") || "1") !== "1") { if (t === "start") report.count("Slurs inside other slurs (not imported)"); }
-        else if (t === "start") slur.start = true;
-        else if (t === "stop") slur.stop = true;
+        // one slur at a time per staff and layer: the first number opened is followed, others counted
+        const num = c.getAttribute("number") || "1";
+        if (t === "start" && !openSlur[lk]) { openSlur[lk] = num; slur.start = true; }
+        else if (t === "start" && openSlur[lk] === num && kid(el, "chord")) slur.start = true; // the same slur on a chord note
+        else if (t === "start") report.count("Slurs inside other slurs (not imported)");
+        else if (t === "stop" && openSlur[lk] === num) { delete openSlur[lk]; slur.stop = true; }
       }
       else if (MARKS[c.localName] && c.getAttribute("type") !== "stop") report.count(MARKS[c.localName]);
     }
@@ -446,6 +456,9 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   if (isRest && (kid(el, "rest").getAttribute("measure") === "yes" ||
       (!type && ticksRaw !== null && Math.round(ticksRaw) >= barCapacity(time)))) {
     if (marks.length) report.count("Fermatas on whole-bar rests (not imported)");
+    // a dynamic or hairpin start just before it would otherwise land in the next bar
+    if (pend[staffNo]?.mi === mi) { pend[staffNo] = null; report.count("Dynamics on whole-bar rests (not imported)"); }
+    if (pendHp[staffNo]?.mi === mi) { pendHp[staffNo] = null; report.count("Hairpins starting on whole-bar rests (not imported)"); }
     return;
   }
 
@@ -481,7 +494,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   const pd = pend[staffNo];
   if (pd && (pd.mi < mi || start >= pd.at)) { ev.dyn = pd.dyn; pend[staffNo] = null; }
   const ph = pendHp[staffNo];
-  if (ph && (ph.mi < mi || start >= ph.at)) { ev.hp = ph.hp; pendHp[staffNo] = null; }
+  if (ph && (ph.mi < mi || start >= ph.at)) { ev.hp = ph.hp; pendHp[staffNo] = null; openHp[staffNo] = { ev, prev: openHp[staffNo] || null }; }
   if (slur.start) ev.slur = true;
   if (slur.stop) ev.slurEnd = true;
   lyricIn(el, ev, report);

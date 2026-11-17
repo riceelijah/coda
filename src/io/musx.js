@@ -266,7 +266,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
       const skip = (label) => { report.count(label, Math.max(1, num(e, "numNotes", 0))); return null; };
       ts.last = 0; // the entry's real length in ticks, from the file (tuplet ratio applied)
       if (has(e, "graceNote")) return skip("Grace notes skipped");
-      if (has(e, "ignore")) { ts.last = (num(e, "dura", 0) * 480) / 1024; report.count("Hidden placeholder entries skipped"); return null; }
+      if (has(e, "ignore")) { ts.last = (num(e, "dura", 0) * 480) / 1024; report.count("Hidden placeholder entries shown as rests"); return null; }
       for (const [flag, label] of DETAILS) if (has(e, flag)) report.count(label);
       const dura = num(e, "dura", 0);
       if (has(e, "tupletStart") && tupletDefs.has(id)) {
@@ -309,6 +309,8 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
       return ev;
     };
 
+    // a hidden entry still takes time: rests in its place keep later notes where the file has them
+    const gapRests = (ticks) => splitTicks(Math.floor(ticks / 60) * 60).map((d) => ({ dur: d.dur, dots: d.dots, tie: false, pitches: [] }));
     measures.forEach((m, mi) => {
       const g = gf.get(`${sid}/${m.cmper}`);
       staff.bars.push([]);
@@ -333,12 +335,14 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
           const e = entries.get(id);
           if (has(e, "v2") || has(e, "voice2")) {
             const ev = readEntry(e, id, mi, v2);
-            if (ev && run) run.events.push(ev);
+            if (!ev && run && v2.last > 0) run.events.push(...gapRests(v2.last));
+            else if (ev && run) run.events.push(ev);
             else if (ev) report.count("Second-voice notes with no start skipped", Math.max(1, ev.pitches.length));
           } else {
             const start = t, ev = readEntry(e, id, mi, v1);
             t += v1.last;
             if (ev) bar.push(ev);
+            else if (v1.last > 0) bar.push(...gapRests(v1.last));
             run = has(e, "controller") ? { src: l, start, events: [] } : null;
             if (run) { runs.push(run); Object.assign(v2, { tup: null, left: 0 }); }
           }

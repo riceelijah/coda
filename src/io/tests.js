@@ -289,6 +289,23 @@ export async function run({ check, eq }) {
     return M.isValidScore(s) && !M.isValidScore({ ...s, staves: [{ ...s.staves[0], bars: [[{ ...ev("w", "C4"), hp: "x" }], []] }] }) || "validation";
   });
 
+  await check("spans: a new slur keeps its neighbour; MusicXML single-note hairpin and voice-numbered slurs (review fixes)", () => {
+    const s = M.newScore({ preset: "treble", bars: 1 });
+    s.staves[0].bars[0] = [ev("q", "C5"), ev("q", "D5"), ev("q", "E5"), ev("q", "F5")];
+    const e = s.staves[0].bars[0];
+    M.toggleSpan(e.slice(0, 3), "slur"); M.toggleSpan(e.slice(2), "slur");
+    if (M.clearBrokenSpans(s) || !e[0].slur || !e[2].slurEnd || !e[2].slur || !e[3].slurEnd) return JSON.stringify(e);
+    const N = (x, o = "") => `<note><pitch><step>${x}</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type>${o}</note>`;
+    const W = (t) => `<direction><direction-type><wedge type="${t}"/></direction-type></direction>`;
+    const sl = (t, n) => `<notations><slur type="${t}" number="${n}"/></notations>`;
+    const xml = `<score-partwise><part-list><score-part id="P1"><part-name>V</part-name></score-part></part-list><part id="P1"><measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      ${W("crescendo")}${N("C", sl("start", 3))}${W("stop")}${N("D")}${N("E", sl("start", 2))}${N("F", sl("stop", 3))}</measure></part></score-partwise>`;
+    const { score: g, report } = importMusicXML(xml, "s.musicxml"), w = report.warnings.join("; "), b = g.staves[0].bars[0];
+    if (b[0].hp || b[0].hpEnd || !b[0].slur || !b[3].slurEnd || b[2].slur) return JSON.stringify(b);
+    return w === "Hairpins over a single note (not imported): 1; Slurs inside other slurs (not imported): 1" || w;
+  });
+
   await check("lyrics: setLyric, syllabics, validation, import counts (DESIGN §24)", () => {
     const s = M.newScore({ preset: "treble", bars: 1 });
     s.staves[0].bars[0] = [ev("q", "C4"), ev("q", "D4"), ev("q", "E4"), ev("q", null)];
