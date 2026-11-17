@@ -371,6 +371,34 @@ export function toggleDyn(ev, dyn) {
   if (ev.dyn === dyn || !dyn) delete ev.dyn; else ev.dyn = dyn;
 }
 
+// ---------- slurs and hairpins (DESIGN §23) ----------
+// A span is a flag on its first event (slur: true, hp: "<" or ">") and one on its last (slurEnd,
+// hpEnd), in the same staff and layer. One of each kind at a time per layer.
+export const SPAN_KINDS = [["slur", "slurEnd"], ["hp", "hpEnd"]];
+// Over events in order (2 or more): set the span, or remove it when exactly that one is there.
+export function toggleSpan(events, kind, type = true) {
+  if (events.length < 2) return "Select two or more notes";
+  const end = kind + "End", a = events[0], z = events[events.length - 1];
+  if (a[kind] === type && z[end]) { delete a[kind]; delete z[end]; return null; }
+  for (const e of events) { delete e[kind]; delete e[end]; } // spans inside are replaced
+  a[kind] = type; z[end] = true;
+  return null;
+}
+// Drop ends with no start, starts with no end, and a start before the last one closed.
+// Returns how many flags went.
+export function clearBrokenSpans(score) {
+  let n = 0;
+  for (const st of score.staves) for (const bars of allLayers(st)) for (const [k, ke] of SPAN_KINDS) {
+    let open = null;
+    for (const bar of bars) for (const ev of bar) {
+      if (ev[ke]) { if (open) open = null; else { delete ev[ke]; n++; } }
+      if (ev[k]) { if (open) { delete open[k]; n++; } open = ev; }
+    }
+    if (open) { delete open[k]; n++; }
+  }
+  return n;
+}
+
 export function setTuplet(score, s, b, i, tup) {
   const ev = score.staves[s].bars[b][i];
   if (tup && !tupletOk(ev.dur, ev.dots, tup)) return `A ${tup[0]}:${tup[1]} tuplet doesn't fit that note value`;
@@ -565,7 +593,9 @@ export function isValidScore(sc) {
       DURS.includes(e.dur) && Array.isArray(e.pitches) &&
       e.pitches.every((p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2) &&
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m)))) &&
-      (e.dyn === undefined || DYNS.includes(e.dyn))));
+      (e.dyn === undefined || DYNS.includes(e.dyn)) &&
+      (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&
+      (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true)));
     return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) &&
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
       (st.transpose === undefined || okTranspose(st.transpose)) &&

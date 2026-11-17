@@ -78,7 +78,7 @@ function autosave() {
 function edit(fn, { keepRedo = false } = {}) {
   const snap = JSON.stringify(state.score);
   let reason;
-  try { reason = M.withLayer(state.score, state.layer, () => fn(state.score)); if (!reason) M.clearBrokenTies(state.score); } catch (e) { console.error(e); reason = "Something went wrong"; }
+  try { reason = M.withLayer(state.score, state.layer, () => fn(state.score)); if (!reason) { M.clearBrokenTies(state.score); M.clearBrokenSpans(state.score); } } catch (e) { console.error(e); reason = "Something went wrong"; }
   if (reason) {
     state.score = JSON.parse(snap);
     message(reason, true);
@@ -181,10 +181,10 @@ function cellRect(cells) {
   if (!cells.length) return null;
   const svg = cells[0].svg;
   const r = svg.getBoundingClientRect(), sheet = $("sheet").getBoundingClientRect();
-  const k = r.width / SHEET_W;
+  const k = r.width / SHEET_W, top = svg.viewBox.baseVal.y; // the drawing may start above 0
   const x0 = Math.min(...cells.map((c) => c.x0)), x1 = Math.max(...cells.map((c) => c.x1));
   const y0 = Math.min(...cells.map((c) => c.yTop)) - 14, y1 = Math.max(...cells.map((c) => c.yBottom)) + 14;
-  return { left: r.left - sheet.left + x0 * k, top: r.top - sheet.top + y0 * k, width: (x1 - x0) * k, height: (y1 - y0) * k };
+  return { left: r.left - sheet.left + x0 * k, top: r.top - sheet.top + (y0 - top) * k, width: (x1 - x0) * k, height: (y1 - y0) * k };
 }
 
 function place(el, rect) {
@@ -403,6 +403,13 @@ function dynamic(d) {
   edit((sc) => { M.toggleDyn(sc.staves[s.staff].bars[p.bar][p.idx], d); return null; });
 }
 
+// Slur or hairpin over the selected range (DESIGN §23); again removes it.
+function span(kind, type) {
+  if (!state.sel) { message("Select a note first", true); return; }
+  const s = state.sel, r = range();
+  edit((sc) => M.toggleSpan(r.map((p) => sc.staves[s.staff].bars[p.bar][p.idx]), kind, type));
+}
+
 function tie() {
   const s = state.sel;
   if (!s) { message("Select a note first", true); return; }
@@ -599,7 +606,7 @@ function locate(e, forceStaff = null) {
   const svgEl = state.hit.systems[si].svg;
   const r = svgEl.getBoundingClientRect();
   const k = SHEET_W / r.width;
-  const x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k;
+  const x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k + svgEl.viewBox.baseVal.y;
   const cells = state.hit.cells.filter((c) => c.sys === si);
   if (!cells.length) return null;
   // staff: nearest band (midpoints between staves)
@@ -670,7 +677,7 @@ function onMove(e) {
   const w = L.cell.spacing * 1.3 * k, h = L.cell.spacing * 0.95 * k;
   Object.assign(g.style, {
     display: "block", width: w + "px", height: h + "px",
-    left: r.left - sheet.left + L.x * k - w / 2 + "px", top: r.top - sheet.top + ySnap * k - h / 2 + "px",
+    left: r.left - sheet.left + L.x * k - w / 2 + "px", top: r.top - sheet.top + (ySnap - L.svgEl.viewBox.baseVal.y) * k - h / 2 + "px",
   });
 }
 
@@ -741,6 +748,7 @@ function onKey(e) {
   else if (k === "-" || k === "_") accidental(-1);
   else if (k === "n" || k === "N") accidental(0);
   else if (k === "t" || k === "T") tie();
+  else if (k === "s" || k === "S") span("slur", true);
   else if (k === "ArrowUp") transposeSel(e.shiftKey ? 7 : 1); // Shift: an octave, as in NotePad
   else if (k === "ArrowDown") transposeSel(e.shiftKey ? -7 : -1);
   else if (k === "ArrowLeft") e.shiftKey ? extendSel(-1) : moveSel(-1);
@@ -1112,6 +1120,9 @@ const CMD = {
   ...Object.fromEntries(M.MARKS.map((m) => ["n-" + m, { run: () => mark(m), on: hasSel }])),
   ...Object.fromEntries(M.DYNS.map((d) => ["d-" + d, { run: () => dynamic(d), on: hasSel }])),
   "d-none": { run: () => dynamic(null), on: hasSel },
+  "n-slur": { run: () => span("slur", true), on: hasSel },
+  "n-cresc": { run: () => span("hp", "<"), on: hasSel },
+  "n-dim": { run: () => span("hp", ">"), on: hasSel },
   "n-layer1": { run: () => setLayer(0) },
   "n-layer2": { run: () => setLayer(1) },
   "n-layer3": { run: () => setLayer(2) },

@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -38,6 +38,8 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop }) {
   if (tieStart) nots.push('<tied type="start"/>');
   if (!chord && tupStart) nots.push('<tuplet type="start" bracket="yes"/>');
   if (!chord && tupStop) nots.push('<tuplet type="stop"/>');
+  if (!chord && ev.slurEnd) nots.push('<slur type="stop" number="1"/>'); // DESIGN §23
+  if (!chord && ev.slur) nots.push('<slur type="start" number="1"/>');
   if (!chord && ev.marks) {
     if (ev.marks.includes("fermata")) nots.push('<fermata type="upright"/>');
     const arts = p ? ev.marks.filter((m) => ARTIC_OUT[m]) : [];
@@ -83,9 +85,12 @@ function barXml(score, s, b, staffNo, voice, v = 0) {
     const before = i > 0 ? bar[i - 1] : prev;
     const tied = (p) => !!(before && before.tie && before.pitches.some((q) => q.step === p.step && q.oct === p.oct));
     const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i) };
-    if (ev.dyn) out.push(`<direction placement="below"><direction-type><dynamics><${ev.dyn}/></dynamics></direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`);
+    const dir = (body) => `<direction placement="below"><direction-type>${body}</direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`;
+    if (ev.dyn) out.push(dir(`<dynamics><${ev.dyn}/></dynamics>`));
+    if (ev.hp) out.push(dir(`<wedge type="${ev.hp === "<" ? "crescendo" : "diminuendo"}"/>`));
     if (!ev.pitches.length) out.push(noteXml(ev, null, flags));
     else ev.pitches.forEach((p, k) => out.push(noteXml(ev, p, { ...flags, chord: k > 0, tieStop: tied(p) })));
+    if (ev.hpEnd) out.push(dir('<wedge type="stop"/>')); // after the note it ends on
   });
   let ticks = barTicks(bar);
   if (ticks < cap) { out.push(restXml(cap - ticks, staffNo, voice, false)); ticks = cap; }
@@ -210,6 +215,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     if (nStaves > 2) report.add(`A part with ${nStaves} staves was split into separate staves without a brace`);
     let divisions = 1, key = 0, time = [4, 4], sym, tr = null;
     const pend = {}; // staff -> dynamic waiting for its note
+    const pendHp = {}, lastAny = {}; // staff -> hairpin waiting for its note; last event read
     // staff -> MusicXML voice ids in layer order: numeric order, so voice 1 is always layer 1
     const voiceOf = {};
     for (const n of part.querySelectorAll("note")) {
@@ -272,6 +278,16 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
         } else if (tag === "direction" || tag === "sound") {
           for (const dt of tag === "direction" ? kids(el, "direction-type") : []) {
             for (const c of dt.children) {
+              if (c.localName === "wedge") { // hairpins (DESIGN §23): start on the next note, stop on the last one
+                const t = c.getAttribute("type"), sn = +(txt(el, "staff") || 1);
+                if (t === "crescendo" || t === "diminuendo") pendHp[sn] = { hp: t === "crescendo" ? "<" : ">", at: pos.t, mi };
+                else if (t === "stop") {
+                  const last = lastAny[sn];
+                  if (pendHp[sn] && (!last || pendHp[sn].mi === mi && pos.t <= pendHp[sn].at)) { report.count("Hairpins with no notes (not imported)"); pendHp[sn] = null; }
+                  else if (last) last.hpEnd = true;
+                }
+                continue;
+              }
               if (c.localName === "dynamics") { // goes on the staff's next note or rest (DESIGN §22)
                 const d = DYN_IN[c.firstElementChild?.localName];
                 if (d) pend[+(txt(el, "staff") || 1)] = { dyn: d, at: pos.t, mi };
@@ -291,7 +307,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
         } else if (tag === "note") {
           const start = pos.t;
-          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi });
+          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny });
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
@@ -299,12 +315,15 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
       if (pi === 0) firstPartAttrs.push({ key: tr ? wrapKey(key + fifthsOf(tr[0], tr[1])) : key, time: [...time], sym });
     });
     for (const k in pend) if (pend[k]) report.count("Dynamics after the last note (not imported)");
+    for (const k in pendHp) if (pendHp[k]) report.count("Hairpins with no notes (not imported)");
     staves.forEach((st) => { if (!st.clef) st.clef = "treble"; });
     score.staves.push(...staves);
   });
   if (!score.staves.length) throw new Error("This MusicXML file has no parts.");
 
   score.measures.push(...measuresFrom(firstPartAttrs));
+  const broken = clearBrokenSpans(score);
+  if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
 
   score.title = (root.querySelector("work > work-title")?.textContent || txt(root, "movement-title") ||
     fileName.replace(/\.[^.]+$/, "") || "Untitled").trim();
@@ -321,17 +340,17 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
 export const DYN_IN = { ppp: "ppp", pp: "pp", p: "p", mp: "mp", mf: "mf", f: "f", ff: "ff", fff: "fff", fp: "fp", sf: "sf", sfz: "sfz", fz: "fz",
   pppp: "ppp", ppppp: "ppp", pppppp: "ppp", ffff: "fff", fffff: "fff", ffffff: "fff", sfp: "fp", sfpp: "fp", sffz: "sfz", rfz: "sfz", rf: "sf", sfzp: "fp" };
 const DIRECTIONS = {
-  wedge: "Hairpins (not imported)", words: "Text directions (not imported)",
+  words: "Text directions (not imported)",
   rehearsal: "Rehearsal marks (not imported)", segno: "Segno and coda signs (not imported)", coda: "Segno and coda signs (not imported)",
   pedal: "Pedal marks (not imported)", "octave-shift": "Octave lines (not imported)",
 };
 const MARKS = {
-  slur: "Slurs (not imported)", articulations: "Other articulations (not imported)",
+  articulations: "Other articulations (not imported)",
   ornaments: "Ornaments (not imported)", technical: "Technical markings (not imported)", arpeggiate: "Arpeggios (not imported)",
   glissando: "Glissandos (not imported)", slide: "Glissandos (not imported)",
 };
 
-function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi }) {
+function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny }) {
   const isRest = !!kid(el, "rest");
   if (kid(el, "grace")) { if (!isRest) report.count("Grace notes skipped"); return; }
   const staffNo = +(txt(el, "staff") || 1);
@@ -341,7 +360,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   if (layer < 0) { if (!isRest) report.count(`Notes in voices beyond ${MAX_LAYERS} per staff skipped`); return; }
   const lk = staffNo + ":" + layer;
   // fermatas and the articulations Coda holds are kept; other markings are counted, not dropped silently
-  const marks = [];
+  const marks = [], slur = {};
   for (const n of kids(el, "notations")) {
     for (const c of n.children) {
       if (c.localName === "fermata") marks.push("fermata");
@@ -351,6 +370,12 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
           else report.count(MARKS.articulations);
         }
       } else if (c.localName === "ornaments" || c.localName === "technical") report.count(MARKS[c.localName], c.children.length);
+      else if (c.localName === "slur") {
+        const t = c.getAttribute("type");
+        if ((c.getAttribute("number") || "1") !== "1") { if (t === "start") report.count("Slurs inside other slurs (not imported)"); }
+        else if (t === "start") slur.start = true;
+        else if (t === "stop") slur.stop = true;
+      }
       else if (MARKS[c.localName] && c.getAttribute("type") !== "stop") report.count(MARKS[c.localName]);
     }
   }
@@ -378,6 +403,8 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     }
     if (tieStart) ev.tie = true;
     addMarks(ev);
+    if (slur.start) ev.slur = true;
+    if (slur.stop) ev.slurEnd = true;
     return;
   }
 
@@ -421,6 +448,11 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   addMarks(ev);
   const pd = pend[staffNo];
   if (pd && (pd.mi < mi || start >= pd.at)) { ev.dyn = pd.dyn; pend[staffNo] = null; }
+  const ph = pendHp[staffNo];
+  if (ph && (ph.mi < mi || start >= ph.at)) { ev.hp = ph.hp; pendHp[staffNo] = null; }
+  if (slur.start) ev.slur = true;
+  if (slur.stop) ev.slurEnd = true;
+  lastAny[staffNo] = ev;
   bar.push(ev);
   lastEvent[lk] = ev;
 }

@@ -19,6 +19,8 @@ const ev = (dur, names, o = {}) => ({
   ...(o.tup ? { tup: o.tup } : {}),
   ...(o.marks ? { marks: o.marks } : {}),
   ...(o.dyn ? { dyn: o.dyn } : {}),
+  ...(o.slur ? { slur: true } : {}), ...(o.slurEnd ? { slurEnd: true } : {}),
+  ...(o.hp ? { hp: o.hp } : {}), ...(o.hpEnd ? { hpEnd: true } : {}),
 });
 
 // Compact text form of a staff's bars, for readable expected values.
@@ -41,8 +43,8 @@ export function roundTripFixture() {
     measures: [{ key: -3, time: [4, 4], sym: "common" }, {}, { key: 2 }, { time: [6, 8] }, {}],
     staves: [
       { name: "Keys", clef: "treble", brace: true, program: 4, bars: [
-        [ev("q", "C4 E4 G4", { marks: ["staccato", "accent"], dyn: "p" }), ev("8", "D5", { dots: 1 }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
-        [ev("q", "F#5"), ev("8", "G5", { tup: [3, 2] }), ev("8", "A5", { tup: [3, 2] }), ev("8", "Bb5", { tup: [3, 2] }), ev("h", null, { marks: ["fermata"], dyn: "mf" })],
+        [ev("q", "C4 E4 G4", { marks: ["staccato", "accent"], dyn: "p" }), ev("8", "D5", { dots: 1, slur: true }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
+        [ev("q", "F#5", { slurEnd: true }), ev("8", "G5", { tup: [3, 2] }), ev("8", "A5", { tup: [3, 2] }), ev("8", "Bb5", { tup: [3, 2] }), ev("h", null, { marks: ["fermata"], dyn: "mf" })],
         [],
         [ev("q", "D5", { dots: 1 }), ev("8", "C#5"), ev("16", "B4"), ev("16", "A4"), ev("8", "G4")],
         [ev("h", "D4 F#4 A4", { dots: 1 })],
@@ -57,8 +59,8 @@ export function roundTripFixture() {
         [ev("h", "G2"), ev("h", "A2", { dyn: "sfz" })], [], [ev("w", "E2", { tie: true })], [ev("h", "E2", { dots: 1 })], [],
       ]] },
       { name: "Viola", clef: "alto", brace: false, bars: [
-        [ev("w", "C4")],
-        [ev("16", "C4", { tup: [5, 4] }), ev("16", "D4", { tup: [5, 4] }), ev("16", "E4", { tup: [5, 4] }), ev("16", "F4", { tup: [5, 4] }), ev("16", "G4", { tup: [5, 4] }), ev("h", "A4", { marks: ["marcato"] }), ev("q", "B4")],
+        [ev("w", "C4", { hp: ">" })],
+        [ev("16", "C4", { tup: [5, 4] }), ev("16", "D4", { tup: [5, 4] }), ev("16", "E4", { tup: [5, 4] }), ev("16", "F4", { tup: [5, 4] }), ev("16", "G4", { tup: [5, 4] }), ev("h", "A4", { marks: ["marcato"], hpEnd: true }), ev("q", "B4")],
         [ev("w", "D4")], [ev("q", "A3", { dots: 1 }), ev("q", "B3", { dots: 1 })], [],
       ] },
     ],
@@ -265,6 +267,24 @@ export async function run({ check, eq }) {
     if (e.dyn) return "toggle off";
     const mid = exportMIDI(s);
     return [...mid].join(",").includes([0x90, 72, 50].join(",")) || "MIDI velocity";
+  });
+
+  await check("slurs and hairpins: toggle over a range, refuse one note, broken ones cleared, validation (DESIGN §23)", () => {
+    const evs = [ev("q", "C4"), ev("q", "D4"), ev("q", "E4")];
+    if (!M.toggleSpan([evs[0]], "slur")) return "one note accepted";
+    M.toggleSpan(evs, "slur");
+    if (!evs[0].slur || !evs[2].slurEnd) return "set";
+    M.toggleSpan(evs, "slur");
+    if (evs[0].slur || evs[2].slurEnd) return "toggle off";
+    M.toggleSpan(evs.slice(0, 2), "hp", "<"); M.toggleSpan(evs, "hp", ">"); // replaces the inner one
+    if (evs[0].hp !== ">" || evs[1].hpEnd || !evs[2].hpEnd) return JSON.stringify(evs);
+    const s = M.newScore({ preset: "treble", bars: 2 });
+    s.staves[0].bars[0] = [ev("q", "C4", { slur: true }), ev("q", "D4", { slurEnd: true, slur: true }), ev("h", "E4")]; // second never ends
+    s.staves[0].bars[1] = [ev("q", "F4", { hpEnd: true }), ev("q", "G4", { hp: "<" }), ev("q", "A4", { hp: ">" }), ev("q", "B4", { hpEnd: true })];
+    const n = M.clearBrokenSpans(s);
+    const flags = s.staves[0].bars.flat().map((e) => ["slur", "slurEnd", "hp", "hpEnd"].filter((k) => e[k]).map((k) => k + (k === "hp" ? e.hp : "")).join("+") || "-").join(" ");
+    if (n !== 3 || flags !== "slur slurEnd - - - hp> hpEnd") return n + " " + flags;
+    return M.isValidScore(s) && !M.isValidScore({ ...s, staves: [{ ...s.staves[0], bars: [[{ ...ev("w", "C4"), hp: "x" }], []] }] }) || "validation";
   });
 
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {

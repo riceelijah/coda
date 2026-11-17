@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel } from "./model.js";
+import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS } from "./model.js";
 
 const VF = () => Vex.Flow;
 
@@ -138,7 +138,6 @@ export function render(score, container, sel, opts = {}) {
 
     try {
       drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, opts);
-      grow(svg, sys);
     } catch (e) {
       console.error(e);
       errors.push(`Could not draw bars ${sys.bars[0] + 1}–${sys.bars[sys.bars.length - 1] + 1}`);
@@ -183,16 +182,82 @@ export function render(score, container, sel, opts = {}) {
     }));
   }));
 
+  // Slurs and hairpins (DESIGN §23)
+  // Slurs first: hairpins go below them. floor["sys:staff"] = lowest slur y.
+  const floor = {};
+  for (const [kind, end] of SPAN_KINDS) score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => {
+    let open = null;
+    bars.forEach((bar, b) => bar.forEach((ev, i) => {
+      const ref = noteRef[s][v][b]?.[i];
+      if (open && ref) { open.refs.push(ref); open.evs.push(ev); }
+      if (ev[end] && open) {
+        try { tintedAll(ctxs, opts.dim && v !== (opts.layer || 0), () => drawSpan(ctxs, kind, open, s, floor)); } catch (e) { console.error(e); }
+        open = null;
+      }
+      if (ev[kind] && ref) open = { type: ev[kind], refs: [ref], evs: [ev], multi: allLayers(st).filter((L) => L[b].length).length > 1 };
+    }));
+  }));
+
+  systems.forEach((sys) => sys.svg && grow(sys.svg, sys));
   return { cells, systems, errors };
 }
 
-// Taller drawing when something hangs below it (low notes, dynamics, lyrics), so print, which
-// clips to the drawing, keeps it. The top stays at 0, so click positions don't move.
+function tintedAll(ctxs, on, draw) {
+  if (!on) return draw();
+  ctxs.forEach((c) => { c.save(); c.setFillStyle(DIM); c.setStrokeStyle(DIM); });
+  try { draw(); } finally { ctxs.forEach((c) => c.restore()); }
+}
+
+// One slur or hairpin over refs ({note, sys}, in order), split where the line breaks.
+function drawSpan(ctxs, kind, { type, refs, evs, multi }, s, floor) {
+  const segs = [];
+  for (const r of refs) {
+    if (!segs.length || segs[segs.length - 1].sys !== r.sys) segs.push({ sys: r.sys, notes: [] });
+    segs[segs.length - 1].notes.push(r.note);
+  }
+  const first = refs[0].note, last = refs[refs.length - 1].note;
+  // slurs go on the notehead side, or the stem side when layers share the bar
+  const up = first.getStemDirection() > 0, dir = kind === "slur" ? (multi ? (up ? -1 : 1) : (up ? 1 : -1)) : 1;
+  segs.forEach((seg, k) => {
+    const ctx = ctxs[seg.sys], stave = seg.notes[0].checkStave();
+    const n0 = seg.notes[0], n1 = seg.notes[seg.notes.length - 1];
+    const x1 = k === 0 ? n0.getAbsoluteX() + 4 : stave.getTieStartX() - 4;
+    const x2 = k === segs.length - 1 ? last.getAbsoluteX() + 6 : n1.checkStave().getTieEndX();
+    const boxes = seg.notes.map((n) => n.getBoundingBox()).filter(Boolean);
+    const edge = (bb) => (dir < 0 ? bb.y : bb.y + bb.h);
+    const ext = (vals) => (dir < 0 ? Math.min(...vals) : Math.max(...vals));
+    if (kind === "slur") {
+      const ya = k === 0 ? edge(first.getBoundingBox()) + dir * 4 : null;
+      const yz = k === segs.length - 1 ? edge(last.getBoundingBox()) + dir * 4 : null;
+      const y1 = ya ?? yz ?? ext(boxes.map(edge)), y2 = yz ?? y1;
+      const inner = boxes.length > 2 ? ext(boxes.slice(1, -1).map(edge)) + dir * 6 : null;
+      const h = Math.min(22, 6 + Math.abs(x2 - x1) * 0.06);
+      const mid = inner === null ? (y1 + y2) / 2 + dir * h : ext([(y1 + y2) / 2 + dir * h, inner]);
+      const c = 2 * mid - (y1 + y2) / 2, cx = (x1 + x2) / 2;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.quadraticCurveTo(cx, c, x2, y2);
+      ctx.quadraticCurveTo(cx, c - dir * 3, x1, y1); ctx.closePath(); ctx.fill();
+      if (dir > 0) floor[seg.sys + ":" + s] = Math.max(floor[seg.sys + ":" + s] || 0, mid);
+    } else {
+      const y = Math.max(stave.getYForLine(4) + 26, (floor[seg.sys + ":" + s] || 0) + 12, ...boxes.map((bb) => bb.y + bb.h + 14));
+      // leave room for a dynamic at either end
+      const xa = k === 0 && evs[0].dyn ? x1 + 22 : x1, xz = k === segs.length - 1 && evs[evs.length - 1].dyn ? x2 - 14 : x2;
+      const open = [k === 0 ? 0 : 3, k === segs.length - 1 ? 6 : 3]; // half-opening at each end
+      const [ha, hz] = type === "<" ? open : [6 - open[0], 6 - open[1]];
+      ctx.beginPath();
+      ctx.moveTo(xz, y - hz); ctx.lineTo(xa, y - ha); ctx.moveTo(xa, y + ha); ctx.lineTo(xz, y + hz);
+      ctx.stroke();
+    }
+  });
+}
+
+// The drawing grows to hold whatever reaches above or below it (high or low notes, fermatas,
+// clef tips, bar numbers, dynamics, lyrics): print clips each system to its drawing and splits
+// pages between them. The viewBox top can go below 0; the app reads it for click positions.
 function grow(svg, sys) {
   let bb;
   try { bb = svg.getBBox(); } catch { return; } // not laid out (hidden)
-  const h = Math.ceil(bb.y + bb.height + 8);
-  if (h > sys.height) { sys.height = h; svg.setAttribute("viewBox", `0 0 ${SHEET_W} ${h}`); }
+  const top = Math.min(0, Math.floor(bb.y - 4)), bottom = Math.max(sys.height, Math.ceil(bb.y + bb.height + 8));
+  if (top < 0 || bottom > sys.height) { sys.height = bottom - top; svg.setAttribute("viewBox", `0 ${top} ${SHEET_W} ${bottom - top}`); }
 }
 
 // Is (b, i) selected? sel may carry `end` for a range (DESIGN §11.7).

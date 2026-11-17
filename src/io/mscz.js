@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans } from "../model.js";
 import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
@@ -101,6 +101,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     let key = 0, time = [4, 4], sym;
     const tuplets = {}; // MuseScore 3: id -> ratio
     const pendDyn = []; // per voice: dynamic waiting for its chord or rest (DESIGN §22)
+    const pendHp = [], lastEv = []; // per voice: hairpin waiting for its first note; last event (DESIGN §23)
     kids(stEl, "Measure").forEach((meas, mi) => {
       const voices = kids(meas, "voice");
       for (const L of staff.layers || []) L.push([]);
@@ -149,6 +150,14 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             break;
           }
           case "endTuplet": tup = null; break;
+          case "Spanner": { // voice level: hairpins start before their first note and end after their last
+            const type = el.getAttribute("type");
+            if (type === "HairPin") {
+              if (kid(el, "next")) pendHp[vi] = ["<", ">", "<", ">"][+txt(kid(el, "HairPin"), "subtype") || 0] || "<";
+              else if (kid(el, "prev") && (bar.length ? bar[bar.length - 1] : lastEv[vi])) (bar.length ? bar[bar.length - 1] : lastEv[vi]).hpEnd = true;
+            } else if (kid(el, "next")) report.count(`Lines (${type}) not imported`);
+            break;
+          }
           case "Dynamic": {
             const d = DYN_IN[txt(el, "subtype")];
             if (d) pendDyn[vi] = d; else report.count("Unusual dynamics (not imported)");
@@ -203,6 +212,12 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             }
             for (const m of marks) if (!isRest || m === "fermata") setMark(ev, m, true);
             if (pendDyn[vi]) { ev.dyn = pendDyn[vi]; pendDyn[vi] = null; }
+            if (pendHp[vi]) { ev.hp = pendHp[vi]; pendHp[vi] = null; }
+            for (const sp of kids(el, "Spanner")) {
+              if (sp.getAttribute("type") === "Slur") { if (kid(sp, "next")) ev.slur = true; else if (kid(sp, "prev")) ev.slurEnd = true; }
+              else if (kid(sp, "next")) report.count(`Lines (${sp.getAttribute("type")}) not imported`);
+            }
+            lastEv[vi] = ev;
             // a chord or rest that starts past where this voice has got to: rests in front
             const gap = Math.floor((cur - barTicks(bar)) / 60) * 60;
             if (gap > 0) {
@@ -232,6 +247,8 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   if (!score.staves.length) throw new Error("This MuseScore file has no staves.");
 
   score.measures.push(...measuresFrom(firstAttrs));
+  const broken = clearBrokenSpans(score);
+  if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
   score.tempo = Math.max(20, Math.min(400, score.tempo || 100));
   padBars(score);
   report.notes = noteCount(score);
@@ -270,6 +287,7 @@ export function exportMSCX(score) {
       (score.composer ? `<Text><style>composer</style><text>${esc(score.composer)}</text></Text>` : "") + "</VBox>");
     const layers = allLayers(st);
     const ties = layers.map((bars) => tieMap(bars)); // per layer: "b:i" -> {next, prev} locations by midi
+    const spans = layers.map((bars) => spanMap(bars));
     score.measures.forEach((m, b) => {
       const a = attrsAt(score, b), cap = barCapacity(a.time);
       x.push("<Measure>");
@@ -284,7 +302,7 @@ export function exportMSCX(score) {
         }
         const bar = layers[v][b];
         if (v === 0 && !bar.length) x.push(`<Rest><durationType>measure</durationType><duration>${frac(cap)}</duration></Rest>`);
-        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st));
+        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st, spans[v]));
         x.push("</voice>");
       }
       x.push("</Measure>");
@@ -314,8 +332,29 @@ function tieMap(bars) {
   return map;
 }
 
+// Slurs and hairpins (DESIGN §23): "b:i" -> {slurNext, slurPrev, hpNext, hpPrev} locations. A slur
+// runs onset to onset; a hairpin from its first onset to the end of its last note.
+function spanMap(bars) {
+  const pos = [];
+  bars.forEach((bar, b) => { let t = 0; bar.forEach((e, i) => { pos.push({ b, i, t, e }); t += eventTicks(e); }); });
+  const map = {}, at = (p) => (map[p.b + ":" + p.i] ||= {});
+  for (const [k, ke] of SPAN_KINDS) {
+    let a = null;
+    for (const p of pos) {
+      if (p.e[ke] && a) {
+        const zt = k === "slur" ? p.t : p.t + eventTicks(p.e);
+        at(a)[k + "Next"] = loc(p.b - a.b, zt - a.t);
+        at(p)[k + "Prev"] = loc(a.b - p.b, a.t - zt);
+        a = null;
+      }
+      if (p.e[k]) a = p;
+    }
+  }
+  return map;
+}
+
 // One voice's events; a first voice is padded with rests to `cap`.
-function voiceXml(bar, ties, b, cap, st) {
+function voiceXml(bar, ties, b, cap, st, spans = {}) {
   const x = [];
   let open = null; // {tup, left: ticks still to fill}
   bar.forEach((e, i) => {
@@ -327,6 +366,8 @@ function voiceXml(bar, ties, b, cap, st) {
     }
     if (e.marks?.includes("fermata")) x.push("<Fermata><subtype>fermataAbove</subtype></Fermata>");
     if (e.dyn) x.push(`<Dynamic><subtype>${e.dyn}</subtype><velocity>${DYN_VEL[e.dyn] || ACCENT_VEL[e.dyn]}</velocity></Dynamic>`);
+    const sp = spans[b + ":" + i] || {};
+    if (sp.hpNext) x.push(`<Spanner type="HairPin"><HairPin><subtype>${e.hp === ">" ? 1 : 0}</subtype></HairPin><next>${sp.hpNext}</next></Spanner>`);
     const head = `${e.dots ? `<dots>${e.dots}</dots>` : ""}<durationType>${TYPE_NAME[e.dur]}</durationType>`;
     if (!e.pitches.length) x.push(`<Rest>${head}</Rest>`);
     else {
@@ -338,8 +379,12 @@ function voiceXml(bar, ties, b, cap, st) {
           (t.prev[mm] ? `<Spanner type="Tie"><prev>${t.prev[mm]}</prev></Spanner>` : "");
         return `<Note>${sp}<pitch>${mm + tc}</pitch><tpc>${tpcOf(tc || td ? shiftPitch(p, tc, td) : p)}</tpc>${tc || td ? `<tpc2>${tpcOf(p)}</tpc2>` : ""}</Note>`;
       }).join("");
-      x.push(`<Chord>${head}${arts}${notes}</Chord>`);
+      // ponytail: MuseScore slurs need chords at both ends; one on a rest is left out of this file
+      const slurs = (sp.slurNext ? `<Spanner type="Slur"><Slur/><next>${sp.slurNext}</next></Spanner>` : "") +
+        (sp.slurPrev ? `<Spanner type="Slur"><prev>${sp.slurPrev}</prev></Spanner>` : "");
+      x.push(`<Chord>${head}${arts}${slurs}${notes}</Chord>`);
     }
+    if (sp.hpPrev) x.push(`<Spanner type="HairPin"><prev>${sp.hpPrev}</prev></Spanner>`);
     if (open) { open.left -= eventTicks(e); if (open.left <= 0) { x.push("<endTuplet/>"); open = null; } }
   });
   if (open) x.push("<endTuplet/>");
