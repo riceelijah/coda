@@ -36,8 +36,8 @@ only says what to build in what order and how to know each phase is finished.
 | 9 | Entry: insert mid-bar, triplets, range select + copy/paste | done |
 | 10 | Score library in the browser | done |
 | 11 | Menu bar (File, Edit, View, Score, Help) | done |
-| 12 | Instrument per staff (model + formats) | in progress |
-| 13 | Instrument sounds on demand (all 128 GM) | not started |
+| 12 | Instrument per staff (model + formats) | done |
+| 13 | Instrument sounds on demand (all 128 GM) | in progress |
 
 ---
 

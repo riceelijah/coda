@@ -64,6 +64,7 @@ export function parseSMF(bytes) {
         const d2 = hi === 0xc0 || hi === 0xd0 ? 0 : bytes[off++];
         if (hi === 0x90 && d2 > 0) events.push({ tick, on: true, ch, note: d1 });
         else if (hi === 0x80 || hi === 0x90) events.push({ tick, on: false, ch, note: d1 });
+        else if (hi === 0xc0) events.push({ tick, program: d1 & 0x7f, ch });
       }
     }
     off = end;
@@ -105,10 +106,18 @@ export function importMIDI(bytes, fileName = "") {
 
   // collect notes per source (track for format 1, channel for format 0)
   const sources = new Map();
+  const programs = new Map(); // first program change per source
+  let extraPrograms = 0;
   tracks.forEach((evs, ti) => {
     const open = new Map(); // ch:note -> [start ticks]
     for (const e of evs) {
       if (e.meta !== undefined) continue;
+      if (e.program !== undefined) {
+        if (e.ch === 9) continue;
+        const src = format === 0 ? `c${e.ch}` : `t${ti}`;
+        if (!programs.has(src)) programs.set(src, e.program); else extraPrograms++;
+        continue;
+      }
       if (e.ch === 9) { if (e.on) report.count("Percussion notes skipped (channel 10)"); continue; }
       const k = e.ch * 128 + e.note;
       if (e.on) { if (!open.has(k)) open.set(k, []); open.get(k).push(e.tick); continue; }
@@ -128,7 +137,7 @@ export function importMIDI(bytes, fileName = "") {
   const score = { title: fileName.replace(/\.[^.]+$/, "") || "Untitled", composer: "", tempo,
     measures: [{ key, time }], staves: [] };
   let n = 0;
-  for (const src of sources.values()) {
+  for (const [key0, src] of sources) {
     n++;
     const notes = src.notes.map((x) => ({ ...x, end: Math.max(x.end, x.start + GRID) }));
     if (!notes.length) continue;
@@ -148,7 +157,8 @@ export function importMIDI(bytes, fileName = "") {
     });
     if (cut) report.count("Overlapping notes shortened to fit one voice", cut);
 
-    const staff = { name: src.name || `Track ${n}`, clef: "treble", brace: false, bars: [] };
+    const staff = { name: src.name || `Track ${n}`, clef: "treble", brace: false, bars: [],
+      ...(programs.has(key0) ? { program: programs.get(key0) } : {}) };
     const pitchesOf = (g) => [...g.midis].sort((a, b) => a - b).map((m) => spellMidi(m, key));
     const emit = (a, b, pitches) => {
       // split [a,b) at barlines, then into note values; tie all note pieces together
@@ -176,6 +186,7 @@ export function importMIDI(bytes, fileName = "") {
     if (cnt && sum / cnt < 60) staff.clef = "bass";
     score.staves.push(staff);
   }
+  if (extraPrograms) report.count("Instrument changes mid-track (first one used)", extraPrograms);
   if (!score.staves.length) throw new Error("This MIDI file has no notes Coda can show.");
   const bars = Math.max(...score.staves.map((s) => s.bars.length));
   while (score.measures.length < bars) score.measures.push({});

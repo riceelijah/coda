@@ -34,14 +34,14 @@ export function roundTripFixture() {
     title: "Round & Trip <test>", composer: "Tester \"Q\"", tempo: 84,
     measures: [{ key: -3, time: [4, 4] }, {}, { key: 2 }, { time: [6, 8] }, {}],
     staves: [
-      { name: "Keys", clef: "treble", brace: true, bars: [
+      { name: "Keys", clef: "treble", brace: true, program: 4, bars: [
         [ev("q", "C4 E4 G4"), ev("8", "D5", { dots: 1 }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
         [ev("q", "F#5"), ev("8", "G5", { tup: [3, 2] }), ev("8", "A5", { tup: [3, 2] }), ev("8", "Bb5", { tup: [3, 2] }), ev("h")],
         [],
         [ev("q", "D5", { dots: 1 }), ev("8", "C#5"), ev("16", "B4"), ev("16", "A4"), ev("8", "G4")],
         [ev("h", "D4 F#4 A4", { dots: 1 })],
       ] },
-      { name: "Keys", clef: "bass", brace: false, bars: [
+      { name: "Keys", clef: "bass", brace: false, program: 4, bars: [
         [ev("w", "C3")],
         [ev("h", "F2", { dots: 2 }), ev("8", "Ab2")],
         [ev("h", "D3", { tie: true }), ev("h", "D3")],
@@ -65,6 +65,22 @@ export async function run({ check, eq }) {
       if (!eq(a.staves[s], b.staves[s])) return `staff ${s}\n  want ${brief(a.staves[s])}\n  got  ${brief(b.staves[s])}\n  ${JSON.stringify({ ...b.staves[s], bars: undefined })}`;
     }
     return `staff count ${b.staves.length}`;
+  });
+
+  await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {
+    const s = M.newScore({ preset: "piano", bars: 1 });
+    if (M.setStaffProgram(s, 1, 40) || s.staves[0].program !== 40 || s.staves[1].program !== 40) return "pair";
+    if (!M.setStaffProgram(s, 0, 128)) return "accepted 128";
+    if (!M.isValidScore(s) || M.isValidScore({ ...s, staves: [{ ...s.staves[0], program: 200 }, s.staves[1]] })) return "validation";
+    // format 0, one channel: program 73 (flute), then a later change that must be counted, one quarter C5
+    const trk = [0x00, 0xc0, 73, 0x00, 0x90, 72, 100, 0x83, 0x60, 0x80, 72, 0, 0x00, 0xc0, 10, 0x00, 0xff, 0x2f, 0x00];
+    const bytes = new Uint8Array([0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0x01, 0xe0,
+      0x4d, 0x54, 0x72, 0x6b, 0, 0, 0, trk.length, ...trk]);
+    return import("./midi.js").then(({ importMIDI }) => {
+      const r = importMIDI(bytes, "x.mid");
+      return (r.score.staves[0].program === 73 && /Instrument changes/.test(JSON.stringify(r.report))) ||
+        `program ${r.score.staves[0].program}, report ${JSON.stringify(r.report)}`;
+    });
   });
 
   await check("MusicXML export pads an underfull bar to capacity", () => {

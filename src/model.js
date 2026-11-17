@@ -323,6 +323,24 @@ export function clearAttrs(score, b) {
   return null;
 }
 
+// Staves grouped into parts: a braced staff and the one after it share a part.
+export function partGroups(score) {
+  const groups = [];
+  for (let s = 0; s < score.staves.length; s++) {
+    if (score.staves[s].brace && s + 1 < score.staves.length) { groups.push([s, s + 1]); s++; }
+    else groups.push([s]);
+  }
+  return groups;
+}
+
+// Set the General MIDI program (0–127) of a staff's whole part (DESIGN §13.2).
+export function setStaffProgram(score, s, program) {
+  if (!Number.isInteger(program) || program < 0 || program > 127) return "Unknown instrument";
+  const g = partGroups(score).find((grp) => grp.includes(s));
+  for (const i of g) score.staves[i].program = program;
+  return null;
+}
+
 export const PRESETS = {
   treble: [{ name: "Staff", clef: "treble" }],
   bass: [{ name: "Staff", clef: "bass" }],
@@ -370,6 +388,7 @@ export function isValidScore(sc) {
     const n = sc.measures.length;
     if (!n || !sc.measures[0].time) return false;
     return sc.staves.every((st) => CLEFS.includes(st.clef) && Array.isArray(st.bars) && st.bars.length === n &&
+      (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
       st.bars.every((bar) => Array.isArray(bar) && bar.every((e) =>
         DURS.includes(e.dur) && Array.isArray(e.pitches) &&
         e.pitches.every((p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2))));

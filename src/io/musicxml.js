@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -14,16 +14,6 @@ const CLEF_OUT = { treble: ["G", 2], bass: ["F", 4], alto: ["C", 3], tenor: ["C"
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 // ---------- export ----------
-
-// Staves grouped into parts: a braced staff and the one after it share a part.
-export function partGroups(score) {
-  const groups = [];
-  for (let s = 0; s < score.staves.length; s++) {
-    if (score.staves[s].brace && s + 1 < score.staves.length) { groups.push([s, s + 1]); s++; }
-    else groups.push([s]);
-  }
-  return groups;
-}
 
 function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop }) {
   const x = ["<note>"];
@@ -103,7 +93,15 @@ export function exportMusicXML(score) {
     "<encoding><software>Coda</software></encoding></identification>",
     "<part-list>",
   ];
-  groups.forEach((g, i) => x.push(`<score-part id="P${i + 1}"><part-name>${esc(score.staves[g[0]].name || "")}</part-name></score-part>`));
+  groups.forEach((g, i) => {
+    const prog = score.staves[g[0]].program, id = `P${i + 1}`;
+    // instrument only when set, so scores without one round-trip unchanged (DESIGN §13.2)
+    const inst = Number.isInteger(prog)
+      ? `<score-instrument id="${id}-I1"><instrument-name>${esc(score.staves[g[0]].name || "")}</instrument-name></score-instrument>` +
+        `<midi-instrument id="${id}-I1"><midi-channel>${i < 9 ? i + 1 : Math.min(i + 2, 16)}</midi-channel><midi-program>${prog + 1}</midi-program></midi-instrument>`
+      : "";
+    x.push(`<score-part id="${id}"><part-name>${esc(score.staves[g[0]].name || "")}</part-name>${inst}</score-part>`);
+  });
   x.push("</part-list>");
   groups.forEach((g, gi) => {
     x.push(`<part id="P${gi + 1}">`);
@@ -164,8 +162,18 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   if (root.localName === "score-timewise") throw new Error("This is a 'timewise' MusicXML file, which Coda can't read yet. Most programs can re-export it as standard (partwise) MusicXML.");
   if (root.localName !== "score-partwise") throw new Error("This XML file isn't a MusicXML score.");
 
-  const names = {};
-  for (const sp of root.querySelectorAll("part-list > score-part")) names[sp.getAttribute("id")] = txt(sp, "part-name") || "";
+  const names = {}, programs = {};
+  for (const sp of root.querySelectorAll("part-list > score-part")) {
+    const id = sp.getAttribute("id");
+    names[id] = txt(sp, "part-name") || "";
+    const mis = kids(sp, "midi-instrument");
+    if (mis.length > 1) report.count("Extra instruments in a part (first one used)", mis.length - 1);
+    const pr = mis.length ? parseInt(txt(mis[0], "midi-program"), 10) : NaN; // 1-based in MusicXML
+    if (Number.isInteger(pr)) {
+      if (pr >= 1 && pr <= 128) programs[id] = pr - 1; else report.count("Instrument numbers out of range (ignored)");
+    }
+    if (mis.some((m) => txt(m, "midi-channel") === "10" || kid(m, "midi-unpitched"))) report.count("Percussion parts (played as pitched notes)");
+  }
 
   const score = { title: "", composer: "", tempo: 0, measures: [], staves: [] };
   const firstPartAttrs = []; // per bar: {key, time}
@@ -174,7 +182,9 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     let nStaves = 1;
     for (const st of part.querySelectorAll("attributes > staves")) nStaves = Math.max(nStaves, +st.textContent || 1);
     const staves = Array.from({ length: nStaves }, (_, k) => ({
-      name: names[part.getAttribute("id")] || `Part ${pi + 1}`, clef: null, brace: nStaves === 2 && k === 0, bars: [],
+      name: names[part.getAttribute("id")] || `Part ${pi + 1}`, clef: null, brace: nStaves === 2 && k === 0,
+      ...(programs[part.getAttribute("id")] !== undefined ? { program: programs[part.getAttribute("id")] } : {}),
+      bars: [],
     }));
     if (nStaves > 2) report.add(`A part with ${nStaves} staves was split into separate staves without a brace`);
     let divisions = 1, key = 0, time = [4, 4];

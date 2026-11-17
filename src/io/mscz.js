@@ -45,7 +45,10 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   kids(sc, "Part").forEach((part) => {
     const n = Math.max(1, kids(part, "Staff").length);
     const name = txt(part, "trackName") || txt(kid(part, "Instrument"), "longName") || "";
-    for (let k = 0; k < n; k++) decl.push({ name, brace: n === 2 && k === 0 });
+    // MuseScore 4 often writes program 0 for every instrument, so 0 is treated as "not set"
+    const prog = parseInt(kid(kid(kid(part, "Instrument"), "Channel"), "program")?.getAttribute("value"), 10);
+    const program = prog > 0 && prog <= 127 ? prog : undefined;
+    for (let k = 0; k < n; k++) decl.push({ name, brace: n === 2 && k === 0, program });
     if (n > 2) report.add(`A part with ${n} staves was split into separate staves without a brace`);
   });
 
@@ -67,7 +70,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   const firstAttrs = [];
   kids(sc, "Staff").forEach((stEl, si) => {
     const d = decl[si] || { name: "", brace: false };
-    const staff = { name: d.name, clef: null, brace: d.brace, bars: [] };
+    const staff = { name: d.name, clef: null, brace: d.brace, bars: [], ...(d.program !== undefined ? { program: d.program } : {}) };
     let key = 0, time = [4, 4];
     const tuplets = {}; // MuseScore 3: id -> ratio
     kids(stEl, "Measure").forEach((meas, mi) => {
