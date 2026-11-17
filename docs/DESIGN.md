@@ -46,6 +46,8 @@ src/model.js        PURE. score model, tick math, pitch math, edit commands. No 
 src/render.js       model -> SVG via VexFlow; returns hit-test geometry
 src/play.js         WebAudio playback
 src/app.js          UI wiring: toolbar, palette, mouse, keyboard, undo, autosave, file open/save
+src/demo.js         demo score for `?demo` (exercises every rendering case)
+src/io/util.js      shared import helpers: text decoding, safe XML parse, size-capped unzip, Report
 src/io/open.js      format sniffing + dispatch
 src/io/musicxml.js  MusicXML import + export, MXL unzip
 src/io/midi.js      Standard MIDI File import
@@ -53,6 +55,7 @@ src/io/mscz.js      MuseScore .mscz / .mscx import
 src/io/musx.js      .musx decode + EnigmaXML import
 vendor/vexflow.js   vendor/fflate.js   vendor/README.md (versions, source URLs, licences)
 test.html           loads src modules, runs assert checks, shows PASS/FAIL
+src/io/tests*.js    file-format checks loaded by test.html (one module per phase)
 samples/            small test files, one or more per format
 docs/DESIGN.md  docs/PLAN.md
 README.md  LICENSE  .nojekyll  .gitignore  CLAUDE.md  .claude/launch.json
@@ -479,11 +482,12 @@ function of its input (testable without UI).
 | zip | contains an entry ending `.mscx` | MuseScore `.mscz` (check this **before** the `.mxl` row: MuseScore 3 files also contain `META-INF/container.xml`) |
 | zip | contains `META-INF/container.xml` | `.mxl` |
 | `<` … | root element `museScore` | uncompressed MuseScore `.mscx` |
-| `4D 54 68 64` ("MThd") | | MIDI |
+| `4D 54 68 64` ("MThd"), or a RIFF `RMID` wrapper | | MIDI |
 | `<` after optional BOM/whitespace | root element `score-partwise` | MusicXML |
 | `<` … | root element `finale` | raw EnigmaXML (accept it; go to §9.5 step 4) |
 | `<` … | root element `score-timewise` | unsupported → message |
 | anything else | extension `.mus` | legacy binary → message below |
+| `{` | valid score JSON | a Coda autosave copied to a file (accepted as-is) |
 | anything else | | "Coda doesn't recognise this file." |
 
 Legacy message (the only place product names may appear in the UI):
@@ -686,7 +690,7 @@ each against decoded XML before relying on it.
 ### 9.6 Import report
 
 ```js
-report = { format: "MusicXML", notes: 412, warnings: [ "12 notes in a second voice were skipped", … ] }
+report = { format: "MusicXML", notes: 412, warnings: [ "Notes in other voices skipped: 12", … ] }
 ```
 
 After any import, show a small non-modal panel: "Opened *file* — 412 notes." followed by the

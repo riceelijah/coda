@@ -288,8 +288,8 @@ function enterAtCaret(pitch) {
     const s = state.caret.staff;
     let b = state.caret.bar;
     const room = (bb) => M.barCapacity(M.attrsAt(sc, bb).time) - M.barTicks(sc.staves[s].bars[bb]);
-    if (need > M.barCapacity(M.attrsAt(sc, b).time)) return "That note is longer than a bar";
     while (room(b) < need) {
+      if (need > M.barCapacity(M.attrsAt(sc, b).time)) return "That note is longer than a bar";
       b++;
       if (b >= sc.measures.length) M.addMeasure(sc, sc.measures.length - 1);
     }
@@ -606,6 +606,7 @@ function init() {
   $("b-new").onclick = () => openSetup(true);
   $("title").onclick = $("composer").onclick = () => openSetup(false);
   $("setup").addEventListener("close", closeSetup);
+  $("setup-cancel").onclick = () => $("setup").close("cancel");
   $("b-open").onclick = () => $("file").click();
   $("file").onchange = (e) => { openFile(e.target.files[0]); e.target.value = ""; };
   $("b-save").onclick = saveFile;

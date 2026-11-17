@@ -41,7 +41,8 @@ name = lambda s: (0, b"\xff\x03" + vlq(len(s)) + s.encode())
 meta = [(0, b"\xff\x51\x03\x07\xa1\x20"),      # 500000 us/quarter = 120 bpm
         (0, b"\xff\x58\x04\x04\x02\x18\x08"),  # 4/4
         (0, b"\xff\x59\x02\x01\x00")]          # G major
-melody = [name("Melody")] + notes(0, [(67, 0, 1), (69, 1, 2), (71, 2, 3), (74, 3, 5), (78, 6, 8)], Q)
+sysex = (0, b"\xf0\x05\x7e\x7f\x09\x01\xf7")  # GM reset; must be skipped cleanly
+melody = [name("Melody"), sysex] + notes(0, [(67, 0, 1), (69, 1, 2), (71, 2, 3), (74, 3, 5), (78, 6, 8)], Q)
 bass = [name("Bass")] + notes(1, [(43, 0, 4), (50, 0, 4), (48, 4, 6), (50, 6, 8)], Q)
 (HERE / "scale.mid").write_bytes(smf(1, Q, [track(meta), track(melody), track(bass)]))
 

@@ -56,7 +56,8 @@ export function parseSMF(bytes) {
         events.push({ tick, meta: type, data });
         if (type === 0x2f) break;
       } else if (b === 0xf0 || b === 0xf7) {
-        off += vlq();
+        const n = vlq(); // read the length first: `off += vlq()` would add to the old offset
+        off += n;
       } else {
         const hi = b & 0xf0, ch = b & 0x0f;
         const d1 = bytes[off++];
