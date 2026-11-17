@@ -76,20 +76,25 @@ function dynamics(score, from) {
       return v;
     };
     // hairpins (DESIGN §23): from the level where they start to the next dynamic when it comes by a
-    // beat after the end and goes their way, else 16 steps; the level reached holds afterwards
-    ramps.sort((a, b) => a.t0 - b.t0);
-    for (const r of ramps) {
-      r.v0 = levelAt(r.t0);
-      const next = levels.find(([lt]) => lt > r.t0 && lt <= r.t1 + PPQ);
-      r.v1 = next && (next[1] - r.v0) * r.dir > 0 ? next[1] : Math.max(16, Math.min(127, r.v0 + 16 * r.dir));
-      levels.push([r.t1 - 0.5, r.v1]); // just before t1, so a dynamic on the next note still wins
-      levels.sort(byTime);
-    }
+    // beat after the end and goes their way, else 16 steps. A ramp stops early at a dynamic inside
+    // it or where the next hairpin starts (a swell's peak); the level reached holds afterwards.
+    const dyns = [...levels], done = [];
     const at = (tick) => {
       if (accents.has(tick)) return accents.get(tick);
-      const r = ramps.find((x) => tick >= x.t0 && tick < x.t1);
+      const r = done.find((x) => tick >= x.t0 && tick < x.t1);
       return r ? Math.round(r.v0 + ((r.v1 - r.v0) * (tick - r.t0)) / (r.t1 - r.t0)) : levelAt(tick);
     };
+    ramps.sort((a, b) => a.t0 - b.t0);
+    ramps.forEach((r, i) => {
+      const next = dyns.find(([lt]) => lt > r.t0 && lt <= r.t1 + PPQ);
+      r.v0 = accents.has(r.t0) ? levelAt(r.t0) : at(r.t0); // an accent is one note, not the level
+      r.v1 = next && (next[1] - r.v0) * r.dir > 0 ? next[1] : Math.max(16, Math.min(127, r.v0 + 16 * r.dir));
+      const nx = ramps[i + 1];
+      r.t1 = Math.min(r.t1, next && next[0] < r.t1 ? next[0] : Infinity, nx && nx.t0 > r.t0 ? nx.t0 : Infinity);
+      done.push(r);
+      levels.push([r.t1 - 0.5, r.v1]); // just before the end, so a dynamic there still wins
+      levels.sort(byTime);
+    });
     for (const s of g) byStaff[s] = at;
   }
   return (s, tick) => byStaff[s](tick);

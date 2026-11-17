@@ -311,8 +311,15 @@ export async function run({ check, eq }) {
     s.staves[0].bars[0] = [ev("q", "C5", { dyn: "p", hp: "<" }), ev("q", "D5"), ev("q", "E5"), ev("q", "F5", { hpEnd: true })];
     s.staves[0].bars[1] = [ev("q", "G5", { dyn: "f", hp: ">" }), ev("q", "F5", { hpEnd: true }), ev("h", "E5")];
     s.staves[0].bars[2] = [ev("w", "C5", { dyn: "sfz" })];
-    const v = schedule(s).notes.map((n) => n.vel).join(" ");
-    return v === "50 62 73 85 96 88 80 112" || v;
+    const vel = (sc) => schedule(sc).notes.map((n) => n.vel).join(" ");
+    let v = vel(s);
+    if (v !== "50 62 73 85 96 88 80 112") return v;
+    s.staves[0].bars[0][3].dyn = "f"; // a dynamic on the hairpin's last note is where it arrives
+    if ((v = vel(s)) !== "50 65 81 96 96 88 80 112") return "dyn on last note: " + v;
+    s.staves[0].bars[0] = [ev("q", "C5", { dyn: "p", hp: "<" }), ev("q", "D5"), ev("q", "E5", { hpEnd: true, hp: ">" }), ev("q", "F5")];
+    s.staves[0].bars[1] = [ev("q", "G5", { hpEnd: true }), ev("q", "F5"), ev("h", "E5")];
+    s.staves[0].bars[2] = [ev("w", "C5")];
+    return (v = vel(s)) === "50 58 66 61 55 50 50 50" || "swell: " + v; // peak on the shared note, back to p
   });
 
   await check("lyrics: setLyric, syllabics, validation, import counts (DESIGN §24)", () => {
