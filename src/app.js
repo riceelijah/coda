@@ -541,13 +541,9 @@ async function saveFile() {
   try {
     const { exportMusicXML } = await import("./io/musicxml.js");
     const xml = exportMusicXML(state.score);
-    const blob = new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = (state.score.title || "score").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 100) + ".musicxml";
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    message("Saved " + a.download);
+    const name = (state.score.title || "score").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 100) + ".musicxml";
+    download(new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" }), name);
+    message("Saved " + name);
   } catch (e) { console.error(e); message("Saving is not available yet", true); }
 }
 
@@ -563,6 +559,24 @@ async function openFile(file) {
     console.error(e);
     showReport(file.name, { error: e.message || String(e) });
   }
+  if (new URLSearchParams(location.search).has("debug") && /\.musx$/i.test(file.name)) debugMusx(file);
+}
+
+// ?debug: save the decoded EnigmaXML of a .musx file, for confirming the format (PLAN Phase 6).
+async function debugMusx(file) {
+  try {
+    const { decodeMusx } = await import("./io/musx.js");
+    const text = decodeMusx(new Uint8Array(await file.arrayBuffer()));
+    download(new Blob([text], { type: "application/xml" }), file.name.replace(/\.musx$/i, "") + ".enigma.xml");
+  } catch (e) { message("Debug decode failed: " + e.message, true); }
+}
+
+function download(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 function showReport(name, report) {

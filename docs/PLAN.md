@@ -30,7 +30,7 @@ only says what to build in what order and how to know each phase is finished.
 | 3 | MusicXML / MXL open + save | done |
 | 4 | MIDI import | done |
 | 5 | MuseScore `.mscz` import | done (4.x verified; 3.x untested) |
-| 6 | `.musx` import | not started — **needs sample files from the user** |
+| 6 | `.musx` import | decode done; mapping **blocked on sample files from the user** |
 | 7 | Publish to GitHub Pages | not started — **needs the user's go-ahead** |
 
 ---
@@ -183,8 +183,8 @@ Without real files this phase cannot be verified; do not write the mapper blind.
 
 Order matters here:
 
-1. [ ] `crypt` + unzip + gunzip + parse (§9.5 "Decode"). Test check 7.
-2. [ ] `?debug` download of the decoded EnigmaXML.
+1. [x] `crypt` + unzip + gunzip + parse (§9.5 "Decode"). Test check 7. (Tested on a synthetic file only.)
+2. [x] `?debug` download of the decoded EnigmaXML.
 3. [ ] **Open the decoded XML and confirm every element name and formula in §9.5**, not only
        the rows of its "[expected]" table: the Structure bullets were partly inferred too.
        Update DESIGN.md with what the file actually says and change the markers to [verified]. If the structure differs from §9.5 in a way that changes the
