@@ -49,6 +49,7 @@ only says what to build in what order and how to know each phase is finished.
 | 22 | Export menu: PDF, MusicXML, .mxl, .mscz, MIDI, WAV, compressed audio (DESIGN §19) | done |
 | 23 | Parts: add, remove, rename, reorder (DESIGN §20) | done |
 | 24 | Transposing instruments (DESIGN §21) | done |
+| 25 | .musx: second voices, articulations, transposition, tempo, C/¢, sounds by name (DESIGN §9.5) | done |
 
 ---
 

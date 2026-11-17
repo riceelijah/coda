@@ -25,7 +25,7 @@ Smart Shape, Lyrics, Repeat, Key Signature, Mass Mover).
 | **Insert notes mid-bar** | **Done (Phase 9):** typing goes after the selected note; clicking between notes inserts there. An overwrite mode is not done. | — |
 | **Tuplet entry** | **Done (Phases 9, 17):** 3:2, 2:3, 4:3, 5:4, 6:4 (`9`/`;`, Notes ▸ Tuplet…). 7-tuplets don't fit the tick grid. | — |
 | **Second voice** (stems up/down in one staff) | **Done (Phase 18):** layers 1–4, entered with the Layer buttons; open, draw, play and save from MusicXML, MuseScore and .musx. | — |
-| **Articulations**: staccato, accent, tenuto, marcato, fermata | **Done (Phase 19):** Notes menu and right-click; MusicXML and MuseScore both read them; staccato plays short. `.musx` articulations not read yet. | — |
+| **Articulations**: staccato, accent, tenuto, marcato, fermata | **Done (Phase 19):** Notes menu and right-click; MusicXML and MuseScore both read them; staccato plays short. `.musx` articulations too (Phase 25). | — |
 | **Dynamics and hairpins** (p, mf, ff, cresc.) | NotePad's Expression tool also did tempo text and rehearsal letters. | M |
 | **Slurs** | | M |
 | **Lyrics** (one verse) | Type syllables under notes; space moves on, hyphen splits a word. | M |
@@ -61,7 +61,7 @@ Ordered roughly by how often they come up for students, teachers and hobbyists.
 | Feature | Notes | Size |
 |---|---|---|
 | **Transpose the whole score** (by interval or to a new key) | A teacher must-have. | S |
-| **Transposing instruments** and a concert-pitch toggle | **Done (Phase 24):** set per part in Parts and instruments; read and written in MusicXML and MuseScore files. Still to do: a concert-pitch view toggle, `.musx` transpositions. | S |
+| **Transposing instruments** and a concert-pitch toggle | **Done (Phase 24):** set per part in Parts and instruments; read and written in MusicXML and MuseScore files. `.musx` transpositions read (Phase 25). Still to do: a concert-pitch view toggle. | S |
 | **Chord symbols** above the staff | Lead sheets; NotePad couldn't do this. | M |
 | **Part extraction** (print one staff on its own) | | M |
 | **Better playback sounds** | **Done (Phase 13):** all 128 General MIDI sounds, downloaded on demand. Your own sounds: done (Phase 21). Still to do: a note-level playback cursor. | — |

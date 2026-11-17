@@ -1,6 +1,7 @@
 // .musx checks (Phase 6). Samples in samples/musx are musxdom's test files (MIT, see README there);
 // expected pitches for keysigs come from musxdom's own KeySigs test.
 import { crypt, decodeMusx } from "./musx.js";
+import { isValidScore } from "../model.js";
 
 export async function run({ check, brief, fetchBytes, importBytes }) {
   await check("musx: crypt is symmetric and resets every 128 KiB", () => {
@@ -85,6 +86,70 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
     const got = brief(r.score.staves[0]);
     if (got !== "C4:q.~ C4+Eb4:8") return got;
     return /articulations \(not imported\): 1/.test(warn(r)) && /placeholder entries skipped: 1/.test(warn(r)) || warn(r);
+  });
+
+  await check("musx sample: second voices go to a free layer from their launch point; cross-voice ties dropped", async () => {
+    const r = await open("v1v2Ties");
+    const st = r.score.staves[0];
+    const got = [st.bars, ...(st.layers || [])].map((L) => brief({ bars: L })).join(" + ");
+    if (got !== "r:h r:q F4+A4:q~ | F4+A4+E5:h r:q F4+A4+E5:q~ | A4+E5:h r:h + r:h. C5:16 D5:16 E5:8 |  | F4:8 E4:8~ E4:q") return got;
+    if (!/Ties with no matching next note dropped: 1/.test(warn(r))) return warn(r);
+    // the second launch would start inside a triplet and overfill the bar: skipped and counted
+    const t = await open("v1v2tuplets");
+    const L2 = brief({ bars: t.score.staves[0].layers[0] });
+    return (L2 === "A4:8/3:2 C4:8/3:2 C4:8/3:2 C4:8 F4:8" && /Notes in second voices skipped: 4/.test(warn(t))) || `${L2} / ${warn(t)}`;
+  });
+
+  await check("musx sample: articulations from a legacy music font", async () => {
+    const r = await open("v1v2Ties2");
+    const st = r.score.staves[0];
+    const marks = [st.bars, ...(st.layers || [])].flat(2).filter((e) => e.marks).map((e) => e.marks.join("+")).join(" ");
+    return marks === "staccato staccato staccato accent" || marks;
+  });
+
+  await check("musx samples: every one imports to a valid score", async () => {
+    const bad = [];
+    for (const n of ["keysigs", "enharmonics_test", "quintuplet", "grace_notes", "layers", "piano_inst", "multistaff_inst",
+      "v1v2Ties", "v1v2Ties2", "v1v2tuplets", "transpose", "expdef", "timesig-inddisp"]) {
+      const r = await open(n);
+      if (!isValidScore(r.score)) bad.push(n);
+    }
+    const t = await open("timesig-inddisp"), s = await open("transpose");
+    if (!/real meter used\): 1/.test(warn(t))) return warn(t);
+    if (!/staff styles \(not imported\): 4/.test(warn(s))) return warn(s);
+    return !bad.length || bad.join();
+  });
+
+  await check("musx: transposition (key and chromatic), tempo, common time, sound by name, SMuFL marks (inline EnigmaXML)", async () => {
+    const staff = (n, extra) => `<staffSpec cmper="${n}">${extra}</staffSpec><frameSpec cmper="${n}" inci="0"><startEntry>${n * 2 - 1}</startEntry><endEntry>${n * 2 - 1 + (n === 1 ? 1 : 0)}</endEntry></frameSpec>` +
+      `<instUsed cmper="0" inci="${n - 1}"><inst>${n}</inst></instUsed>`;
+    const x = `<finale xmlns="http://www.makemusic.com/2012/finale"><options><timeSignatureOptions><timeSigDoAbrvCommon/></timeSignatureOptions></options><others>
+      <measSpec cmper="1"><beats>4</beats><divbeat>1024</divbeat></measSpec>
+      ${staff(1, "<fullName>1</fullName>")}
+      ${staff(2, "<transposition><keysig><interval>1</interval><adjust>2</adjust></keysig></transposition>")}
+      ${staff(3, "<transposition><chromatic><diatonic>5</diatonic><alteration>0</alteration></chromatic></transposition>")}
+      <textBlock cmper="1"><textID>1</textID></textBlock><fontName cmper="0"><name>Maestro</name></fontName>
+      <articDef cmper="1"><charMain>58544</charMain></articDef><articDef cmper="2"><charMain>58561</charMain></articDef>
+      <articDef cmper="3"><charMain>46</charMain></articDef><articDef cmper="4"><charMain>40</charMain><fontMain>9</fontMain></articDef>
+      <textExprDef cmper="1"><value>60</value><auxdata1>1536</auxdata1><useAuxData/><playType>time</playType></textExprDef>
+      <measExprAssign cmper="1" inci="0"><textExprID>1</textExprID></measExprAssign><measExprAssign cmper="1" inci="1"><textExprID>2</textExprID><horzEduOff>512</horzEduOff></measExprAssign>
+      </others><details>
+      ${[1, 2, 3].map((n) => `<gfhold cmper1="${n}" cmper2="1"><frame1>${n}</frame1></gfhold>`).join("")}
+      <articAssign entnum="1" inci="0"><articDef>1</articDef></articAssign><articAssign entnum="2" inci="0"><articDef>2</articDef></articAssign>
+      <articAssign entnum="2" inci="1"><articDef>3</articDef></articAssign><articAssign entnum="3" inci="0"><articDef>3</articDef></articAssign>
+      <articAssign entnum="5" inci="0"><articDef>4</articDef></articAssign></details>
+      <entries><entry entnum="1" prev="0" next="2"><dura>2048</dura><isNote/><note id="1"><harmLev>0</harmLev></note></entry>
+      <entry entnum="2" prev="1" next="0"><dura>2048</dura></entry>
+      <entry entnum="3" prev="0" next="0"><dura>4096</dura><isNote/><note id="1"><harmLev>0</harmLev></note></entry>
+      <entry entnum="5" prev="0" next="0"><dura>4096</dura><isNote/><note id="1"><harmLev>0</harmLev></note></entry></entries>
+      <texts><blockText number="1">Flute</blockText></texts></finale>`;
+    const r = await importBytes(new TextEncoder().encode(x), "inline.xml");
+    const sc = r.score, w = warn(r);
+    if (sc.tempo !== 90 || sc.measures[0].sym !== "common" || sc.staves[0].program !== 73) return `tempo ${sc.tempo} sym ${sc.measures[0].sym} program ${sc.staves[0].program}`;
+    const got = sc.staves.map((st) => `${st.transpose || "-"} ${brief(st)} ${st.bars[0].map((e) => (e.marks || []).join("+")).join(",")}`).join(" / ");
+    if (got !== "- C4:h r:h staccato+accent,fermata / -2,-1 D4:w staccato / -9,-5 A4:w ") return got;
+    return (/Articulations on rests \(not imported\): 1/.test(w) && /Other articulations \(not imported\): 1/.test(w) &&
+      /Chromatic transpositions/.test(w) && /Expressions .* skipped: 1/.test(w)) || w;
   });
 
   await check("musx sample: piano staves, clefs, names and brace", async () => {

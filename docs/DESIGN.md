@@ -627,7 +627,7 @@ the CC0 decrypt routine above):
 - Reference reader (C++, MIT): `https://github.com/openmusx/musxdom` — `src/musx/dom/Entries.cpp`,
   `CommonClasses.cpp`, `Others.h`, `Details.h`, `Options.h`. (The old `rpatters1/musxdom` URL redirects here.)
 
-**Structure — [verified]** against seven real `.musx` files (musxdom's test data, kept in
+**Structure — [verified]** against thirteen real `.musx` files (musxdom's test data, kept in
 `samples/musx/`) and musxdom's source and tests. Everything below was seen in decoded files
 unless marked otherwise.
 
@@ -666,18 +666,46 @@ unless marked otherwise.
 - Tuplets: `details > tupletDef[entnum][inci="0"]` with `symbolicNum`/`symbolicDur` and
   `refNum`/`refDur` (5 eighths in the time of 4 = 5/512, 4/512). The tuplet covers entries until
   `symbolicNum × symbolicDur` EDU of written values are used.
-- **[expected], not seen in a sample:** voice-2 entries (`<voice2/>`, `<v2/>` accepted), title
-  and composer from `texts > fileInfo[type]`, multiple `frameSpec` incis.
+- Voice 2: entries flagged `<v2/>` follow, in the same frame chain, the voice-1 entry flagged
+  `<controller/>` that launches them, and start where it starts. They keep their own tuplet state.
+- Articulations: `details > articAssign[entnum] > articDef` → `others > articDef` `charMain`
+  (+ `fontMain` → `fontName`). SMuFL code points: U+E4A0 accent, E4A2 staccato, E4A4 tenuto,
+  E4AC marcato, E4AE marcato+staccato, E4B0 accent+staccato, E4B2 tenuto+staccato, E4B4
+  tenuto+accent (odd = below), E4C0–E4CB fermatas. Legacy fonts (Maestro, Petrucci, Jazz,
+  Broadway Copyist, Engraver Font Set): 46 staccato, 62 accent, 45 tenuto, 94 marcato, 85/117
+  fermata (94/85/117 from the font's character map, not yet seen in a file).
+- Transposition: `staffSpec > transposition`, the interval concert → written: `keysig > interval`
+  (steps) + `adjust` (key change in fifths), or `chromatic > diatonic` + `alteration` (key change
+  as musxdom `calcKeySigChangeFromInterval`). Semitones = (fifths + 12·steps) / 7. In chromatic
+  mode Finale keeps the concert key signature. Mid-score changes come from `staffStyle` /
+  `staffStyleAssign`.
+- Tempo: `measExprAssign[cmper=measure] > textExprID` → `textExprDef` with `playType` time,
+  `value` and, with `useAuxData`, `auxdata1` = the beat unit in EDU.
+- C/¢: as musxdom `TimeSignature::getAbbreviatedSymbol`: with `measSpec > useDisplayTimesig` the
+  bar's `abbrvTime` decides; otherwise `options > timeSignatureOptions > timeSigDoAbrvCommon` /
+  `timeSigDoAbrvCut`.
+- **[expected], not seen in a sample:** title and composer from `texts > fileInfo[type]`,
+  multiple `frameSpec` incis.
 
 **Rules for this importer:**
 
-- Use the **lowest layer present** in each bar; other layers, voice-2 entries and grace notes are
-  skipped and counted.
+- Frames 1–4 become layers 1–4. Voice-2 runs go to the first layer no frame uses in that bar,
+  after rests up to their launch point; a run that starts before the layer's end, can't be
+  reached with plain rests (inside a tuplet) or overfills the bar is skipped and counted. Grace
+  notes are skipped and counted. A tie whose next note in the same layer has no matching pitch
+  is dropped and counted.
 - Non-linear and microtonal keys: pitches keep their real spelling (microtonal alterations are
   rounded to semitones and counted); the key signature shown is the nearest standard one.
-- Entries store concert pitch, so transposing staves are shown at concert pitch, reported.
-  Expressions (`measExprAssign`), `<ignore/>` entries and notes flagged `articDetail`,
-  `lyricDetail` or `smartShapeDetail` are counted.
+- Entries store concert pitch; a transposing staff's notes are moved to written pitch and the
+  staff gets `transpose` (DESIGN §21). Counted instead: chromatic-mode staves (key shown
+  transposed), braced staves that disagree, microtonal keys, non-integer intervals, notes out of
+  range, and staff-style changes.
+- Marks: unknown symbols, and articulations other than a fermata on rests, are counted.
+- Tempo: the first tempo mark at the very start of bar 1 sets the score tempo (20–400); every
+  other expression (`measExprAssign`), `<ignore/>` entries and notes flagged `lyricDetail` or
+  `smartShapeDetail` are counted. A display time signature different from the real one is
+  counted (the real one is used).
+- Sound: the staff's full name matched against the General MIDI names, like MuseScore.
 - With `?debug` in the page URL, opening a `.musx` also offers the decoded EnigmaXML as a download.
 
 ### 9.6 Import report
@@ -863,7 +891,7 @@ item runs. Zoom sets the sheet width (menu items only; Ctrl +/− stays the brow
 - MusicXML: `<score-instrument>` + `<midi-instrument><midi-channel/><midi-program>` (1-based),
   written only when `program` is set; import sets it only when present.
 - MIDI: first program change per track; later ones counted. MuseScore: `Instrument > Channel >
-  program@value` if present. `.musx`: not read (one report line when it has instruments).
+  program@value` if present. `.musx`: the staff name matched against the General MIDI names; no match is counted.
 
 ### 13.3 Sounds on demand (Phase 13)
 
@@ -987,8 +1015,7 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
 - **Files:** MusicXML `<fermata>` and `<articulations>` (`staccato`, `accent`, `tenuto`,
   `strong-accent` = marcato) both ways; other articulations are counted. A fermata on a
   whole-bar rest is counted (an empty bar holds no event). MuseScore: `<Fermata>` before the
-  chord or rest, `<Articulation>` subtypes inside it (`markOf`). `.musx` articulations are
-  still counted, not read.
+  chord or rest, `<Articulation>` subtypes inside it (`markOf`). `.musx`: `articAssign` → `articDef` symbol (§9.5).
 
 ## 17. Common and cut time (Phase 20)
 
@@ -998,8 +1025,8 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
 - **UI:** both time menus offer "C (common time)" and "¢ (cut time)"; `parseTime`/`timeLabel`
   convert between the menu value ("C", "C|", "n/d", also what VexFlow draws) and the model.
 - **Files:** MusicXML `<time symbol="common|cut">` both ways; MuseScore `TimeSig` subtype 1 =
-  common, 2 = cut. Importers build `measures` with the shared `measuresFrom`. `.musx` time
-  symbols are not read yet (drawn as numbers).
+  common, 2 = cut. Importers build `measures` with the shared `measuresFrom`. `.musx`: the bar's
+  `abbrvTime` or the document options (§9.5).
 
 ## 18. Your own sounds (Phase 21)
 
@@ -1077,5 +1104,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   a B♭ part shows A♭ major, as G♯ would need 8 sharps) while notes keep sharp spellings, so expect extra accidentals.
   MuseScore 3 files with only `<accidental>` in a transposing first part are counted, not
   converted (no MuseScore 3 file to check against).
-- Not yet: a concert-pitch view toggle, and `.musx` transpositions (still shown at concert pitch).
+- **.musx:** `staffSpec > transposition` (§9.5). Chromatic-mode staves get a transposed key
+  signature, unlike Finale; counted.
+- Not yet: a concert-pitch view toggle.
 
