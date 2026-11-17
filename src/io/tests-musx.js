@@ -66,11 +66,10 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
     return /Grace notes skipped: 8/.test(warn(r)) || warn(r);
   });
 
-  await check("musx sample: layers (first layer used, others reported)", async () => {
+  await check("musx sample: layers 1–4 kept as layers (DESIGN §15)", async () => {
     const r = await open("layers");
-    const got = r.score.staves.map((s) => brief(s)).join(" / ");
-    if (got !== " | C5:w / A4:w | ") return got;
-    return /other layers skipped: 1/.test(warn(r)) || warn(r);
+    const got = r.score.staves.map((s) => [s.bars, ...(s.layers || [])].map((L) => brief({ bars: L })).join(" + ")).join(" / ");
+    return got === " | C5:w +  | F4:h r:h /  |  +  |  + A4:w | " || got;
   });
 
   await check("musx: ties, dotted values, chords and skipped markings (inline EnigmaXML)", async () => {

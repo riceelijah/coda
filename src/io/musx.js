@@ -187,11 +187,19 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
         if (mi === 0) clefId = num(g, "clefID");
         else if (num(g, "clefID") !== clefId) report.count("Clef changes ignored");
       }
-      const layers = [1, 2, 3, 4].filter((l) => has(g, `frame${l}`));
-      if (!layers.length) return;
-      for (const l of layers.slice(1)) report.count("Measures with notes in other layers skipped");
-      const frame = frames.get(String(num(g, `frame${layers[0]}`)));
-      if (!frame) { report.count("Measures with missing note data"); return; }
+      // each frame (layer 1–4) becomes a layer of the staff (DESIGN §15)
+      for (const l of [1, 2, 3, 4]) {
+      if (!has(g, `frame${l}`)) continue;
+      const frame = frames.get(String(num(g, `frame${l}`)));
+      if (!frame) { report.count("Measures with missing note data"); continue; }
+      let bar = staff.bars[mi];
+      if (l > 1) {
+        staff.layers ||= [];
+        while (staff.layers.length < l - 1) staff.layers.push([]);
+        const L = staff.layers[l - 2];
+        while (L.length <= mi) L.push([]);
+        bar = L[mi];
+      }
       const end = String(num(frame, "endEntry", -1));
       let id = String(num(frame, "startEntry", -1)), guard = 0, tup = null, tupLeft = 0;
       while (id !== "0" && entries.has(id) && guard++ < 10000) {
@@ -234,6 +242,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
         }
         if (id === end) break;
         id = e.getAttribute("next") || "0";
+      }
       }
     });
     staff.clef = clefFor(clefId);
