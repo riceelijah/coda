@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Coda tests</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; background: #fff; color: #111; }
+  .fail { color: #b91c1c; } .pass { color: #15803d; }
+  pre { white-space: pre-wrap; }
+</style>
+<script src="./vendor/vexflow.js"></script>
+<script src="./vendor/fflate.js"></script>
+</head>
+<body>
+<h1>Coda self-checks</h1>
+<div id="out"></div>
+<script type="module">
+import * as M from "./src/model.js";
+
+const out = document.getElementById("out");
+let pass = 0, fail = 0;
+const log = (ok, name, detail) => {
+  const p = document.createElement("pre");
+  p.className = ok ? "pass" : "fail";
+  p.textContent = (ok ? "PASS " : "FAIL ") + name + (detail ? "\n  " + detail : "");
+  out.appendChild(p);
+  ok ? pass++ : fail++;
+};
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+function check(name, fn) {
+  try { const r = fn(); log(r === true, name, r === true ? "" : String(r)); }
+  catch (e) { log(false, name, e.stack || String(e)); }
+}
+async function checkAsync(name, fn) {
+  try { const r = await fn(); log(r === true, name, r === true ? "" : String(r)); }
+  catch (e) { log(false, name, e.stack || String(e)); }
+}
+window.check = check; window.eq = eq;
+
+// 1. tick math
+check("tick values", () => {
+  const T = (dur, dots = 0, tup) => M.eventTicks({ dur, dots, tup });
+  const want = { w: 1920, h: 960, q: 480, 8: 240, 16: 120, 32: 60 };
+  for (const [d, t] of Object.entries(want)) {
+    if (T(d) !== t) return `${d} = ${T(d)}`;
+    if (T(d, 1) !== t * 1.5) return `${d}. = ${T(d, 1)}`;
+    if (T(d, 2) !== t * 1.75) return `${d}.. = ${T(d, 2)}`;
+  }
+  if (T("8", 0, [3, 2]) !== 160) return "triplet eighth";
+  return true;
+});
+check("bar capacity", () =>
+  M.barCapacity([4, 4]) === 1920 && M.barCapacity([3, 4]) === 1440 &&
+  M.barCapacity([6, 8]) === 1440 && M.barCapacity([2, 2]) === 1920 || "wrong capacity");
+check("tuplet integer rule", () =>
+  M.tupletOk("8", 0, [3, 2]) && M.tupletOk("16", 0, [5, 4]) && !M.tupletOk("8", 0, [7, 4]) || "rule");
+
+// 2. appendEvent
+check("appendEvent fills and rejects", () => {
+  const s = M.newScore({ time: [4, 4] });
+  const q = () => ({ dur: "q", dots: 0, pitches: [{ step: 0, oct: 4, alter: 0 }], tie: false });
+  for (let i = 0; i < 4; i++) if (M.appendEvent(s, 0, 0, q())) return "rejected note " + i;
+  if (M.appendEvent(s, 0, 0, q()) !== "Bar is full") return "accepted 5th quarter";
+  return s.staves[0].bars[0].length === 4 || "length";
+});
+
+// 3. y -> pitch
+check("y to pitch, treble and bass, ledger to ledger", () => {
+  const yB = 80, sp = 10;
+  const names = (clef) => {
+    const r = [];
+    for (let pos = -4; pos <= 12; pos++) {
+      const p = M.yToPitch(yB, sp, clef, yB - pos * 5);
+      r.push("CDEFGAB"[p.step] + p.oct);
+    }
+    return r.join(" ");
+  };
+  const tre = "A3 B3 C4 D4 E4 F4 G4 A4 B4 C5 D5 E5 F5 G5 A5 B5 C6";
+  const bas = "C2 D2 E2 F2 G2 A2 B2 C3 D3 E3 F3 G3 A3 B3 C4 D4 E4";
+  if (names("treble") !== tre) return "treble: " + names("treble");
+  if (names("bass") !== bas) return "bass: " + names("bass");
+  // in-between clicks snap to the nearest line/space
+  const p = M.yToPitch(yB, sp, "treble", yB - 2.4);
+  if (!(p.step === 2 && p.oct === 4)) return "snap " + JSON.stringify(p);
+  const alto = M.yToPitch(yB, sp, "alto", yB - 20), ten = M.yToPitch(yB, sp, "tenor", yB - 30);
+  return (alto.step === 0 && alto.oct === 4 && ten.step === 0 && ten.oct === 4) || "C clefs";
+});
+
+// 4. pitch helpers
+check("midi numbers", () => {
+  const m = (step, oct, alter) => M.midi({ step, oct, alter });
+  return (m(0, 4, 0) === 60 && m(5, 4, 0) === 69 && m(6, 3, -1) === 58 && m(3, 5, 1) === 78) || "midi";
+});
+check("key alterations", () => {
+  const F = 3, B = 6, C = 0;
+  return (M.keyAlter(1, F) === 1 && M.keyAlter(1, C) === 0 && M.keyAlter(-1, B) === -1 &&
+    M.keyAlter(-1, 2) === 0 && M.keyAlter(7, B) === 1 && M.keyAlter(-7, F) === -1 &&
+    M.keyAlter(0, F) === 0) || "keyAlter";
+});
+check("spellMidi", () => {
+  const s = (m, k) => { const p = M.spellMidi(m, k); return "CDEFGAB"[p.step] + ["bb", "b", "", "#"][p.alter + 2] + p.oct; };
+  return (s(61, 0) === "C#4" && s(61, -1) === "Db4" && s(70, -2) === "Bb4" && s(60, 0) === "C4" && s(71, -1) === "B4") ||
+    [s(61, 0), s(61, -1), s(70, -2)].join();
+});
+check("edit commands", () => {
+  const s = M.newScore({ time: [4, 4], key: 1, bars: 2 });
+  const C4 = { step: 0, oct: 4, alter: 0 };
+  M.appendEvent(s, 0, 0, { dur: "h", dots: 0, pitches: [{ ...C4 }], tie: false });
+  M.toggleChordPitch(s, 0, 0, 0, { step: 4, oct: 4, alter: 0 });
+  if (s.staves[0].bars[0][0].pitches.length !== 2) return "chord add";
+  M.toggleChordPitch(s, 0, 0, 0, { step: 4, oct: 4, alter: 0 });
+  if (s.staves[0].bars[0][0].pitches.length !== 1) return "chord remove";
+  M.transpose(s, 0, 0, 0, 3); // C4 -> F#4 in G major
+  const p = s.staves[0].bars[0][0].pitches[0];
+  if (!(p.step === 3 && p.alter === 1)) return "transpose " + JSON.stringify(p);
+  if (M.setDuration(s, 0, 0, 0, "w", 1) !== "Bar is full") return "setDuration overflow allowed";
+  M.appendEvent(s, 0, 1, { dur: "q", dots: 0, pitches: [{ step: 3, oct: 4, alter: 1 }], tie: false });
+  M.appendEvent(s, 0, 0, { dur: "h", dots: 0, pitches: [{ step: 3, oct: 4, alter: 1 }], tie: false });
+  if (M.toggleTie(s, 0, 0, 1)) return "tie across bar refused";
+  M.deleteEvent(s, 0, 1, 0);
+  if (s.staves[0].bars[0][1].tie) return "tie not cleared on delete";
+  M.addMeasure(s, 1);
+  if (s.measures.length !== 3 || s.staves[0].bars.length !== 3) return "addMeasure";
+  M.deleteMeasure(s, 0);
+  if (s.measures[0].key !== 1 || !s.measures[0].time) return "deleteMeasure attrs";
+  return M.isValidScore(s) || "invalid after edits";
+});
+
+// Later phases append checks here via test modules.
+const extra = ["./src/io/tests.js"];
+for (const path of extra) {
+  try { const mod = await import(path); await mod.run({ check: checkAsync, eq, M }); }
+  catch (e) { if (!String(e).includes("Failed to fetch") && !String(e).includes("Importing a module")) log(false, "load " + path, e.stack || String(e)); }
+}
+
+document.title = fail ? `FAIL (${fail} of ${pass + fail})` : `PASS (${pass})`;
+const h = document.createElement("h2");
+h.className = fail ? "fail" : "pass";
+h.textContent = document.title;
+out.prepend(h);
+</script>
+</body>
+</html>

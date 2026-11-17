@@ -25,7 +25,7 @@ only says what to build in what order and how to know each phase is finished.
 | Phase | What | State |
 |---|---|---|
 | 0 | Repo scaffold | done |
-| 1 | Model + rendering (read-only score on screen) | not started |
+| 1 | Model + rendering (read-only score on screen) | done |
 | 2 | Editing, playback, autosave, print | not started |
 | 3 | MusicXML / MXL open + save | not started |
 | 4 | MIDI import | not started |
@@ -61,11 +61,11 @@ only says what to build in what order and how to know each phase is finished.
 Build: `src/model.js` (DESIGN §3, all of it including edit commands), `src/render.js`
 (DESIGN §5), `test.html`, and enough of `src/app.js` to render a hard-coded demo score.
 
-- [ ] `model.js`: constants, `eventTicks`, `barTicks`, `barCapacity`, `attrsAt`, pitch helpers,
+- [x] `model.js`: constants, `eventTicks`, `barTicks`, `barCapacity`, `attrsAt`, pitch helpers,
       `yToPitch(yBottom, spacing, clef, y)` as a pure function, every command in §3.4, `newScore`.
-- [ ] `test.html` with checks 1–4 from DESIGN §10.
-- [ ] `render.js`: layout (§5.2), drawing (§5.3–5.5), hit map (§5.6), per-system try/catch.
-- [ ] Demo score (kept in `app.js` behind `?demo`): piano grand staff in D major, 3/4, ~20 bars,
+- [x] `test.html` with checks 1–4 from DESIGN §10.
+- [x] `render.js`: layout (§5.2), drawing (§5.3–5.5), hit map (§5.6), per-system try/catch.
+- [x] Demo score (kept in `app.js` behind `?demo`): piano grand staff in D major, 3/4, ~20 bars,
       containing chords, rests, dotted notes, beamed eighths and 16ths, a tie within a bar, a tie
       across a barline, a tie across a system break, an accidental outside the key, an empty bar,
       an underfull bar, an **overfull** bar, a key change and a time change.
