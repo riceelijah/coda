@@ -28,16 +28,18 @@ export function keyName(k) { return KEY_NAMES[k + 7]; }
 
 function minWidth(score, b) {
   // 30 per note, more under a long lyric (DESIGN §24)
-  const need = (bar) => bar.reduce((w, e) => w + (e.lyric ? Math.max(30, e.lyric.length * 8.5 + 12) : 30) + (e.grace ? 6 + 10 * e.grace.length : 0), 0);
+  const longest = (e) => Math.max(0, ...(e.lyrics || []).map((l) => l?.text.length || 0));
+  const need = (bar) => bar.reduce((w, e) => w + Math.max(30, longest(e) * 8.5 + 12) + (e.grace ? 6 + 10 * e.grace.length : 0), 0);
   return Math.max(150, 50 + Math.max(30, ...score.staves.flatMap((s) => allLayers(s).map((bars) => need(bars[b])))));
 }
 
 // Top of each staff in a system: a staff with lyrics leaves a line for them below it.
 const LYRIC_ROOM = 30;
-const hasLyrics = (st) => allLayers(st).some((bars) => bars.some((bar) => bar.some((e) => e.lyric)));
+export const LYRIC_LINE = 20;
+const verses = (st) => Math.max(0, ...allLayers(st).flatMap((bars) => bars.flatMap((bar) => bar.map((e) => e.lyrics?.length || 0))));
 function staffTops(score) {
   const y = [SYS_TOP];
-  for (let s = 1; s < score.staves.length; s++) y.push(y[s - 1] + STAFF_GAP + (hasLyrics(score.staves[s - 1]) ? LYRIC_ROOM : 0));
+  for (let s = 1; s < score.staves.length; s++) y.push(y[s - 1] + STAFF_GAP + (verses(score.staves[s - 1]) ? LYRIC_ROOM + LYRIC_LINE * (verses(score.staves[s - 1]) - 1) : 0));
   return y;
 }
 
@@ -201,14 +203,15 @@ export function render(score, container, sel, opts = {}) {
   }));
 
   // Slurs and hairpins (DESIGN §23)
-  // Lyrics on one line per staff and system, below its notes and dynamics (DESIGN §24).
+  // Lyrics: a line per verse for each staff and system, below its notes and dynamics (DESIGN §24).
+  // lyricY["sys:staff"] = verse 1's baseline, for the app's lyric box.
   // floor["sys:staff"] = lowest thing drawn so far below the staff; hairpins go under it.
-  const floor = {};
+  const floor = {}, lyricY = {};
   score.staves.forEach((st, s) => {
-    const rows = {}; // sys -> [{ev, note}] in order
+    const rows = {}, nv = verses(st); // sys -> [{ev, note}] in order
     allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
       const ref = noteRef[s][v][b]?.[i];
-      if (ev.lyric && ref) (rows[ref.sys] ||= []).push({ ev, note: ref.note, v, b, i });
+      if (ev.lyrics && ref) (rows[ref.sys] ||= []).push({ ev, note: ref.note, v, b, i });
     })));
     for (const si in rows) {
       const ctx = ctxs[si], row = rows[si].sort((p, q) => p.b - q.b || p.note.getAbsoluteX() - q.note.getAbsoluteX());
@@ -221,20 +224,24 @@ export function render(score, container, sel, opts = {}) {
       try {
         tintedAll([ctx], opts.dim && row.every((r) => r.v !== (opts.layer || 0)), () => {
           ctx.save(); ctx.setFont("Georgia", 15);
-          const spans = row.map(({ ev, note }) => {
-            const w = ctx.measureText(ev.lyric).width, x = note.getAbsoluteX() + 6 - w / 2;
-            ctx.fillText(ev.lyric, x, y);
-            return { x, w };
-          });
-          row.forEach(({ ev }, k) => { // hyphen halfway to the next syllable, or just after at a line end
-            if (!ev.lyricHyph) return;
-            const a = spans[k], z = spans[k + 1], hx = z ? (a.x + a.w + z.x) / 2 - 3 : a.x + a.w + 4;
-            ctx.fillText("-", hx, y);
-          });
+          for (let vn = 0; vn < nv; vn++) {
+            const vy = y + vn * LYRIC_LINE;
+            const spans = row.filter(({ ev }) => ev.lyrics[vn]).map(({ ev, note }) => {
+              const l = ev.lyrics[vn], w = ctx.measureText(l.text).width, x = note.getAbsoluteX() + 6 - w / 2;
+              ctx.fillText(l.text, x, vy);
+              return { x, w, hyph: l.hyph };
+            });
+            spans.forEach((a, k) => { // hyphen halfway to the next syllable, or just after at a line end
+              if (!a.hyph) return;
+              const z = spans[k + 1], hx = z ? (a.x + a.w + z.x) / 2 - 3 : a.x + a.w + 4;
+              ctx.fillText("-", hx, vy);
+            });
+          }
           ctx.restore();
         });
       } catch (e) { console.error(e); }
-      floor[si + ":" + s] = y + 6;
+      floor[si + ":" + s] = y + (nv - 1) * LYRIC_LINE + 6;
+      lyricY[si + ":" + s] = y;
     }
   });
   for (const [kind, end] of SPAN_KINDS) score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => {
@@ -251,7 +258,7 @@ export function render(score, container, sel, opts = {}) {
   }));
 
   systems.forEach((sys) => sys.svg && grow(sys.svg, sys));
-  return { cells, systems, errors };
+  return { cells, systems, errors, lyricY };
 }
 
 function tintedAll(ctxs, on, draw) {

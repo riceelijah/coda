@@ -1,7 +1,9 @@
 // Score library in browser storage (DESIGN §12). No DOM: the storage object is passed in, so
 // tests can use a separate prefix or a fake. Each score is one key, `<prefix>doc.<id>`, holding
 // {modified, score}; there is no index key, so two tabs never overwrite each other's list.
-import { isValidScore } from "./model.js";
+import { isValidScore as valid, upgradeScore } from "./model.js";
+
+const isValidScore = (score) => valid(upgradeScore(score)); // older saves are brought up to date first
 
 const docKey = (prefix, id) => `${prefix}doc.${id}`;
 

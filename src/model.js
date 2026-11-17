@@ -257,7 +257,7 @@ export function toggleChordPitch(score, s, b, i, pitch) {
   const at = ev.pitches.findIndex((p) => samePitch(p, pitch));
   if (at >= 0) {
     ev.pitches.splice(at, 1);
-    if (!ev.pitches.length) { ev.tie = false; delete ev.lyric; delete ev.lyricHyph; delete ev.grace; }
+    if (!ev.pitches.length) { ev.tie = false; delete ev.lyrics; delete ev.grace; }
   } else {
     ev.pitches.push({ ...pitch });
     sortPitches(ev.pitches);
@@ -403,8 +403,9 @@ export function clearBrokenSpans(score) {
 }
 
 // ---------- lyrics (DESIGN §24) ----------
-// One verse: ev.lyric is the syllable, ev.lyricHyph a hyphen to the next one. Notes only.
-export const MAX_LYRIC = 40;
+// ev.lyrics = [{text, hyph?} | null, …]: verse v's syllable at index v (null: none in that verse),
+// hyph a hyphen to the next one. No trailing nulls; absent when empty. Notes only.
+export const MAX_LYRIC = 40, MAX_VERSES = 5;
 // ---------- grace notes (DESIGN §26) ----------
 // ev.grace = [pitch, …]: single grace notes before a note, played on the beat. One draws as a
 // slashed eighth, more as beamed sixteenths.
@@ -418,23 +419,45 @@ export function addGrace(ev, pitch) {
 
 // MusicXML/MuseScore <syllabic> for every lyric in the score, keyed by event: a hyphen after a
 // syllable makes it begin/middle, one before it makes it middle/end.
+// Values are arrays by verse (null where the event has none in that verse).
 export function syllabics(score) {
   const m = new Map();
   for (const st of score.staves) for (const bars of allLayers(st)) {
-    let prev = false;
-    for (const bar of bars) for (const ev of bar) if (ev.lyric) {
-      m.set(ev, ev.lyricHyph ? (prev ? "middle" : "begin") : (prev ? "end" : "single"));
-      prev = !!ev.lyricHyph;
+    const prev = []; // per verse: did the last syllable end with a hyphen
+    for (const bar of bars) for (const ev of bar) if (ev.lyrics) {
+      m.set(ev, ev.lyrics.map((l, v) => {
+        if (!l) return null;
+        const s = l.hyph ? (prev[v] ? "middle" : "begin") : (prev[v] ? "end" : "single");
+        prev[v] = !!l.hyph;
+        return s;
+      }));
     }
   }
   return m;
 }
 
-export function setLyric(ev, text, hyph = false) {
+export function setLyric(ev, text, hyph = false, verse = 0) {
+  if (!Number.isInteger(verse) || verse < 0 || verse >= MAX_VERSES) return;
+  if (!ev.pitches.length) { delete ev.lyrics; return; }
   const t = String(text || "").trim().slice(0, MAX_LYRIC);
-  if (!t || !ev.pitches.length) { delete ev.lyric; delete ev.lyricHyph; return; }
-  ev.lyric = t;
-  if (hyph) ev.lyricHyph = true; else delete ev.lyricHyph;
+  const ls = Array.from({ length: Math.max(ev.lyrics?.length || 0, verse + 1) }, (_, i) => ev.lyrics?.[i] ?? null); // no holes
+  ls[verse] = t ? (hyph ? { text: t, hyph: true } : { text: t }) : null;
+  while (ls.length && !ls[ls.length - 1]) ls.pop();
+  if (ls.length) ev.lyrics = ls; else delete ev.lyrics;
+}
+
+// Scores saved before verses (one lyric as ev.lyric/lyricHyph) are moved to ev.lyrics on load.
+// Never makes a score invalid: anything odd is dropped.
+export function upgradeScore(score) {
+  try {
+    for (const st of score.staves) for (const bars of allLayers(st)) for (const bar of bars) for (const ev of bar) {
+      if (!("lyric" in ev || "lyricHyph" in ev)) continue;
+      const t = ev.lyric, h = ev.lyricHyph;
+      delete ev.lyric; delete ev.lyricHyph;
+      if (typeof t === "string" && Array.isArray(ev.pitches)) setLyric(ev, t, h === true);
+    }
+  } catch { /* not a score: isValidScore says so */ }
+  return score;
 }
 
 export function setTuplet(score, s, b, i, tup) {
@@ -686,8 +709,9 @@ export function isValidScore(sc) {
       (e.dyn === undefined || DYNS.includes(e.dyn)) &&
       (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&
       (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true) &&
-      (e.lyric === undefined || (typeof e.lyric === "string" && e.lyric.length > 0 && e.lyric.length <= MAX_LYRIC)) &&
-      (e.lyricHyph === undefined || (e.lyricHyph === true && e.lyric !== undefined))));
+      (e.lyrics === undefined || (Array.isArray(e.lyrics) && e.lyrics.length > 0 && e.lyrics.length <= MAX_VERSES &&
+        e.pitches.length > 0 && e.lyrics[e.lyrics.length - 1] !== null && e.lyrics.every((l) => l === null ||
+        (typeof l.text === "string" && l.text.length > 0 && l.text.length <= MAX_LYRIC && (l.hyph === undefined || l.hyph === true)))))));
     const okClefs = (c) => c === undefined || (c && typeof c === "object" && Object.keys(c).length > 0 &&
       Object.entries(c).every(([k, v]) => /^[1-9]\d*$/.test(k) && +k < n && CLEFS.includes(v)));
     return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) && okClefs(st.clefs) &&

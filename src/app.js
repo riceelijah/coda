@@ -1,6 +1,6 @@
 // Coda — UI wiring. See docs/DESIGN.md §4 and §6.
 import * as M from "./model.js";
-import { render, SHEET_W } from "./render.js";
+import { render, SHEET_W, LYRIC_LINE } from "./render.js";
 import { play, stop, isPlaying, audition, prefetch, noteName, forgetUserSound, renderAudio, wavBytes, recordType, recordCompressed } from "./play.js";
 import * as usnd from "./usersounds.js";
 import { GM, FAMILIES } from "./gm.js";
@@ -416,10 +416,13 @@ function span(kind, type) {
 // ---------- lyrics (DESIGN §24) ----------
 // A box under the selected note: Space or Tab moves on, "-" moves on with a hyphen, Shift+Tab
 // goes back, Enter or clicking away finishes, Escape drops what's typed. Each syllable is one edit.
+// ↑/↓ change verse (state.verse, kept for next time).
 function openLyrics() {
   const s = state.sel;
   if (!s || !selEvent()?.pitches.length) { message("Select the note the lyrics start on", true); return; }
   state.selEnd = null;
+  state.verse ??= 0;
+  message(`Lyrics, verse ${state.verse + 1} (↑/↓ for another verse)`, false, true);
   placeLyricBox();
   const box = $("lyric-box");
   box.hidden = false; box.focus(); box.select();
@@ -431,15 +434,17 @@ function placeLyricBox() {
   const n = cell?.notes.find((q) => q.idx === s.idx);
   if (!cell || !n) { box.hidden = true; return; }
   const r = cell.svg.getBoundingClientRect(), sheet = $("sheet").getBoundingClientRect(), k = r.width / SHEET_W;
-  box.value = ev.lyric || "";
+  box.value = ev.lyrics?.[state.verse]?.text || "";
+  // on the verse's line: verse 1's baseline from the drawing when this staff has lyrics there
+  const base = state.hit.lyricY?.[cell.sys + ":" + s.staff] ?? cell.yBottom + 32;
   box.style.left = r.left - sheet.left + (n.x + 6) * k - 55 + "px";
-  box.style.top = r.top - sheet.top + (cell.yBottom + 18 - cell.svg.viewBox.baseVal.y) * k + "px";
+  box.style.top = r.top - sheet.top + (base - 14 + state.verse * LYRIC_LINE - cell.svg.viewBox.baseVal.y) * k + "px";
 }
 
 function commitLyric(hyph) {
-  const s = state.sel, ev = selEvent(), text = $("lyric-box").value.trim();
-  if (!s || !ev || ((ev.lyric || "") === text && !!ev.lyricHyph === (hyph && !!text))) return;
-  edit((sc) => { M.setLyric(sc.staves[s.staff].bars[s.bar][s.idx], text, hyph); return null; });
+  const s = state.sel, ev = selEvent(), text = $("lyric-box").value.trim(), v = state.verse, l = ev?.lyrics?.[v];
+  if (!s || !ev || ((l?.text || "") === text && !!l?.hyph === (hyph && !!text))) return;
+  edit((sc) => { M.setLyric(sc.staves[s.staff].bars[s.bar][s.idx], text, hyph, v); return null; });
 }
 
 // Next (dir 1) or previous note with pitches in the layer; false at either end.
@@ -455,7 +460,8 @@ function lyricStep(dir) {
   return true;
 }
 
-function closeLyrics() { const box = $("lyric-box"); box.hidden = true; box.blur(); }
+function closeLyrics() { const box = $("lyric-box"); box.hidden = true; box.blur(); message(""); }
+const hyphOf = () => !!selEvent()?.lyrics?.[state.verse]?.hyph; // Enter, Shift+Tab and ↑/↓ keep the hyphen
 
 function onLyricKey(e) {
   const k = e.key;
@@ -463,8 +469,17 @@ function onLyricKey(e) {
     e.preventDefault();
     commitLyric(k === "-");
     if (!lyricStep(1)) closeLyrics();
-  } else if (k === "Tab") { e.preventDefault(); commitLyric(selEvent()?.lyricHyph); lyricStep(-1); }
-  else if (k === "Enter") { e.preventDefault(); commitLyric(selEvent()?.lyricHyph); closeLyrics(); }
+  } else if (k === "Tab") { e.preventDefault(); commitLyric(hyphOf()); lyricStep(-1); }
+  else if (k === "Enter") { e.preventDefault(); commitLyric(hyphOf()); closeLyrics(); }
+  else if (k === "ArrowUp" || k === "ArrowDown") {
+    e.preventDefault();
+    const v = state.verse + (k === "ArrowDown" ? 1 : -1);
+    if (v < 0 || v >= M.MAX_VERSES) return;
+    commitLyric(hyphOf());
+    state.verse = v;
+    message(`Lyrics, verse ${v + 1}`, false, true);
+    placeLyricBox(); $("lyric-box").select();
+  }
   else if (k === "Escape") { e.preventDefault(); closeLyrics(); }
 }
 
@@ -1634,7 +1649,7 @@ function init() {
   document.addEventListener("pointerup", () => (drag = null));
   document.addEventListener("keydown", onKey);
   $("lyric-box").addEventListener("keydown", onLyricKey);
-  $("lyric-box").addEventListener("blur", () => { if (!$("lyric-box").hidden) { commitLyric(selEvent()?.lyricHyph); closeLyrics(); } });
+  $("lyric-box").addEventListener("blur", () => { if (!$("lyric-box").hidden) { commitLyric(hyphOf()); closeLyrics(); } });
   document.addEventListener("dragover", (e) => e.preventDefault());
   document.addEventListener("drop", (e) => { e.preventDefault(); openFile(e.dataTransfer.files[0]); });
   let rt = 0;

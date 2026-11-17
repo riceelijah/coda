@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, finishClefs, MAX_GRACE } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE } from "../model.js";
 import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
@@ -306,16 +306,19 @@ const frac = (ticks) => { const g = gcd(Math.abs(ticks), 1920) || 1; return `${t
 const tpcOf = (p) => [14, 16, 18, 13, 15, 17, 19][p.step] + 7 * p.alter;
 const loc = (dm, dt) => `<location>${dm ? `<measures>${dm}</measures>` : ""}${dt ? `<fractions>${frac(dt)}</fractions>` : ""}</location>`;
 
-// The first verse of a chord's <Lyrics> onto `ev` (DESIGN §24); other verses and extender lines are counted.
+// A chord's <Lyrics> onto `ev` by verse (DESIGN §24): <no> is the verse − 1, none for verse 1.
+// Verses past the fifth and extender lines are counted.
 function lyricIn(el, ev, report) {
   const ls = kids(el, "Lyrics").filter((l) => txt(l, "text"));
   if (!ls.length) return;
-  if (!ev.pitches.length) { report.count("Lyrics on rests (not imported)"); return; }
-  const l = ls.find((x) => !+(txt(x, "no") || 0)) || ls[0];
-  if (ls.length > 1) report.count("Lyrics beyond the first verse (not imported)", ls.length - 1);
-  if (kid(l, "ticks_f") || kid(l, "ticks")) report.count("Lyric extender lines (not imported)");
-  if (txt(l, "text").length > MAX_LYRIC) report.count("Long lyrics shortened");
-  setLyric(ev, txt(l, "text"), ["begin", "middle"].includes(txt(l, "syllabic")));
+  if (!ev.pitches.length) { report.count("Lyrics on rests (not imported)", ls.length); return; }
+  for (const l of ls) {
+    const v = parseInt(txt(l, "no") || "0", 10);
+    if (!(v >= 0 && v < MAX_VERSES) || ev.lyrics?.[v]) { report.count(`Lyrics beyond verse ${MAX_VERSES} (not imported)`); continue; }
+    if (kid(l, "ticks_f") || kid(l, "ticks")) report.count("Lyric extender lines (not imported)");
+    if (txt(l, "text").length > MAX_LYRIC) report.count("Long lyrics shortened");
+    setLyric(ev, txt(l, "text"), ["begin", "middle"].includes(txt(l, "syllabic")), v);
+  }
 }
 
 export function exportMSCX(score) {
@@ -440,7 +443,7 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
       // ponytail: MuseScore slurs need chords at both ends; one on a rest is left out of this file
       const slurs = (sp.slurNext ? `<Spanner type="Slur"><Slur/><next>${sp.slurNext}</next></Spanner>` : "") +
         (sp.slurPrev ? `<Spanner type="Slur"><prev>${sp.slurPrev}</prev></Spanner>` : "");
-      const s = syl.get(e), lyr = s ? `<Lyrics>${s === "single" ? "" : `<syllabic>${s}</syllabic>`}<text>${esc(e.lyric)}</text></Lyrics>` : "";
+      const lyr = (syl.get(e) || []).map((s, v) => s ? `<Lyrics>${v ? `<no>${v}</no>` : ""}${s === "single" ? "" : `<syllabic>${s}</syllabic>`}<text>${esc(e.lyrics[v].text)}</text></Lyrics>` : "").join("");
       x.push(`<Chord>${head}${lyr}${arts}${slurs}${notes}</Chord>`);
     }
     if (sp.hpPrev) x.push(`<Spanner type="HairPin"><prev>${sp.hpPrev}</prev></Spanner>`);

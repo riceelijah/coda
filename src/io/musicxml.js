@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, finishClefs, MAX_GRACE,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -47,7 +47,7 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl
     if (arts.length) nots.push(`<articulations>${arts.map((m) => ARTIC_OUT[m]).join("")}</articulations>`);
   }
   if (nots.length) x.push(`<notations>${nots.join("")}</notations>`);
-  if (!chord && syl) x.push(`<lyric number="1"><syllabic>${syl}</syllabic><text>${esc(ev.lyric)}</text></lyric>`);
+  if (!chord && syl) syl.forEach((s, v) => s && x.push(`<lyric number="${v + 1}"><syllabic>${s}</syllabic><text>${esc(ev.lyrics[v].text)}</text></lyric>`));
   x.push("</note>");
   return x.join("");
 }
@@ -446,7 +446,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     addMarks(ev);
     if (slur.start) ev.slur = true;
     if (slur.stop) ev.slurEnd = true;
-    if (!ev.lyric) lyricIn(el, ev, report);
+    lyricIn(el, ev, report);
     return;
   }
 
@@ -514,17 +514,21 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   lastEvent[lk] = ev;
 }
 
-// The first verse of a note's lyrics onto `ev` (DESIGN §24); other verses and extender lines are counted.
+// A note's lyrics onto `ev` by verse (DESIGN §24): number="1"–"5" (none is 1); a verse the event
+// already has (a chord's other notes) is kept. Other numbers and extender lines are counted.
 function lyricIn(el, ev, report) {
   const ls = kids(el, "lyric").filter((l) => kids(l, "text").some((t) => t.textContent.trim()));
   if (!ls.length) return;
-  if (!ev.pitches.length) { report.count("Lyrics on rests (not imported)"); return; }
-  const l = ls.find((x) => (x.getAttribute("number") || "1") === "1") || ls[0];
-  if (ls.length > 1) report.count("Lyrics beyond the first verse (not imported)", ls.length - 1);
-  if (kid(l, "extend") && kid(l, "extend").getAttribute("type") !== "stop") report.count("Lyric extender lines (not imported)");
-  const text = kids(l, "text").map((t) => t.textContent.trim()).join("‿"); // elided syllables share a note
-  if (text.length > MAX_LYRIC) report.count("Long lyrics shortened");
-  setLyric(ev, text, ["begin", "middle"].includes(txt(l, "syllabic")));
+  if (!ev.pitches.length) { report.count("Lyrics on rests (not imported)", ls.length); return; }
+  for (const l of ls) {
+    const n = l.getAttribute("number") || "1", v = /^[1-9]\d*$/.test(n) ? +n - 1 : -1;
+    if (v < 0 || v >= MAX_VERSES) { report.count(`Lyrics beyond verse ${MAX_VERSES} or not numbered by verse (not imported)`); continue; }
+    if (ev.lyrics?.[v]) continue;
+    if (kid(l, "extend") && kid(l, "extend").getAttribute("type") !== "stop") report.count("Lyric extender lines (not imported)");
+    const text = kids(l, "text").map((t) => t.textContent.trim()).join("‿"); // elided syllables share a note
+    if (text.length > MAX_LYRIC) report.count("Long lyrics shortened");
+    setLyric(ev, text, ["begin", "middle"].includes(txt(l, "syllabic")), v);
+  }
 }
 
 // MusicXML voice -> layer index for a staff (numeric voice order); -1 past the fourth (DESIGN §15).
