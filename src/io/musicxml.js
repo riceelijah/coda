@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -59,12 +59,13 @@ function completeTuplet(bar, cap) {
 }
 
 // Notes for one staff in one bar. Returns {xml, ticks written}.
-function barXml(score, s, b, staffNo, voice) {
+function barXml(score, s, b, staffNo, voice, v = 0) {
   const cap = barCapacity(attrsAt(score, b).time);
-  const bar = completeTuplet(score.staves[s].bars[b], cap);
+  const bars = layerBars(score.staves[s], v);
+  const bar = completeTuplet(bars[b], cap);
   if (!bar.length) return { xml: restXml(cap, staffNo, voice, true), ticks: cap };
   // last event of the previous bar, for tie stops on this bar's first event
-  const pbar = b > 0 ? score.staves[s].bars[b - 1] : [];
+  const pbar = b > 0 ? bars[b - 1] : [];
   const prev = pbar.length ? pbar[pbar.length - 1] : null;
   const runs = tupletRuns(bar);
   const starts = new Set(runs.map((r) => r.idx[0])), stops = new Set(runs.map((r) => r.idx[r.idx.length - 1]));
@@ -123,10 +124,14 @@ export function exportMusicXML(score) {
       if (b === 0 && gi === 0) {
         x.push(`<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${score.tempo}</per-minute></metronome></direction-type><sound tempo="${score.tempo}"/></direction>`);
       }
-      g.forEach((s, k) => {
-        const r = barXml(score, s, b, g.length > 1 ? k + 1 : 0, k + 1);
+      // every layer bar with notes, as voice staff×4 + layer + 1, separated by <backup> (DESIGN §15)
+      const chunks = [];
+      g.forEach((s, k) => allLayers(score.staves[s]).forEach((bars, v) => {
+        if (v === 0 || bars[b].length) chunks.push(barXml(score, s, b, g.length > 1 ? k + 1 : 0, k * MAX_LAYERS + v + 1, v));
+      }));
+      chunks.forEach((r, i) => {
         x.push(r.xml);
-        if (k < g.length - 1) x.push(`<backup><duration>${r.ticks}</duration></backup>`);
+        if (i < chunks.length - 1) x.push(`<backup><duration>${r.ticks}</duration></backup>`);
       });
       if (b === score.measures.length - 1) x.push('<barline location="right"><bar-style>light-heavy</bar-style></barline>');
       x.push("</measure>");
@@ -188,10 +193,10 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     }));
     if (nStaves > 2) report.add(`A part with ${nStaves} staves was split into separate staves without a brace`);
     let divisions = 1, key = 0, time = [4, 4];
-    const voiceOf = {}; // staff -> kept voice
+    const voiceOf = {}; // staff -> MusicXML voice ids in layer order
 
     measures.forEach((meas, mi) => {
-      staves.forEach((st) => st.bars.push([]));
+      staves.forEach((st) => allLayers(st).forEach((bars) => bars.push([])));
       const lastEvent = {}; // staff -> last kept event in this bar
       for (const el of meas.children) {
         const tag = el.localName;
@@ -227,6 +232,16 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           if (!score.tempo && snd && snd.getAttribute("tempo")) score.tempo = Math.round(+snd.getAttribute("tempo")) || 0;
           const pm = el.querySelector && el.querySelector("metronome > per-minute");
           if (!score.tempo && pm) score.tempo = Math.round(parseFloat(pm.textContent)) || 0;
+        } else if (tag === "forward") {
+          // a gap inside one voice: rests in that layer (DESIGN §15)
+          const v = txt(el, "voice"), staffNo = +(txt(el, "staff") || 1), st = staves[staffNo - 1];
+          const layer = st && v !== null ? layerOf(voiceOf, staffNo, v) : -1;
+          if (layer >= 0) {
+            const ticks = Math.round((+txt(el, "duration") * PPQ) / divisions);
+            const bar = barOf(st, layer);
+            for (const d of splitTicks(ticks)) bar.push({ dur: d.dur, dots: d.dots, tie: false, pitches: [] });
+            report.count("Gaps in a voice filled with rests");
+          }
         } else if (tag === "note") {
           readNote(el, { staves, voiceOf, lastEvent, divisions, time, report });
         }
@@ -274,9 +289,9 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report }) {
   const staffNo = +(txt(el, "staff") || 1);
   const st = staves[staffNo - 1];
   if (!st) return;
-  const voice = txt(el, "voice") || "1";
-  if (voiceOf[staffNo] === undefined) voiceOf[staffNo] = voice;
-  if (voice !== voiceOf[staffNo]) { if (!isRest) report.count("Notes in other voices skipped"); return; }
+  const layer = layerOf(voiceOf, staffNo, txt(el, "voice") || "1");
+  if (layer < 0) { if (!isRest) report.count(`Notes in voices beyond ${MAX_LAYERS} per staff skipped`); return; }
+  const lk = staffNo + ":" + layer;
   // markings on kept notes that Coda doesn't hold yet: counted, not dropped silently
   for (const n of kids(el, "notations")) {
     for (const c of n.children) {
@@ -285,7 +300,6 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report }) {
     }
   }
   if (!isRest && kids(el, "lyric").length) report.count("Notes with lyrics (not imported)");
-  const bar = st.bars[st.bars.length - 1];
   const tieStart = kids(el, "tie").some((t) => t.getAttribute("type") === "start");
 
   let pitch = null;
@@ -300,8 +314,8 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report }) {
     if (p.localName === "unpitched") report.count("Percussion notes shown at their staff position");
   }
 
-  if (kid(el, "chord") && lastEvent[staffNo]) {
-    const ev = lastEvent[staffNo];
+  if (kid(el, "chord") && lastEvent[lk]) {
+    const ev = lastEvent[lk];
     if (pitch && !ev.pitches.some((q) => q.step === pitch.step && q.oct === pitch.oct)) {
       ev.pitches.push(pitch);
       ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
@@ -337,8 +351,25 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report }) {
       else report.count("Notes in unsupported tuplets (kept written lengths)");
     }
   }
-  bar.push(ev);
-  lastEvent[staffNo] = ev;
+  barOf(st, layer).push(ev);
+  lastEvent[lk] = ev;
+}
+
+// MusicXML voice -> layer index for a staff, by first appearance; -1 past the fourth (DESIGN §15).
+function layerOf(voiceOf, staffNo, voice) {
+  const list = (voiceOf[staffNo] ||= []);
+  if (!list.includes(voice)) { if (list.length >= MAX_LAYERS) return -1; list.push(voice); }
+  return list.indexOf(voice);
+}
+
+// The current (last) bar of a layer, creating the layer with empty bars so far when it's new.
+function barOf(st, layer) {
+  if (layer > 0) {
+    st.layers ||= [];
+    while (st.layers.length < layer) st.layers.push(st.bars.map(() => []));
+  }
+  const bars = layerBars(st, layer);
+  return bars[bars.length - 1];
 }
 
 // ---------- MXL ----------

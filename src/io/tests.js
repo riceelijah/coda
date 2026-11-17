@@ -48,7 +48,9 @@ export function roundTripFixture() {
         [ev("h", "D3", { tie: true }), ev("h", "D3")],
         [],
         [ev("h", "D2 A2", { dots: 1 })],
-      ] },
+      ], layers: [[ // layer 2 (DESIGN §15): bar 1 and a tie into bar 3
+        [ev("h", "G2"), ev("h", "A2")], [], [ev("w", "E2", { tie: true })], [ev("h", "E2", { dots: 1 })], [],
+      ]] },
       { name: "Viola", clef: "alto", brace: false, bars: [
         [ev("w", "C4")],
         [ev("16", "C4", { tup: [5, 4] }), ev("16", "D4", { tup: [5, 4] }), ev("16", "E4", { tup: [5, 4] }), ev("16", "F4", { tup: [5, 4] }), ev("16", "G4", { tup: [5, 4] }), ev("h", "A4"), ev("q", "B4")],
@@ -172,8 +174,10 @@ export async function run({ check, eq }) {
     if (lh !== "Bb2+F3:h. | ") return "lh " + lh;
     if (!score.staves[0].brace || score.staves[1].brace || score.staves[1].clef !== "bass") return "staves";
     if (!eq(score.measures[0], { key: -2, time: [3, 4] }) || score.title !== "Piano Sample") return "attrs";
+    const l2 = (score.staves[0].layers || []).map((L) => brief({ bars: L })).join();
+    if (l2 !== "F4:h. | " || score.staves[1].layers) return "layer 2: " + l2; // voice 2 kept as layer 2 (DESIGN §15)
     const w = report.warnings.join("; ");
-    return (w.includes("Grace notes skipped: 1") && w.includes("Notes in other voices skipped: 1")) || "warnings: " + w;
+    return w === "Grace notes skipped: 1" || "warnings: " + w;
   });
 
   await check("sniffing", () => {

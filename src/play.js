@@ -1,6 +1,6 @@
 // Coda playback: sampled General MIDI sounds fetched on demand, with a triangle-wave fallback.
 // See docs/DESIGN.md §7 and §13.3.
-import { attrsAt, barCapacity, eventTicks, midi, PPQ } from "./model.js";
+import { attrsAt, barCapacity, eventTicks, midi, PPQ, allLayers } from "./model.js";
 import { GM } from "./gm.js";
 
 let ctx = null;
@@ -16,11 +16,11 @@ export function schedule(score, from = 0) {
   }
   const total = t;
   const notes = [];
-  score.staves.forEach((st) => {
-    const open = new Map(); // midi -> note awaiting a tie continuation
+  score.staves.forEach((st) => allLayers(st).forEach((bars) => {
+    const open = new Map(); // midi -> note awaiting a tie continuation, per layer
     barStart.forEach(({ bar, tick }) => {
       let at = tick;
-      for (const ev of st.bars[bar]) {
+      for (const ev of bars[bar]) {
         const len = eventTicks(ev);
         const nextOpen = new Map();
         for (const p of ev.pitches) {
@@ -35,7 +35,7 @@ export function schedule(score, from = 0) {
         at += len;
       }
     });
-  });
+  }));
   return { notes, barStart, total };
 }
 

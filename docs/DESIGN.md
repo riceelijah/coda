@@ -948,3 +948,22 @@ Key and time… · Instruments…. Clamped to the viewport; Esc, a click outside
 - With a selection: `setTuplet` on the range. Without: arms the ratio for the next notes.
 - `;` and NotePad's **9** toggle the last-used ratio (3:2 at first).
 - An armed ratio that doesn't fit the duration gives a message instead of being dropped.
+
+## 15. Layers: more than one voice per staff (Phase 18)
+
+NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stems up for layers
+1 and 3 and down for 2 and 4 when more than one layer has notes in a bar.
+
+- **Model:** `staff.bars` stays layer 1. Optional `staff.layers`: up to three more bars arrays
+  (layers 2–4), each `measures.length` long, absent when unused. `layerBars(staff, v)` and
+  `allLayers(staff)`; navigation and edit functions take a trailing `v = 0`. Each layer fits the
+  bar on its own; an empty bar in layers 2–4 draws nothing (layer 1 draws a whole rest).
+- **Every bar walker covers all layers:** `isValidScore`, `addMeasure`, `deleteMeasure`, the
+  time-change fit check, `padBars`, `noteCount`, `clearBrokenTies`, `schedule` (ties per layer),
+  render, export.
+- **MusicXML:** import maps `<voice>` per staff by first appearance to layers 1–4 (more are
+  counted and skipped); a `<forward>` with a voice becomes rests in that layer (counted). Export
+  writes each non-empty layer bar as voice `staff × 4 + layer + 1`, separated by `<backup>`.
+- **Phase 18a:** model, MusicXML, drawing, playback. **18b:** a Layer 1–4 control at the lower
+  left (NotePad's place for it); entry, selection and caret carry a layer. **18c:** MuseScore
+  voices and `.musx` layers.

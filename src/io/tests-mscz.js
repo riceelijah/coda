@@ -16,6 +16,8 @@ export async function run({ check, eq, brief, fetchBytes, importBytes }) {
       for (let s = 0; s < a.score.staves.length; s++) {
         if (brief(a.score.staves[s]) !== brief(b.score.staves[s])) return `staff ${s}\n  want ${brief(a.score.staves[s])}\n  got  ${brief(b.score.staves[s])}`;
         for (const k of ["clef", "brace", "name"]) if (a.score.staves[s][k] !== b.score.staves[s][k]) return `staff ${s} ${k}: ${b.score.staves[s][k]}`;
+        const lay = (st) => (st.layers || []).map((L) => brief({ bars: L })).join(" / ");
+        if (lay(a.score.staves[s]) !== lay(b.score.staves[s])) return `staff ${s} layers\n  want ${lay(a.score.staves[s])}\n  got  ${lay(b.score.staves[s])}`;
       }
       for (const k of ["title", "tempo", "measures"]) if (!eq(a.score[k], b.score[k])) return `${k}: ${JSON.stringify(b.score[k])}`;
       if (name === "simple" && b.score.composer !== "Coda Tests") return "composer " + b.score.composer;

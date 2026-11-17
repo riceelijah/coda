@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
 
@@ -81,14 +81,22 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     let key = 0, time = [4, 4];
     const tuplets = {}; // MuseScore 3: id -> ratio
     kids(stEl, "Measure").forEach((meas, mi) => {
-      const bar = [];
       const voices = kids(meas, "voice");
-      // MuseScore 2 files have no <voice> wrapper
-      const v0 = voices.length ? voices[0] : meas;
-      for (const extra of voices.slice(1)) report.count("Notes in other voices skipped", kids(extra, "Chord").length);
+      for (const L of staff.layers || []) L.push([]);
+      // MuseScore 2 files have no <voice> wrapper. Voices become layers 1–4 (DESIGN §15).
+      (voices.length ? voices : [meas]).forEach((vEl, vi) => {
+      if (vi >= MAX_LAYERS) { report.count(`Notes in voices beyond ${MAX_LAYERS} per staff skipped`, kids(vEl, "Chord").length); return; }
+      const bar = [];
       let tup = null;
-      for (const el of v0.children) {
+      for (const el of vEl.children) {
         switch (el.localName) {
+          case "location": { // a gap in this voice (MuseScore 4)
+            const [n, dd] = (txt(el, "fractions") || "").split("/").map(Number);
+            const ticks = Math.round((n / dd) * 1920);
+            if (ticks > 0) { for (const d of splitTicks(ticks)) bar.push({ dur: d.dur, dots: d.dots, tie: false, pitches: [] }); report.count("Gaps in a voice filled with rests"); }
+            else if (ticks < 0) report.count("Backward position moves ignored");
+            break;
+          }
           case "Clef": {
             const t = txt(el, "concertClefType") || txt(el, "subtype") || txt(el, "clefType") || "G";
             const clef = CLEF[t] || (t.startsWith("G") ? "treble" : t.startsWith("F") ? "bass" : null);
@@ -157,7 +165,13 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
           default: break;
         }
       }
-      staff.bars.push(bar);
+      if (vi === 0) staff.bars.push(bar);
+      else if (bar.length) {
+        staff.layers ||= [];
+        while (staff.layers.length < vi) staff.layers.push(staff.bars.map(() => []).concat(staff.bars.length === mi ? [[]] : []));
+        staff.layers[vi - 1][mi] = bar;
+      }
+      });
       if (si === 0) firstAttrs.push({ key, time: [...time] });
     });
     if (!staff.clef) staff.clef = "treble";

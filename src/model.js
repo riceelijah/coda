@@ -129,15 +129,20 @@ function sortPitches(ps) { ps.sort((a, b) => diatonic(a) - diatonic(b)); return 
 
 // ---------- navigation ----------
 
-export function nextEventPos(score, s, b, i) {
-  const bars = score.staves[s].bars;
+// Layers (DESIGN §15): staff.bars is layer 1; staff.layers holds layers 2–4 when used.
+export const MAX_LAYERS = 4;
+export function layerBars(st, v = 0) { return v === 0 ? st.bars : st.layers?.[v - 1]; }
+export function allLayers(st) { return [st.bars, ...(st.layers || [])]; }
+
+export function nextEventPos(score, s, b, i, v = 0) {
+  const bars = layerBars(score.staves[s], v);
   if (i + 1 < bars[b].length) return { bar: b, idx: i + 1 };
   for (let nb = b + 1; nb < bars.length; nb++) if (bars[nb].length) return { bar: nb, idx: 0 };
   return null;
 }
 
-export function prevEventPos(score, s, b, i) {
-  const bars = score.staves[s].bars;
+export function prevEventPos(score, s, b, i, v = 0) {
+  const bars = layerBars(score.staves[s], v);
   if (i > 0) return { bar: b, idx: i - 1 };
   for (let pb = b - 1; pb >= 0; pb--) if (bars[pb].length) return { bar: pb, idx: bars[pb].length - 1 };
   return null;
@@ -278,17 +283,17 @@ export function toggleTie(score, s, b, i) {
 
 // Drop ties whose next note no longer shares a pitch (after inserts, pastes, edits).
 export function clearBrokenTies(score) {
-  score.staves.forEach((st, s) => st.bars.forEach((bar, b) => bar.forEach((ev, i) => {
+  score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
     if (!ev.tie) return;
-    const n = nextEventPos(score, s, b, i);
-    const ne = n && (n.bar === b || n.bar === b + 1) ? st.bars[n.bar][n.idx] : null;
+    const n = nextEventPos(score, s, b, i, v);
+    const ne = n && (n.bar === b || n.bar === b + 1) ? bars[n.bar][n.idx] : null;
     if (!ne || !ev.pitches.some((p) => ne.pitches.some((q) => samePitch(p, q) && p.alter === q.alter))) ev.tie = false;
-  })));
+  }))));
 }
 
 export function addMeasure(score, after) {
   score.measures.splice(after + 1, 0, {});
-  for (const st of score.staves) st.bars.splice(after + 1, 0, []);
+  for (const st of score.staves) for (const bars of allLayers(st)) bars.splice(after + 1, 0, []);
   return null;
 }
 
@@ -296,7 +301,7 @@ export function deleteMeasure(score, idx) {
   if (score.measures.length <= 1) return "A score needs at least one bar";
   const a0 = attrsAt(score, 0);
   score.measures.splice(idx, 1);
-  for (const st of score.staves) st.bars.splice(idx, 1);
+  for (const st of score.staves) for (const bars of allLayers(st)) bars.splice(idx, 1);
   if (idx === 0) {
     const m = score.measures[0];
     if (m.key === undefined) m.key = a0.key;
@@ -313,7 +318,7 @@ export function setAttrs(score, b, { key, time }) {
     if (prev && prev.time[0] === time[0] && prev.time[1] === time[1]) delete m.time; else m.time = time;
     for (let j = b; j < score.measures.length; j++) {
       if (j > b && score.measures[j].time) break;
-      for (const st of score.staves) if (!fits(score, j, st.bars[j])) return `Bar ${j + 1} would overflow`;
+      for (const st of score.staves) for (const bars of allLayers(st)) if (!fits(score, j, bars[j])) return `Bar ${j + 1} would overflow`;
     }
   }
   return null;
@@ -328,7 +333,7 @@ export function clearAttrs(score, b) {
   delete m.key; delete m.time;
   if (hadTime) for (let j = b; j < score.measures.length; j++) {
     if (j > b && score.measures[j].time) break;
-    for (const st of score.staves) if (!fits(score, j, st.bars[j])) return `Bar ${j + 1} would overflow`;
+    for (const st of score.staves) for (const bars of allLayers(st)) if (!fits(score, j, bars[j])) return `Bar ${j + 1} would overflow`;
   }
   return null;
 }
@@ -377,7 +382,7 @@ export function newScore({ title = "Untitled", composer = "", tempo = 100, prese
 
 export function noteCount(score) {
   let n = 0;
-  for (const st of score.staves) for (const bar of st.bars) for (const e of bar) n += e.pitches.length ? 1 : 0;
+  for (const st of score.staves) for (const bars of allLayers(st)) for (const bar of bars) for (const e of bar) n += e.pitches.length ? 1 : 0;
   return n;
 }
 
@@ -385,7 +390,7 @@ export function noteCount(score) {
 export function padBars(score) {
   const n = Math.max(1, score.measures.length, ...score.staves.map((s) => s.bars.length));
   while (score.measures.length < n) score.measures.push({});
-  for (const st of score.staves) while (st.bars.length < n) st.bars.push([]);
+  for (const st of score.staves) for (const bars of allLayers(st)) while (bars.length < n) bars.push([]);
   if (score.measures[0].key === undefined) score.measures[0].key = 0;
   if (!score.measures[0].time) score.measures[0].time = [4, 4];
   return score;
@@ -397,10 +402,11 @@ export function isValidScore(sc) {
     if (!sc || !Array.isArray(sc.measures) || !Array.isArray(sc.staves) || !sc.staves.length) return false;
     const n = sc.measures.length;
     if (!n || !sc.measures[0].time) return false;
-    return sc.staves.every((st) => CLEFS.includes(st.clef) && Array.isArray(st.bars) && st.bars.length === n &&
+    const okBars = (bars) => Array.isArray(bars) && bars.length === n && bars.every((bar) => Array.isArray(bar) && bar.every((e) =>
+      DURS.includes(e.dur) && Array.isArray(e.pitches) &&
+      e.pitches.every((p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2)));
+    return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) &&
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
-      st.bars.every((bar) => Array.isArray(bar) && bar.every((e) =>
-        DURS.includes(e.dur) && Array.isArray(e.pitches) &&
-        e.pitches.every((p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2))));
+      (st.layers === undefined || (Array.isArray(st.layers) && st.layers.length < MAX_LAYERS && st.layers.every(okBars))));
   } catch { return false; }
 }

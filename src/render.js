@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, nextEventPos, tupletRuns } from "./model.js";
+import { attrsAt, nextEventPos, tupletRuns, allLayers } from "./model.js";
 
 const VF = () => Vex.Flow;
 
@@ -10,13 +10,15 @@ const SYS_BOTTOM = 50;
 const LEFT_PAD = 20;
 const KEY_NAMES = ["Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#"];
 const REST_KEY = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3" };
+// rests above / below the middle when two layers share a bar
+const REST_KEY_LAYER = { treble: ["e/5", "f/4"], bass: ["g/3", "a/2"], alto: ["f/4", "g/3"], tenor: ["d/4", "e/3"] };
 const ACC = { "-2": "bb", "-1": "b", 0: "n", 1: "#", 2: "##" };
 const ACCENT = "#2563eb";
 
 export function keyName(k) { return KEY_NAMES[k + 7]; }
 
 function minWidth(score, b) {
-  const n = Math.max(1, ...score.staves.map((s) => s.bars[b].length));
+  const n = Math.max(1, ...score.staves.flatMap((s) => allLayers(s).map((bars) => bars[b].length)));
   return Math.max(150, 50 + 30 * n);
 }
 
@@ -61,13 +63,15 @@ export function layout(score) {
   return systems;
 }
 
-function makeNote(ev, clef) {
+// stem: 0 = automatic, 1 = up, -1 = down (when layers share a bar, DESIGN §15)
+function makeNote(ev, clef, stem = 0) {
   const VFl = VF();
   const rest = !ev.pitches.length;
-  const keys = rest ? [REST_KEY[clef]]
+  const keys = rest ? [stem ? REST_KEY_LAYER[clef][stem > 0 ? 0 : 1] : REST_KEY[clef]]
     : ev.pitches.map((p) => "cdefgab"[p.step] + ACC[p.alter] + "/" + p.oct);
   const duration = ev.dur + "d".repeat(ev.dots || 0) + (rest ? "r" : "");
-  const note = new VFl.StaveNote({ clef, keys, duration, auto_stem: true });
+  const note = stem ? new VFl.StaveNote({ clef, keys, duration, stem_direction: stem })
+    : new VFl.StaveNote({ clef, keys, duration, auto_stem: true });
   if (ev.dots) VFl.Dot.buildAndAttach([note], { all: true });
   return note;
 }
@@ -83,7 +87,7 @@ export function render(score, container, sel) {
   const systems = layout(score);
   const cells = [];
   const errors = [];
-  const noteRef = score.staves.map(() => []); // [staff][bar][idx] = {note, sys}
+  const noteRef = score.staves.map((st) => allLayers(st).map(() => [])); // [staff][layer][bar][idx] = {note, sys}
   const ctxs = [];
   const nStaves = score.staves.length;
   const height = SYS_TOP + (nStaves - 1) * STAFF_GAP + 80 + SYS_BOTTOM;
@@ -124,13 +128,13 @@ export function render(score, container, sel) {
   });
 
   // Ties, after all systems exist (DESIGN §5.4).
-  score.staves.forEach((st, s) => {
-    st.bars.forEach((bar, b) => bar.forEach((ev, i) => {
+  score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => {
+    bars.forEach((bar, b) => bar.forEach((ev, i) => {
       if (!ev.tie || !ev.pitches.length) return;
-      const n = nextEventPos(score, s, b, i);
+      const n = nextEventPos(score, s, b, i, v);
       if (!n) return;
-      const ne = st.bars[n.bar][n.idx];
-      const a = noteRef[s][b]?.[i], z = noteRef[s][n.bar]?.[n.idx];
+      const ne = bars[n.bar][n.idx];
+      const a = noteRef[s][v][b]?.[i], z = noteRef[s][v][n.bar]?.[n.idx];
       if (!a || !z) return;
       const fi = [], li = [];
       ev.pitches.forEach((p, pi) => {
@@ -150,7 +154,7 @@ export function render(score, container, sel) {
         }
       } catch (e) { console.error(e); }
     }));
-  });
+  }));
 
   return { cells, systems, errors };
 }
@@ -207,45 +211,53 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar) {
   sys.bars.forEach((b, k) => {
     const { key, time } = attrsAt(score, b);
     const voices = [], beams = [], tuplets = [], drawn = [];
+    const fmt = new VFl.Formatter();
     score.staves.forEach((st, s) => {
-      const bar = st.bars[b];
       const stave = staves[k][s];
-      let notes;
-      if (!bar.length) {
-        notes = [new VFl.StaveNote({ clef: st.clef, keys: [REST_KEY[st.clef]], duration: "wr", align_center: true })];
-      } else {
-        notes = bar.map((ev) => makeNote(ev, st.clef));
-        bar.forEach((ev, i) => {
-          if (sel && sel.staff === s && inSel(sel, b, i))
-            notes[i].setStyle({ fillStyle: ACCENT, strokeStyle: ACCENT });
-        });
-        for (const run of tupletRuns(bar)) {
-          tuplets.push(new VFl.Tuplet(run.idx.map((i) => notes[i]),
-            { num_notes: run.tup[0], notes_occupied: run.tup[1] }));
+      // layer 1 always draws (a whole rest when empty); layers 2–4 only when they have notes
+      const used = allLayers(st).map((bars, v) => ({ v, bar: bars[b] })).filter(({ v, bar }) => v === 0 || bar.length);
+      const multi = used.length > 1;
+      const staffVoices = [];
+      for (const { v, bar } of used) {
+        let notes;
+        const stem = multi ? (v % 2 === 0 ? 1 : -1) : 0;
+        if (!bar.length) {
+          notes = [new VFl.StaveNote({ clef: st.clef, keys: [REST_KEY[st.clef]], duration: "wr", align_center: !multi })];
+        } else {
+          notes = bar.map((ev) => makeNote(ev, st.clef, stem));
+          bar.forEach((ev, i) => {
+            if (v === 0 && sel && sel.staff === s && inSel(sel, b, i))
+              notes[i].setStyle({ fillStyle: ACCENT, strokeStyle: ACCENT });
+          });
+          for (const run of tupletRuns(bar)) {
+            tuplets.push(new VFl.Tuplet(run.idx.map((i) => notes[i]),
+              { num_notes: run.tup[0], notes_occupied: run.tup[1], location: stem < 0 ? -1 : 1 }));
+          }
+          if (bar.some((e) => e.pitches.length && ["8", "16", "32"].includes(e.dur))) {
+            beams.push(...VFl.Beam.generateBeams(notes, { groups: VFl.Beam.getDefaultBeamGroups(`${time[0]}/${time[1]}`), maintain_stem_directions: !!stem }));
+          }
         }
+        const voice = new VFl.Voice({ num_beats: time[0], beat_value: time[1] }).setMode(VFl.Voice.Mode.SOFT);
+        voice.addTickables(notes);
+        staffVoices.push(voice);
+        drawn.push({ s, v, stave, voice, notes, empty: !bar.length });
       }
-      const voice = new VFl.Voice({ num_beats: time[0], beat_value: time[1] }).setMode(VFl.Voice.Mode.SOFT);
-      voice.addTickables(notes);
-      if (bar.length) {
-        VFl.Accidental.applyAccidentals([voice], keyName(key));
-        if (bar.some((e) => e.pitches.length && ["8", "16", "32"].includes(e.dur))) {
-          beams.push(...VFl.Beam.generateBeams(notes, { groups: VFl.Beam.getDefaultBeamGroups(`${time[0]}/${time[1]}`) }));
-        }
-      }
-      voices.push(voice);
-      drawn.push({ s, stave, voice, notes, empty: !bar.length });
+      // accidentals look across all layers of the staff
+      const withNotes = staffVoices.filter((_, i) => used[i].bar.length);
+      if (withNotes.length) VFl.Accidental.applyAccidentals(withNotes, keyName(key));
+      fmt.joinVoices(staffVoices);
+      voices.push(...staffVoices);
     });
     const st0 = staves[k][0];
     const width = Math.max(10, st0.getNoteEndX() - st0.getNoteStartX() - 10);
-    const fmt = new VFl.Formatter();
-    voices.forEach((v) => fmt.joinVoices([v]));
     fmt.format(voices, width);
     drawn.forEach(({ stave, voice }) => voice.draw(ctx, stave));
     beams.forEach((bm) => bm.setContext(ctx).draw());
     tuplets.forEach((t) => t.setContext(ctx).draw());
 
-    drawn.forEach(({ s, stave, notes, empty }) => {
-      noteRef[s][b] = empty ? [] : notes.map((note) => ({ note, sys: si }));
+    drawn.forEach(({ s, v, stave, notes, empty }) => {
+      noteRef[s][v][b] = empty ? [] : notes.map((note) => ({ note, sys: si }));
+      if (v > 0) return; // ponytail: hit map has layer 1 only until layer entry (Phase 18b)
       cells.push({
         sys: si, staff: s, bar: b, svg,
         x0: stave.getX(), x1: stave.getX() + stave.getWidth(),
