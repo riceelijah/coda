@@ -1020,7 +1020,7 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
 File ▸ Export is a submenu (CSS: it opens on hover or focus inside the File menu); it replaces
 Print, and ⌘/Ctrl+P is now its PDF item.
 
-- **PDF or printer…:** `window.print()` with the print stylesheet; the browser's dialog saves PDF.
+- **PDF (via the print dialog)…:** `window.print()` with the print stylesheet; the browser's dialog saves PDF. File ▸ Print… (mod+P) does the same. Systems keep a 4-unit right margin in their drawing so print, which clips to it, keeps the closing barline.
   A one-click PDF needs a PDF library (a new dependency), so it isn't done.
 - **MusicXML / .mxl:** the existing export; `.mxl` zips it with `META-INF/container.xml` and an
   uncompressed `mimetype` entry.

@@ -17,6 +17,7 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 - **Score ▸ Key and time** changes the key or time signature from the current bar on. **View** zooms the score.
 - **Score ▸ Parts and instruments** adds, removes, renames and reorders parts (treble, bass, alto or tenor staff, or a grand staff), and picks a sound for each part from the 128 General MIDI instruments (New also asks for one). Sounds download the first time a part uses them and are then kept in your browser; without a connection, parts play a plain tone. Each part can also be set to a transposing instrument (B♭ clarinet or trumpet, F horn, E♭ alto sax and others): the notes are then written for that instrument and still sound the same.
 - **Play** plays from the current bar.
+- **File ▸ Print…** (Ctrl/Cmd+P) prints the score.
 - **File ▸ Export** saves the score as a PDF (through your browser's print dialog), MusicXML, compressed MusicXML (`.mxl`), MuseScore (`.mscz`), MIDI, WAV audio, or compressed audio (WebM, Ogg or M4A, whichever your browser can record; it takes as long as the piece).
 - Your work is saved automatically in this browser. **File ▸ Scores in this browser** lists everything saved here: open, duplicate or delete. Scores stay only in this browser, so use **File ▸ Save as MusicXML** to keep a file (MusicXML) you can back up or open anywhere.
 

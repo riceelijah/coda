@@ -1084,6 +1084,7 @@ const CMD = {
   "b-lib": { run: () => openLibrary() },
   "b-save": { run: () => saveFile() },
   "x-pdf": { run: () => window.print() },
+  "b-print": { run: () => window.print() },
   "x-musicxml": { run: () => saveFile() },
   ...Object.fromEntries(["x-mxl", "x-mscz", "x-midi", "x-wav", "x-audio"].map((id) => [id, { run: () => exportAs(id), on: () => !exporting && (id !== "x-audio" || !!recordType()) }])),
   "b-undo": { run: () => undo(), on: () => state.undo.length > 0 },

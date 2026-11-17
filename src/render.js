@@ -8,6 +8,7 @@ const STAFF_GAP = 95;
 const SYS_TOP = 10;      // VexFlow already leaves 40 units above the top line
 const SYS_BOTTOM = 50;
 const LEFT_PAD = 20;
+const RIGHT_PAD = 4;     // keeps the closing barline inside the drawing, which print clips to
 const KEY_NAMES = ["Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#"];
 const MARK_VF = { fermata: "a@", staccato: "a.", accent: "a>", tenuto: "a-", marcato: "a^" };
 const REST_KEY = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3" };
@@ -45,7 +46,7 @@ function changeW(score, b) {
 
 // Greedy system breaking + justification (DESIGN §5.2).
 export function layout(score) {
-  const avail = SHEET_W - LEFT_PAD;
+  const avail = SHEET_W - LEFT_PAD - RIGHT_PAD;
   const systems = [];
   let cur = null;
   for (let b = 0; b < score.measures.length; b++) {
