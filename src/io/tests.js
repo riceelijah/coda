@@ -1,7 +1,8 @@
 // File-format checks, loaded by test.html. Each phase adds its checks here.
 import { exportMusicXML, importMusicXML } from "./musicxml.js";
 import { importBytes, sniff, LEGACY_MUS } from "./open.js";
-import { schedule } from "../play.js";
+import { schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES } from "../play.js";
+import { GM } from "../gm.js";
 import * as M from "../model.js";
 import * as store from "../store.js";
 
@@ -81,6 +82,45 @@ export async function run({ check, eq }) {
       return (r.score.staves[0].program === 73 && /Instrument changes/.test(JSON.stringify(r.report))) ||
         `program ${r.score.staves[0].program}, report ${JSON.stringify(r.report)}`;
     });
+  });
+
+  await check("sounds: note names, roots, the samples a score needs (DESIGN §13.3)", () => {
+    if ([21, 60, 61, 63, 70, 108].map(noteName).join() !== "A0,C4,Db4,Eb4,Bb4,C8") return "noteName";
+    if (rootFor(10) !== 21 || rootFor(61) !== 60 || rootFor(62) !== 63 || rootFor(127) !== 108) return "rootFor";
+    if (GM.length !== 128 || GM[52].slug !== "choir_aahs" || !sustained(52) || sustained(0)) return "GM table";
+    const sc = M.newScore({ preset: "piano", bars: 1 });
+    M.setStaffProgram(sc, 0, 40);
+    sc.staves[0].bars[0] = [ev("w", "C4 D4")]; // C4 -> root 60, D4 (62) -> root 63
+    sc.staves[1].bars[0] = [ev("w", "C3")];
+    return [...needed(sc)].sort().join() === "40:48,40:60,40:63" || [...needed(sc)].join();
+  });
+
+  await check("sounds: fetch falls back to the second host, gives up cleanly when both fail", async () => {
+    const cacheName = "codatest-sounds", seen = [];
+    try {
+      const flaky = async (url) => { seen.push(url); return url.startsWith(BASES[0]) ? new Response("", { status: 404 }) : new Response("mp3"); };
+      const buf = await fetchSample(0, 60, { fetchFn: flaky, cacheName });
+      if (new TextDecoder().decode(buf) !== "mp3") return "bytes";
+      if (seen[1] !== BASES[1] + "/acoustic_grand_piano-mp3/C4.mp3") return "url " + seen[1];
+      // now cached: no fetch at all
+      await fetchSample(0, 60, { fetchFn: () => { throw new Error("fetched"); }, cacheName });
+      let failed = false;
+      try { await fetchSample(0, 63, { fetchFn: () => Promise.reject(new TypeError("offline")), cacheName }); } catch { failed = true; }
+      return failed || "did not reject";
+    } finally { await caches.delete(cacheName).catch(() => {}); }
+  });
+
+  await check("sounds: a looped sustained note still sounds at 5 s and doesn't clip", async () => {
+    const rate = 8000, c = new OfflineAudioContext(1, rate * 6.5, rate);
+    const buf = c.createBuffer(1, rate * 3.16, rate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = 0.9 * Math.sin((2 * Math.PI * 262 * i) / rate);
+    // a six-note chord through the playback output chain
+    const out = output(c);
+    for (const m of [60, 64, 67, 72, 76, 79]) sampledVoice(c, out, buf, m, rootFor(m), 0, 6, true);
+    const res = (await c.startRendering()).getChannelData(0);
+    let peak = 0, late = 0;
+    for (let i = 0; i < res.length; i++) { peak = Math.max(peak, Math.abs(res[i])); if (i > rate * 5 && i < rate * 5.1) late = Math.max(late, Math.abs(res[i])); }
+    return (late > 0.1 && peak < 1 && peak > 0.1) || `peak ${peak.toFixed(2)}, at 5 s ${late.toFixed(2)}`;
   });
 
   await check("MusicXML export pads an underfull bar to capacity", () => {

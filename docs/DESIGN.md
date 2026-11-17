@@ -467,8 +467,8 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
 ## 8. Things deliberately not in the first version
 
 Lyrics, articulations, dynamics, slurs, grace notes, more than one voice per staff, repeats
-and endings, mid-score clef changes, transposing instruments, page-layout controls, sampled
-instrument sounds, MIDI export. (Tuplet entry, inserting mid-bar and copy/paste: §11.)
+and endings, mid-score clef changes, transposing instruments, page-layout controls, user-supplied
+instrument samples, MIDI export. (Sampled General MIDI sounds: §13.3.) (Tuplet entry, inserting mid-bar and copy/paste: §11.)
 
 All are additive on this model. Importers must **count and report** anything in these
 categories that they skip (§9.6).

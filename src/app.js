@@ -1,7 +1,8 @@
 // Coda — UI wiring. See docs/DESIGN.md §4 and §6.
 import * as M from "./model.js";
 import { render, SHEET_W } from "./render.js";
-import { play, stop, isPlaying, audition } from "./play.js";
+import { play, stop, isPlaying, audition, prefetch } from "./play.js";
+import { GM, FAMILIES } from "./gm.js";
 import { demoScore } from "./demo.js";
 import * as store from "./store.js";
 
@@ -360,7 +361,7 @@ function enterAtCaret(pitch) {
 
 // Sound the pitches of an event (DESIGN §11.2).
 function hear(ev) {
-  if (ev && ev.pitches.length) audition(ev.pitches.map(M.midi));
+  if (ev && ev.pitches.length) audition(ev.pitches.map(M.midi), state.score.staves[state.sel?.staff ?? 0].program ?? 0);
 }
 
 // Shift+A–G: add that letter above the selected note's top pitch (DESIGN §11.1).
@@ -620,12 +621,13 @@ function startPlay() {
     if (bar === null) { hl.style.display = "none"; $("b-play").disabled = false; return; }
     place(hl, cellRect(state.hit.cells.filter((c) => c.bar === bar)));
     hl.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }).catch((e) => message("Audio could not start: " + e.message, true));
+  }, (text) => (text ? message(text, /couldn't/.test(text), text.endsWith("…")) : message(""))).catch((e) => message("Audio could not start: " + e.message, true));
   $("b-play").disabled = true;
 }
 
 function stopPlay() {
   stop();
+  if ($("status-msg").textContent === "Loading sounds…") message("");
   $("play-hl").style.display = "none";
   $("b-play").disabled = false;
 }
@@ -650,6 +652,7 @@ function openSetup(isNew) {
   $("f-title").value = isNew ? "Untitled" : sc.title;
   $("f-composer").value = isNew ? "" : sc.composer;
   $("f-tempo").value = isNew ? 100 : sc.tempo;
+  if (isNew) $("f-sound").value = $("f-preset").value === "satb" ? 52 : 0;
   d.dataset.mode = isNew ? "new" : "edit";
   d.returnValue = "";
   d.showModal();
@@ -666,11 +669,48 @@ function closeSetup() {
     const [n, dd] = $("f-time").value.split("/").map(Number);
     replaceScore(M.newScore({
       title, composer, tempo, preset: $("f-preset").value, key: +$("f-key").value,
-      time: [n, dd], bars: +$("f-bars").value || 16,
+      time: [n, dd], bars: +$("f-bars").value || 16, program: +$("f-sound").value,
     }), { save: false });
   } else {
     edit((sc) => { sc.title = title; sc.composer = composer; sc.tempo = tempo; return null; });
   }
+}
+
+// A <select> of the 128 General MIDI sounds, grouped by family (DESIGN §13.3).
+function fillSounds(sel, value) {
+  sel.textContent = "";
+  for (const fam of FAMILIES) {
+    const g = document.createElement("optgroup");
+    g.label = fam;
+    for (const it of GM.filter((x) => x.family === fam)) g.appendChild(new Option(it.name, it.program));
+    sel.appendChild(g);
+  }
+  sel.value = value;
+}
+
+// ---------- instruments (DESIGN §13.3) ----------
+
+function openInstruments() {
+  const sc = state.score, box = $("inst-rows");
+  box.textContent = "";
+  M.partGroups(sc).forEach((g, i) => {
+    const lab = document.createElement("label"), sel = document.createElement("select");
+    lab.textContent = sc.staves[g[0]].name || `Part ${i + 1}`;
+    lab.htmlFor = sel.id = "inst-" + i;
+    sel.dataset.staff = g[0];
+    fillSounds(sel, sc.staves[g[0]].program ?? 0);
+    box.append(lab, sel);
+  });
+  $("instruments").returnValue = "";
+  $("instruments").showModal();
+}
+
+function closeInstruments() {
+  if ($("instruments").returnValue !== "ok") return;
+  const picks = [...$("inst-rows").querySelectorAll("select")].map((x) => [+x.dataset.staff, +x.value])
+    .filter(([s, p]) => (state.score.staves[s].program ?? 0) !== p);
+  if (!picks.length) return;
+  if (edit((sc) => { for (const [s, p] of picks) M.setStaffProgram(sc, s, p); return null; })) prefetch(state.score);
 }
 
 // ---------- key / time change at a bar (DESIGN §11.3) ----------
@@ -856,6 +896,7 @@ async function openFile(file) {
     const { openFile: open } = await import("./io/open.js");
     const { score, report } = await open(file);
     replaceScore(score);
+    prefetch(score);
     showReport(file.name, report);
   } catch (e) {
     console.error(e);
@@ -926,6 +967,11 @@ function init() {
   $("b-help").onclick = () => $("help").showModal();
   $("m-about").onclick = () => $("about").showModal();
   $("m-details").onclick = () => openSetup(false);
+  $("m-instruments").onclick = openInstruments;
+  $("instruments").addEventListener("close", closeInstruments);
+  $("inst-cancel").onclick = () => $("instruments").close("cancel");
+  fillSounds($("f-sound"), 0);
+  $("f-preset").onchange = (e) => ($("f-sound").value = e.target.value === "satb" ? 52 : 0);
   $("m-cut").onclick = () => copySel(true);
   $("m-copy").onclick = () => copySel(false);
   $("m-paste").onclick = () => paste();

@@ -353,13 +353,13 @@ export const PRESETS = {
 };
 
 export function newScore({ title = "Untitled", composer = "", tempo = 100, preset = "treble",
-  key = 0, time = [4, 4], bars = 16 } = {}) {
+  key = 0, time = [4, 4], bars = 16, program = 0 } = {}) {
   const n = Math.max(1, Math.min(999, bars | 0));
   return {
     title, composer, tempo,
     measures: Array.from({ length: n }, (_, i) => (i === 0 ? { key, time } : {})),
     staves: PRESETS[preset].map((st) => ({
-      name: st.name, clef: st.clef, brace: !!st.brace,
+      name: st.name, clef: st.clef, brace: !!st.brace, ...(program ? { program } : {}),
       bars: Array.from({ length: n }, () => []),
     })),
   };

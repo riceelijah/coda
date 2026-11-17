@@ -37,7 +37,7 @@ only says what to build in what order and how to know each phase is finished.
 | 10 | Score library in the browser | done |
 | 11 | Menu bar (File, Edit, View, Score, Help) | done |
 | 12 | Instrument per staff (model + formats) | done |
-| 13 | Instrument sounds on demand (all 128 GM) | in progress |
+| 13 | Instrument sounds on demand (all 128 GM) | done |
 
 ---
 
@@ -262,12 +262,12 @@ tab's score; an existing autosave survives the upgrade.
 
 ## Phase 12 — Instrument per staff (DESIGN §13.2)
 
-- [ ] `program` field, `gm.js`, `setStaffProgram`; MusicXML/MIDI/MuseScore import, MusicXML export.
+- [x] `program` field, `gm.js`, `setStaffProgram`; MusicXML/MIDI/MuseScore import, MusicXML export.
 **Done when:** a violin part survives a Coda save and reopen with `program: 40`; old autosaves load.
 
 ## Phase 13 — Sounds on demand (DESIGN §13.3)
 
-- [ ] Sampler with lazy fetch, cache, fallback; Instruments dialog; Sound in New; About credits.
+- [x] Sampler with lazy fetch, cache, fallback; Instruments dialog; Sound in New; About credits.
 **Done when:** a score with piano and strings plays both sounds; with the network off and no
 cache, it plays the triangle voice and says why.
 
@@ -286,6 +286,7 @@ DESIGN.md before work starts.
   not beat-aware. Correct durations, but not how an engraver would write it.
 - **Undo history is per session**; it is not saved with the autosave.
 - **The same score open in two tabs: last write wins.**
-- **Instruments:** research report in `docs/research/instruments.md`; waiting on the user's answers to its open questions.
+- **User-supplied sounds** are not done. Next step: one audio file mapped to a pitch range (see `docs/research/instruments.md`).
+- **Looped long notes** use a fixed 0.8–2.4 s loop with no crossfade; some sounds may click at the loop point.
 - **`.musx` has only been checked on small test files** (musxdom's). Ties, voice 2 and title/composer
   were not present in them; a real-world piece would confirm those.

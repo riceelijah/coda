@@ -58,6 +58,7 @@ const CLEF = { "38,-6": "treble", "66,-4": "alto", "66,-2": "tenor", "63,-2": "b
 
 export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
   const report = new Report(format);
+  report.add("Instrument sounds aren't read from this format; every part plays as piano until you pick one (Score ▸ Instruments…).");
   const root = parseXml(text).documentElement;
   if (root.localName !== "finale") throw new Error("This isn't an EnigmaXML file.");
 

@@ -194,6 +194,7 @@
         <hr>
         <button role="menuitem" id="b-attrs">Key and time…</button>
         <button role="menuitem" id="m-details">Title, composer, tempo…</button>
+        <button role="menuitem" id="m-instruments">Instruments…</button>
       </div></div>
     <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Help</button>
       <div class="mlist" role="menu" hidden>
@@ -247,6 +248,7 @@
         <option value="trebleBass">Treble + Bass</option>
         <option value="satb">SATB (4 staves)</option>
       </select>
+      <label class="new-only" for="f-sound">Sound</label><select class="new-only" id="f-sound"></select>
       <label class="new-only" for="f-key">Key</label><select class="new-only" id="f-key"></select>
       <label class="new-only" for="f-time">Time</label>
       <select class="new-only" id="f-time">
@@ -281,6 +283,18 @@
   </form>
 </dialog>
 
+<dialog id="instruments">
+  <form method="dialog">
+    <h2>Instruments</h2>
+    <div class="form" id="inst-rows"></div>
+    <p class="note">Sounds download the first time a part uses them, then stay in this browser. Without a connection, parts play a plain tone.</p>
+    <div class="actions">
+      <button class="btn" type="button" id="inst-cancel">Cancel</button>
+      <button class="btn primary" value="ok">Apply</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="library">
   <form method="dialog">
     <h2>Scores in this browser</h2>
@@ -295,7 +309,7 @@
     <h2>About Coda</h2>
     <p>Coda is a free, open-source music notation editor that runs in your browser. Your scores stay in this browser unless you save them as files.</p>
     <p>Source code and licence (MIT): <a href="https://github.com/riceelijah/coda" target="_blank" rel="noopener">github.com/riceelijah/coda</a></p>
-    <p class="note">Notation drawn with VexFlow (MIT) and the Bravura font (SIL OFL). Zip support by fflate (MIT).</p>
+    <p class="note">Notation drawn with VexFlow (MIT) and the Bravura font (SIL OFL). Zip support by fflate (MIT). Instrument sounds: the FluidR3_GM sound set by Frank Wen (MIT), as MP3s from gleitz/midi-js-soundfonts (CC BY 3.0), downloaded when first used.</p>
     <div class="actions"><button class="btn primary">Close</button></div>
   </form>
 </dialog>

@@ -14,6 +14,7 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 - **Click** on a staff to add a note of the selected length; clicking between two notes inserts it there. Click a note to select it. To build a chord, select a note and press **Shift+A–G**, **Shift+click** the staff, or turn on the chord button so clicks add to the selected note.
 - **Type** letters to add notes quickly. Coda picks the octave closest to the previous note and moves to the next bar when one fills up.
 - **Score ▸ Key and time** changes the key or time signature from the current bar on. **View** zooms the score.
+- **Score ▸ Instruments** picks a sound for each part from the 128 General MIDI instruments (New also asks for one). Sounds download the first time a part uses them and are then kept in your browser; without a connection, parts play a plain tone.
 - **Play** plays from the current bar. **File ▸ Print** prints the score, or saves it as a PDF from your browser's print dialog.
 - Your work is saved automatically in this browser. **File ▸ Scores in this browser** lists everything saved here: open, duplicate or delete. Scores stay only in this browser, so use **File ▸ Save as MusicXML** to keep a file (MusicXML) you can back up or open anywhere.
 
@@ -56,7 +57,7 @@ voices, grace notes, clef changes…), it opens the rest and lists what it left 
 
 Lyrics, articulations, dynamics, slurs, grace notes, tuplets other than triplets, more than one
 voice per staff, repeats and endings, mid-score clef changes, transposing instruments, page layout
-controls, sampled instrument sounds, and MIDI export. See [docs/ROADMAP.md](docs/ROADMAP.md).
+controls, your own instrument samples, and MIDI export. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Running it locally
 
@@ -76,6 +77,11 @@ Then open <http://localhost:8000/>. Self-checks run at <http://localhost:8000/te
 MIT — see [LICENSE](LICENSE). Coda bundles [VexFlow](https://www.vexflow.com) (MIT, including the
 Bravura music font under the SIL Open Font License) and [fflate](https://github.com/101arrowz/fflate) (MIT);
 see [vendor/README.md](vendor/README.md).
+
+Instrument sounds are the FluidR3_GM sound set by Frank Wen (MIT), in the MP3 rendering from
+[gleitz/midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts) (CC BY 3.0). They are not
+in this repository: the browser downloads each one from jsDelivr (or gleitz.github.io) the first time
+a score needs it.
 
 The `.musx` test files in `samples/musx/` come from [musxdom](https://github.com/openmusx/musxdom)
 (MIT); see [samples/musx/README.md](samples/musx/README.md).
