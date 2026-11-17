@@ -201,6 +201,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           const k = kid(el, "key");
           if (k && txt(k, "fifths") !== null) key = Math.max(-7, Math.min(7, parseInt(txt(k, "fifths"), 10) || 0));
           const t = kid(el, "time");
+          if (t && ["common", "cut"].includes(t.getAttribute("symbol"))) report.add("Common and cut time symbols are shown as 4/4 and 2/2.");
           if (t && txt(t, "beats")) {
             const beats = txt(t, "beats"), bt = +txt(t, "beat-type");
             if (/^\d+$/.test(beats) && [1, 2, 4, 8, 16, 32].includes(bt)) time = [+beats, bt];
@@ -213,7 +214,15 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
             if (st.clef === null) st.clef = clefFrom(c, report);
             else if (mi > 0) report.count("Clef changes ignored");
           }
+        } else if (tag === "barline") {
+          if (kid(el, "repeat") || kid(el, "ending")) report.count("Repeat signs and endings (not imported)");
         } else if (tag === "direction" || tag === "sound") {
+          for (const dt of tag === "direction" ? kids(el, "direction-type") : []) {
+            for (const c of dt.children) {
+              const label = DIRECTIONS[c.localName];
+              if (label && c.getAttribute("type") !== "stop" && c.getAttribute("type") !== "continue") report.count(label);
+            }
+          }
           const snd = tag === "sound" ? el : kid(el, "sound");
           if (!score.tempo && snd && snd.getAttribute("tempo")) score.tempo = Math.round(+snd.getAttribute("tempo")) || 0;
           const pm = el.querySelector && el.querySelector("metronome > per-minute");
@@ -248,6 +257,17 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   return { score, report: report.done() };
 }
 
+const DIRECTIONS = {
+  dynamics: "Dynamics (not imported)", wedge: "Hairpins (not imported)", words: "Text directions (not imported)",
+  rehearsal: "Rehearsal marks (not imported)", segno: "Segno and coda signs (not imported)", coda: "Segno and coda signs (not imported)",
+  pedal: "Pedal marks (not imported)", "octave-shift": "Octave lines (not imported)",
+};
+const MARKS = {
+  fermata: "Fermatas (not imported)", slur: "Slurs (not imported)", articulations: "Articulations (not imported)",
+  ornaments: "Ornaments (not imported)", technical: "Technical markings (not imported)", arpeggiate: "Arpeggios (not imported)",
+  glissando: "Glissandos (not imported)", slide: "Glissandos (not imported)",
+};
+
 function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report }) {
   const isRest = !!kid(el, "rest");
   if (kid(el, "grace")) { if (!isRest) report.count("Grace notes skipped"); return; }
@@ -257,6 +277,14 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report }) {
   const voice = txt(el, "voice") || "1";
   if (voiceOf[staffNo] === undefined) voiceOf[staffNo] = voice;
   if (voice !== voiceOf[staffNo]) { if (!isRest) report.count("Notes in other voices skipped"); return; }
+  // markings on kept notes that Coda doesn't hold yet: counted, not dropped silently
+  for (const n of kids(el, "notations")) {
+    for (const c of n.children) {
+      if (c.localName === "articulations" || c.localName === "ornaments" || c.localName === "technical") report.count(MARKS[c.localName], c.children.length);
+      else if (MARKS[c.localName] && c.getAttribute("type") !== "stop") report.count(MARKS[c.localName]);
+    }
+  }
+  if (!isRest && kids(el, "lyric").length) report.count("Notes with lyrics (not imported)");
   const bar = st.bars[st.bars.length - 1];
   const tieStart = kids(el, "tie").some((t) => t.getAttribute("type") === "start");
 
