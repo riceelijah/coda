@@ -193,11 +193,18 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     }));
     if (nStaves > 2) report.add(`A part with ${nStaves} staves was split into separate staves without a brace`);
     let divisions = 1, key = 0, time = [4, 4];
-    const voiceOf = {}; // staff -> MusicXML voice ids in layer order
+    // staff -> MusicXML voice ids in layer order: numeric order, so voice 1 is always layer 1
+    const voiceOf = {};
+    for (const n of part.querySelectorAll("note")) {
+      const sn = +(txt(n, "staff") || 1), v = txt(n, "voice") || "1";
+      if (!(voiceOf[sn] ||= []).includes(v)) voiceOf[sn].push(v);
+    }
+    for (const k in voiceOf) voiceOf[k].sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || a.localeCompare(b));
 
     measures.forEach((meas, mi) => {
       staves.forEach((st) => allLayers(st).forEach((bars) => bars.push([])));
-      const lastEvent = {}; // staff -> last kept event in this bar
+      const lastEvent = {}; // staff:layer -> last kept event in this bar
+      const pos = { t: 0 }; // time cursor in ticks: notes advance it, <backup> and <forward> move it
       for (const el of meas.children) {
         const tag = el.localName;
         if (tag === "attributes") {
@@ -232,18 +239,13 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           if (!score.tempo && snd && snd.getAttribute("tempo")) score.tempo = Math.round(+snd.getAttribute("tempo")) || 0;
           const pm = el.querySelector && el.querySelector("metronome > per-minute");
           if (!score.tempo && pm) score.tempo = Math.round(parseFloat(pm.textContent)) || 0;
-        } else if (tag === "forward") {
-          // a gap inside one voice: rests in that layer (DESIGN §15)
-          const v = txt(el, "voice"), staffNo = +(txt(el, "staff") || 1), st = staves[staffNo - 1];
-          const layer = st && v !== null ? layerOf(voiceOf, staffNo, v) : -1;
-          if (layer >= 0) {
-            const ticks = Math.round((+txt(el, "duration") * PPQ) / divisions);
-            const bar = barOf(st, layer);
-            for (const d of splitTicks(ticks)) bar.push({ dur: d.dur, dots: d.dots, tie: false, pitches: [] });
-            report.count("Gaps in a voice filled with rests");
-          }
+        } else if (tag === "backup" || tag === "forward") {
+          const d = Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
+          pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
         } else if (tag === "note") {
-          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report });
+          const start = pos.t;
+          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start });
+          if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
       if (pi === 0) firstPartAttrs.push({ key, time: [...time] });
@@ -283,7 +285,7 @@ const MARKS = {
   glissando: "Glissandos (not imported)", slide: "Glissandos (not imported)",
 };
 
-function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report }) {
+function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start }) {
   const isRest = !!kid(el, "rest");
   if (kid(el, "grace")) { if (!isRest) report.count("Grace notes skipped"); return; }
   const staffNo = +(txt(el, "staff") || 1);
@@ -351,15 +353,21 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report }) {
       else report.count("Notes in unsupported tuplets (kept written lengths)");
     }
   }
-  barOf(st, layer).push(ev);
+  const bar = barOf(st, layer);
+  // a voice that starts later than where its layer has got to: fill the gap with rests
+  const gap = Math.floor((start - barTicks(bar)) / 60) * 60;
+  if (gap > 0) {
+    for (const d of splitTicks(gap)) bar.push({ dur: d.dur, dots: d.dots, tie: false, pitches: [] });
+    report.count("Gaps in a voice filled with rests");
+  }
+  bar.push(ev);
   lastEvent[lk] = ev;
 }
 
-// MusicXML voice -> layer index for a staff, by first appearance; -1 past the fourth (DESIGN §15).
+// MusicXML voice -> layer index for a staff (numeric voice order); -1 past the fourth (DESIGN §15).
 function layerOf(voiceOf, staffNo, voice) {
-  const list = (voiceOf[staffNo] ||= []);
-  if (!list.includes(voice)) { if (list.length >= MAX_LAYERS) return -1; list.push(voice); }
-  return list.indexOf(voice);
+  const i = (voiceOf[staffNo] || []).indexOf(voice);
+  return i < MAX_LAYERS ? i : -1;
 }
 
 // The current (last) bar of a layer, creating the layer with empty bars so far when it's new.

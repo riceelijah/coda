@@ -214,8 +214,9 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar) {
     const fmt = new VFl.Formatter();
     score.staves.forEach((st, s) => {
       const stave = staves[k][s];
-      // layer 1 always draws (a whole rest when empty); layers 2–4 only when they have notes
-      const used = allLayers(st).map((bars, v) => ({ v, bar: bars[b] })).filter(({ v, bar }) => v === 0 || bar.length);
+      // layers with notes draw; when none has any, layer 1 draws a whole rest
+      let used = allLayers(st).map((bars, v) => ({ v, bar: bars[b] })).filter(({ bar }) => bar.length);
+      if (!used.length) used = [{ v: 0, bar: [] }];
       const multi = used.length > 1;
       const staffVoices = [];
       for (const { v, bar } of used) {
@@ -257,7 +258,10 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar) {
 
     drawn.forEach(({ s, v, stave, notes, empty }) => {
       noteRef[s][v][b] = empty ? [] : notes.map((note) => ({ note, sys: si }));
-      if (v > 0) return; // ponytail: hit map has layer 1 only until layer entry (Phase 18b)
+      // one cell per staff and bar, whichever layer drew first; note hits are layer 1 only
+      // ponytail: until layer entry (Phase 18b) picks the active layer here
+      if (cells.some((c) => c.sys === si && c.staff === s && c.bar === b)) return;
+      if (v > 0) { empty = true; }
       cells.push({
         sys: si, staff: s, bar: b, svg,
         x0: stave.getX(), x1: stave.getX() + stave.getWidth(),

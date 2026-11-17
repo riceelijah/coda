@@ -59,8 +59,8 @@ voices, grace notes, clef changes…), it opens the rest and lists what it left 
 
 ## Not supported yet
 
-Lyrics, articulations, dynamics, slurs, grace notes, septuplets, more than one
-voice per staff, repeats and endings, mid-score clef changes, transposing instruments, page layout
+Lyrics, articulations, dynamics, slurs, grace notes, septuplets, entering notes into layers 2–4
+(files with up to four voices per staff open, draw, play and save; editing is layer 1 only for now), repeats and endings, mid-score clef changes, transposing instruments, page layout
 controls, your own instrument samples, and MIDI export. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Running it locally

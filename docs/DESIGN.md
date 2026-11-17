@@ -467,7 +467,7 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
 
 ## 8. Things deliberately not in the first version
 
-Lyrics, articulations, dynamics, slurs, grace notes, more than one voice per staff, repeats
+Lyrics, articulations, dynamics, slurs, grace notes, entering notes in layers 2–4 (layers: §15), repeats
 and endings, mid-score clef changes, transposing instruments, page-layout controls, user-supplied
 instrument samples, MIDI export. (Sampled General MIDI sounds: §13.3.) (Tuplet entry, inserting mid-bar and copy/paste: §11.)
 
@@ -957,12 +957,14 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
 - **Model:** `staff.bars` stays layer 1. Optional `staff.layers`: up to three more bars arrays
   (layers 2–4), each `measures.length` long, absent when unused. `layerBars(staff, v)` and
   `allLayers(staff)`; navigation and edit functions take a trailing `v = 0`. Each layer fits the
-  bar on its own; an empty bar in layers 2–4 draws nothing (layer 1 draws a whole rest).
+  bar on its own; empty layer bars draw nothing, and a bar where every layer is empty draws one
+  whole rest.
 - **Every bar walker covers all layers:** `isValidScore`, `addMeasure`, `deleteMeasure`, the
   time-change fit check, `padBars`, `noteCount`, `clearBrokenTies`, `schedule` (ties per layer),
   render, export.
-- **MusicXML:** import maps `<voice>` per staff by first appearance to layers 1–4 (more are
-  counted and skipped); a `<forward>` with a voice becomes rests in that layer (counted). Export
+- **MusicXML:** import maps each staff's `<voice>` ids, in numeric order, to layers 1–4 (more are
+  counted and skipped). A time cursor follows notes, `<backup>` and `<forward>`; a note starting
+  after where its layer has reached gets rests in front (counted). Export
   writes each non-empty layer bar as voice `staff × 4 + layer + 1`, separated by `<backup>`.
 - **Phase 18a:** model, MusicXML, drawing, playback. **18b:** a Layer 1–4 control at the lower
   left (NotePad's place for it); entry, selection and caret carry a layer. **18c:** MuseScore

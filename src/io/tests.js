@@ -139,6 +139,35 @@ export async function run({ check, eq }) {
     return true;
   });
 
+  await check("layers: MusicXML voice entering mid-bar gets rests; a forward-only bar stays empty (DESIGN §15)", () => {
+    const note = (step, type, dur, voice) => `<note><pitch><step>${step}</step><octave>4</octave></pitch><duration>${dur}</duration><voice>${voice}</voice><type>${type}</type></note>`;
+    const xml = `<score-partwise><part-list><score-part id="P1"><part-name>x</part-name></score-part></part-list><part id="P1">
+      <measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+        ${note("C", "whole", 4, 1)}<backup><duration>4</duration></backup><forward><duration>2</duration></forward>${note("E", "half", 2, 2)}</measure>
+      <measure number="2">${note("D", "whole", 4, 1)}<backup><duration>4</duration></backup><forward><duration>4</duration><voice>2</voice></forward></measure>
+    </part></score-partwise>`;
+    const st = importMusicXML(xml).score.staves[0];
+    const l2 = brief({ bars: st.layers[0] });
+    return (brief(st) === "C4:w | D4:w" && l2 === "r:h E4:h | ") || `${brief(st)} / ${l2}`;
+  });
+
+  await check("layers: bar walkers cover every layer (add/delete bar, time check, counts, playback, validation)", () => {
+    const s = M.newScore({ bars: 2 });
+    s.staves[0].bars[0] = [ev("w", "C5")];
+    s.staves[0].layers = [[[ev("h", "C4"), ev("h", "D4")], [ev("w", "E4")]]];
+    if (!M.isValidScore(s)) return "valid";
+    if (M.noteCount(s) !== 4 || schedule(s).notes.length !== 4) return "counts";
+    M.addMeasure(s, 0);
+    if (s.staves[0].layers[0].length !== 3 || s.staves[0].layers[0][1].length) return "addMeasure";
+    M.deleteMeasure(s, 1);
+    if (s.staves[0].layers[0].length !== 2 || brief({ bars: s.staves[0].layers[0] }) !== "C4:h D4:h | E4:w") return "deleteMeasure";
+    s.staves[0].bars[1] = []; // only layer 2 is too long for 2/4 in bar 2
+    if (!M.setAttrs(s, 1, { time: [2, 4] })) return "time change allowed an overflowing layer";
+    const short = JSON.parse(JSON.stringify(s)); short.staves[0].layers[0].pop();
+    const four = JSON.parse(JSON.stringify(s)); four.staves[0].layers = [0, 1, 2, 3].map(() => s.staves[0].layers[0]);
+    return (!M.isValidScore(short) && !M.isValidScore(four)) || "validation accepted a short layer or a fifth";
+  });
+
   await check("MusicXML export pads an underfull bar to capacity", () => {
     const sc = { title: "", composer: "", tempo: 100, measures: [{ key: 0, time: [3, 4] }],
       staves: [{ name: "", clef: "treble", brace: false, bars: [[ev("8", "C5")]] }] };

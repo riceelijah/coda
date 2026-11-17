@@ -920,7 +920,7 @@ const CMD = {
   "b-addbar": { run: () => edit((sc) => { M.addMeasure(sc, state.caret.bar); state.caret.bar++; return null; }) },
   "b-delbar": { run: () => {
     const b = state.caret.bar;
-    const has = state.score.staves.some((s) => s.bars[b].length);
+    const has = state.score.staves.some((s) => M.allLayers(s).some((bars) => bars[b].length));
     if (has && !confirm(`Delete bar ${b + 1} and its notes?`)) return;
     edit((sc) => M.deleteMeasure(sc, b));
   }, on: () => state.score.measures.length > 1 },
