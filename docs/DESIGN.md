@@ -1114,3 +1114,68 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   signature, unlike Finale; counted.
 - Not yet: a concert-pitch view toggle.
 
+
+## 22. Dynamics (Phase 26)
+
+- **Model:** `ev.dyn`, one of `ppp pp p mp mf f ff fff fp sf sfz fz`, on a note or rest.
+- **Entry:** Notes ▸ Dynamics (also right-click) sets or clears it on the first selected event.
+- **Drawn** under the note in bold italic; a staff's drawing grows to fit what hangs below.
+- **Sound:** a level (`ppp`…`fff`) holds until the next one, for the whole part (all its staves
+  and layers); `mf` before the first. `sf`, `sfz`, `fz` accent one note; `fp` accents, then `p`.
+  Playback, MIDI and audio export use it as note velocity. Hairpins don't change the sound yet.
+- **Files:** MusicXML `<direction><dynamics>` before the note; MuseScore `<Dynamic>` before the
+  chord or rest. Rarer marks map to the nearest (`pppp`→`ppp`, `sfp`→`fp`, `rfz`→`sfz`…); a
+  dynamic after a part's last note is counted.
+
+## 23. Slurs and hairpins (Phase 27)
+
+- **Model:** flags on the first and last event of a layer: `slur`/`slurEnd`, `hp` (`"<"` or
+  `">"`)/`hpEnd`. No nesting or overlap within a kind. `clearBrokenSpans` runs after every
+  `edit()` and import, dropping orphan ends and overlaps (imports count them).
+- **Entry:** select a range, then S (slur) or Notes ▸ Crescendo / Diminuendo hairpin. The same
+  command on exactly that range removes it; a new one replaces any inside it.
+- **Drawn** by hand on the SVG (slurs as filled curves, hairpins as lines), split at line ends;
+  hairpins sit under slurs, lyrics and dynamics.
+- **Files:** MusicXML `<slur number="1">` in `<notations>` (other numbers counted) and `<wedge>`
+  directions, the stop after its note. MuseScore Slur spanners in the chords, HairPin spanners at
+  voice level. Other MuseScore lines are counted.
+
+## 24. Lyrics (Phase 28)
+
+- **Model:** `ev.lyric` (1–40 characters) and `ev.lyricHyph` (a hyphen to the next syllable), on
+  notes only. One verse.
+- **Entry:** select a note, press L (Notes ▸ Lyrics…). A box opens under the note. Space or Tab
+  moves to the next note, `-` moves on with a hyphen, Shift+Tab goes back, Enter or clicking
+  away finishes, Escape drops what's typed. Each syllable is one undo step. Rests are skipped.
+- **Drawn** on one line per staff per system, under the notes and dynamics; a staff with lyrics
+  gets extra room below and bars widen for long words.
+- **Files:** MusicXML `<lyric number="1">` with `<syllabic>`; MuseScore `<Lyrics>` (verse 1 has no
+  `<no>`). Syllabic values are worked out from the hyphens. Other verses, extender lines and
+  lyrics on rests are counted. Elided syllables join with ‿.
+
+## 25. Clef changes (Phase 29)
+
+- **Model:** `staff.clefs = {bar: clef}`, at barlines only, bar ≥ 1; `staff.clef` is the clef at
+  bar 0. `clefAt(staff, bar)` gives the clef in effect. `tidyClefs` drops changes to the clef
+  already in effect. Adding a bar shifts later changes; deleting a bar moves its change to the
+  next bar.
+- **Entry:** Score ▸ Clef from this bar (the caret's staff and bar).
+- **Drawn** small before the barline where it starts, which also gives a courtesy clef at the end
+  of a line. Notes, rests, clicks and letter entry use the clef in effect.
+- **Files:** MusicXML `<clef>` in that bar's `<attributes>`; MuseScore `<Clef>` at the end of the
+  bar before, as MuseScore writes it. On import a clef at the end of a bar starts the next bar; one
+  inside a bar moves to the bar's start, counted; one after the last bar is counted.
+
+## 26. Grace notes (Phase 30)
+
+- **Model:** `ev.grace = [pitch, …]`, up to 8 single notes before a note (not a rest). One draws as
+  a slashed eighth, more as beamed sixteenths. They move with their note (arrows, part
+  transposition, paste between parts).
+- **Entry:** grace mode (palette button, Notes ▸ Grace notes): click a note to add one at the
+  clicked pitch, or select a note and type A–G (nearest to the last grace or the note). The armed
+  sharp/flat/natural applies. Delete removes the selected notes' graces; Escape leaves the mode.
+- **Sound:** on the beat, a 32nd each (at most half the note); the note starts after them.
+- **Files:** MusicXML `<grace slash="yes"/>` notes before their note; MuseScore `<acciaccatura/>`
+  or `<grace16/>` chords. Imported groups drawn differently (unslashed single, other values) are
+  counted as redrawn; grace chords keep their first note; graces after a note, before a rest or
+  at a bar end are counted. `.musx` grace notes are still skipped and counted.

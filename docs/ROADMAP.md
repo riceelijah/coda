@@ -26,13 +26,13 @@ Smart Shape, Lyrics, Repeat, Key Signature, Mass Mover).
 | **Tuplet entry** | **Done (Phases 9, 17):** 3:2, 2:3, 4:3, 5:4, 6:4 (`9`/`;`, Notes ▸ Tuplet…). 7-tuplets don't fit the tick grid. | — |
 | **Second voice** (stems up/down in one staff) | **Done (Phase 18):** layers 1–4, entered with the Layer buttons; open, draw, play and save from MusicXML, MuseScore and .musx. | — |
 | **Articulations**: staccato, accent, tenuto, marcato, fermata | **Done (Phase 19):** Notes menu and right-click; MusicXML and MuseScore both read them; staccato plays short. `.musx` articulations too (Phase 25). | — |
-| **Dynamics and hairpins** (p, mf, ff, cresc.) | NotePad's Expression tool also did tempo text and rehearsal letters. | M |
-| **Slurs** | | M |
-| **Lyrics** (one verse) | Type syllables under notes; space moves on, hyphen splits a word. | M |
+| **Dynamics and hairpins** (p, mf, ff, cresc.) | **Done (Phases 26–27):** dynamics set playback and MIDI velocity; hairpins don't change the sound yet. Tempo text and rehearsal letters are not done. | — |
+| **Slurs** | **Done (Phase 27).** | — |
+| **Lyrics** (one verse) | **Done (Phase 28):** L, then type; space moves on, hyphen splits a word. | — |
 | **Repeats and 1st/2nd endings**, played back | NotePad drew them but didn't play them back; Coda can do both. | M |
-| **Clef changes mid-score** | Importers count and skip them today. | S |
+| **Clef changes mid-score** | **Done (Phase 29):** Score ▸ Clef from this bar. | — |
 | **Pickup bar** (anacrusis) | NotePad couldn't do this either; very common in songs and hymns. | S |
-| **Grace notes** | NotePad couldn't do this either. | M |
+| **Grace notes** | **Done (Phase 30):** grace mode; played on the beat. | — |
 | **MIDI keyboard entry** | Browsers can read a MIDI keyboard directly (Web MIDI API), so no dependency is needed. Chrome and Edge support it; Firefox asks for permission; Safari doesn't. | S |
 | **MIDI export** | **Done (Phase 22):** File ▸ Export ▸ MIDI. | — |
 | **Up to 8 staves with instrument names** | **Done (Phases 12–13, 23):** Score ▸ Parts and instruments adds, removes, renames and reorders parts and picks their sounds. | — |
