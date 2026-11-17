@@ -55,6 +55,7 @@ only says what to build in what order and how to know each phase is finished.
 | 28 | Lyrics, up to 5 verses (DESIGN §24) | done |
 | 29 | Clef changes mid-score (DESIGN §25) | done |
 | 30 | Grace notes (DESIGN §26) | done |
+| 31 | .musx: dynamics, slurs and hairpins, lyric verses, clef changes, grace notes (DESIGN §9.5) | done |
 
 ---
 

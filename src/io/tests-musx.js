@@ -60,11 +60,40 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
     return got === "F4:8/5:4 G4:8/5:4 A4:8/5:4 B4:8/5:4 C5:8/5:4 r:h" || got;
   });
 
-  await check("musx sample: grace notes are reported", async () => {
+  // marks per event in a layer: dyn, ( ) slur, < > | hairpin, lyrics by verse, [grace]
+  const P = (p) => "CDEFGAB"[p.step] + ["bb", "b", "", "#", "##"][p.alter + 2] + p.oct;
+  const tags = (bars) => bars.map((bar) => bar.map((e) => [e.dyn, e.slur && "(", e.slurEnd && ")", e.hp, e.hpEnd && "|",
+    e.lyrics && e.lyrics.map((l) => (l ? l.text + (l.hyph ? "-" : "") : "_")).join("/"), e.grace && `[${e.grace.map(P).join(" ")}]`].filter(Boolean).join("") || ".").join(" ")).join(" | ");
+
+  await check("musx sample: grace notes go on the next note (DESIGN §26)", async () => {
     const r = await open("grace_notes");
-    const got = brief(r.score.staves[0]);
-    if (got !== "r:h D5:h") return got;
-    return /Grace notes skipped: 8/.test(warn(r)) || warn(r);
+    const got = `${brief(r.score.staves[0])} ${tags(r.score.staves[0].bars)}`;
+    if (got !== "r:h D5:h . [B4 C5 D5 E5 F5]") return got;
+    return (/no note after them in the bar \(not imported\): 3/.test(warn(r)) && /Dynamics on grace notes \(not imported\): 1/.test(warn(r))) || warn(r);
+  });
+
+  await check("musx samples: dynamics by layer and position, legacy font characters (DESIGN §22)", async () => {
+    const r = await open("exprlayers"), st = r.score.staves[0];
+    const got = `${tags(st.bars)} + ${tags(st.layers[0])}`;
+    if (got !== "f . pp . + . mp ." || !/Two dynamics on one note \(the first kept\): 1/.test(warn(r))) return `${got} / ${warn(r)}`;
+    const v = await open("exprv2");
+    // one hidden; one over the closing rest, with no note after it
+    return (tags(v.score.staves[0].bars) === ". ." && /Hidden dynamics \(not imported\): 1/.test(warn(v)) && /after the last note \(not imported\): 1/.test(warn(v))) ||
+      `${tags(v.score.staves[0].bars)} / ${warn(v)}`;
+  });
+
+  await check("musx sample: slurs from smart shapes (DESIGN §23)", async () => {
+    const r = await open("slur");
+    return tags(r.score.staves[0].bars) === "( . ) ." || tags(r.score.staves[0].bars);
+  });
+
+  await check("musx sample: lyric verses, hyphens and word extensions (DESIGN §24)", async () => {
+    const r = await open("syllables");
+    const got = tags(r.score.staves[0].bars);
+    const want = "fi@# na le . | _/fi _/na.;— _/le . | _/_/fi- _/_/na- _/_/le . | _/_/_/fi _/_/_/na _/_/_/le . | _/_/_/_/finale _/_/_/_/fi- _/_/_/_/na- _/_/_/_/le";
+    if (got !== want) return got;
+    const w = await open("wordext");
+    return /Lyric extender lines \(not imported\): 5/.test(warn(w)) || warn(w);
   });
 
   await check("musx sample: layers 1–4 kept as layers (DESIGN §15)", async () => {
@@ -113,7 +142,7 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
   await check("musx samples: every one imports to a valid score", async () => {
     const bad = [];
     for (const n of ["keysigs", "enharmonics_test", "quintuplet", "grace_notes", "layers", "piano_inst", "multistaff_inst",
-      "v1v2Ties", "v1v2Ties2", "v1v2tuplets", "transpose", "expdef", "timesig-inddisp"]) {
+      "v1v2Ties", "v1v2Ties2", "v1v2tuplets", "transpose", "expdef", "timesig-inddisp", "exprlayers", "exprv2", "slur", "syllables", "wordext", "beam_over_graces"]) {
       const r = await open(n);
       if (!isValidScore(r.score)) bad.push(n);
     }
@@ -153,6 +182,49 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
     if (got !== "- C4:h r:h staccato+accent,fermata / -2,-1 D4:w staccato / -9,-5 A4:w ") return got;
     return (/Articulations on rests \(not imported\): 1/.test(w) && /Other articulations \(not imported\): 1/.test(w) &&
       /Chromatic transpositions/.test(w) && /Expressions .* skipped: 1/.test(w)) || w;
+  });
+
+  await check("musx: hairpins, clef changes, SMuFL dynamics, lyrics on rests, graces before rests (inline EnigmaXML)", async () => {
+    const bar = (n) => `<measSpec cmper="${n}"><beats>4</beats><divbeat>1024</divbeat></measSpec><frameSpec cmper="${n}" inci="0"><startEntry>${n * 10 + 1}</startEntry><endEntry>${n * 10 + 4}</endEntry></frameSpec>`;
+    const q = (id, lev, extra = "") => `<entry entnum="${id}" prev="0" next="${id % 10 === 4 ? 0 : id + 1}"><dura>1024</dura>${lev === null ? "" : `<isNote/><note id="1"><harmLev>${lev}</harmLev></note>`}${extra}</entry>`;
+    const pt = (m, e) => `<endPt><inst>1</inst><meas>${m}</meas><edu>${e}</edu></endPt>`;
+    const shape = (n, type, a, b) => `<smartShape cmper="${n}"><shapeType>${type}</shapeType><startTermSeg>${a}</startTermSeg><endTermSeg>${b}</endTermSeg></smartShape>`;
+    const x = `<finale xmlns="http://www.makemusic.com/2012/finale"><options><clefOptions>
+      <clefDef index="0"><clefChar>38</clefChar><clefYDisp>-6</clefYDisp></clefDef><clefDef index="3"><clefChar>63</clefChar><clefYDisp>-2</clefYDisp></clefDef>
+      <clefDef index="1"><clefChar>66</clefChar><clefYDisp>-4</clefYDisp></clefDef></clefOptions></options><others>
+      ${bar(1)}${bar(2)}${bar(3)}<instUsed cmper="0" inci="0"><inst>1</inst></instUsed><staffSpec cmper="1"/>
+      <clefList cmper="7" inci="0"><clef>0</clef><xEduPos>0</xEduPos></clefList><clefList cmper="7" inci="1"><clef>1</clef><xEduPos>2048</xEduPos></clefList>
+      <fontName cmper="0"><name>Maestro</name></fontName>
+      <textBlock cmper="1"><textID>1</textID></textBlock><textBlock cmper="2"><textID>2</textID></textBlock><textBlock cmper="3"><textID>3</textID></textBlock>
+      <markingsCategory cmper="1"><categoryType>dynamics</categoryType></markingsCategory>
+      <textExprDef cmper="1"><textIDKey>1</textIDKey><categoryID>1</categoryID></textExprDef>
+      <textExprDef cmper="2"><textIDKey>2</textIDKey><categoryID>1</categoryID></textExprDef>
+      <textExprDef cmper="3"><textIDKey>3</textIDKey><categoryID>1</categoryID></textExprDef>
+      <measExprAssign cmper="1" inci="0"><textExprID>1</textExprID><horzEduOff>1024</horzEduOff><staffAssign>1</staffAssign></measExprAssign>
+      <measExprAssign cmper="1" inci="1"><textExprID>2</textExprID><horzEduOff>3072</horzEduOff><staffAssign>1</staffAssign></measExprAssign>
+      <measExprAssign cmper="2" inci="0"><textExprID>3</textExprID><staffAssign>1</staffAssign></measExprAssign>
+      <measExprAssign cmper="3" inci="0"><textExprID>1</textExprID><staffAssign>1</staffAssign></measExprAssign>
+      ${shape(1, "cresc", pt(1, 0), pt(1, 2048))}${shape(2, "decresc", pt(2, 1024), pt(2, 4096))}${shape(3, "trill", pt(1, 0), pt(1, 1024))}
+      ${shape(4, "slurAuto", pt(2, 0), pt(2, 0))}
+      </others><details>
+      <gfhold cmper1="1" cmper2="1"><frame1>1</frame1></gfhold><gfhold cmper1="1" cmper2="2"><frame1>2</frame1><clefID>3</clefID></gfhold>
+      <gfhold cmper1="1" cmper2="3"><frame1>3</frame1><clefListID>7</clefListID></gfhold>
+      <lyrDataVerse entnum="14" inci="0"><lyricNumber>1</lyricNumber><syll>1</syll></lyrDataVerse>
+      <lyrDataVerse entnum="31" inci="0"><lyricNumber>1</lyricNumber><syll>2</syll></lyrDataVerse>
+      </details><entries>
+      ${q(11, 0)}${q(12, 1)}${q(13, 2)}${q(14, null)}
+      ${q(21, 0)}${q(22, 1)}${q(23, 2)}${q(24, 3)}
+      ${q(31, 0)}<entry entnum="32" prev="31" next="33"><dura>256</dura><isNote/><graceNote/><note id="1"><harmLev>4</harmLev></note></entry>${q(33, null)}${q(34, 3)}
+      </entries><texts><expression number="1">^fontMus(Font0,0)\uE52D</expression><expression number="2">^fontMus(Font0,0)ƒ</expression>
+      <expression number="3">^fontTxt(Times,0)dolce</expression><verse number="1">la la</verse></texts></finale>`;
+    const r = await importBytes(new TextEncoder().encode(x), "inline.xml");
+    const st = r.score.staves[0], w = warn(r);
+    const got = `${st.clef} ${JSON.stringify(st.clefs)} ${tags(st.bars)}`;
+    if (got !== 'treble {"1":"bass","2":"alto"} < mf | . | ff > . | | mfla . .') return `${got} / ${w}`;
+    const want = ["Lyrics on rests (not imported): 1", "Clef changes inside a bar moved to its start: 1", "Unusual dynamics (not imported): 1",
+      "Slurs over a single note (not imported): 1", "Lines, trills, octave signs and other shapes (not imported): 1",
+      "Grace notes before rests (not imported): 1"];
+    return want.every((s) => r.report.warnings.includes(s)) || w;
   });
 
   await check("musx sample: piano staves, clefs, names and brace", async () => {

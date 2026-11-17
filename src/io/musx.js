@@ -3,7 +3,9 @@
 // Container: unzip -> decrypt score.dat -> gunzip -> EnigmaXML. Notation mapping follows the
 // EnigmaXML structure as checked against real files and the MIT-licensed musxdom library
 // (key/pitch rules ported from its KeySignature::calcPitch).
-import { padBars, noteCount, tupletOk, durFromTicks, nearestDur, measuresFrom, setMark, splitTicks, barTicks, barCapacity, allLayers, shiftPitch, midi, MAX_LAYERS } from "../model.js";
+import { padBars, noteCount, tupletOk, durFromTicks, nearestDur, measuresFrom, setMark, splitTicks, barTicks, barCapacity, allLayers, shiftPitch, midi, MAX_LAYERS,
+  eventTicks, clearBrokenSpans, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, DYNS } from "../model.js";
+import { DYN_IN } from "./musicxml.js";
 import { GM } from "../gm.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -51,9 +53,6 @@ const str = (el, name) => kid(el, name)?.textContent.trim() || "";
 // strip Enigma text codes like ^font(Times,4096)^size(12)
 const plain = (s) => s.replace(/\^\w+\([^)]*\)/g, "").replace(/\^\^/g, "^").trim();
 
-// entry flags for attached markings Coda doesn't import
-const DETAILS = [["lyricDetail", "Notes with lyrics (not imported)"], ["smartShapeDetail", "Notes with slurs or lines (not imported)"]];
-
 // Articulation symbols -> Coda marks (DESIGN §16). SMuFL fonts use code points U+E4A0…; the older
 // Finale music fonts (Maestro and its look-alikes) use plain character codes.
 const SMUFL_MARKS = {
@@ -69,6 +68,52 @@ const LEGACY_MARKS = {
   172: ["marcato", "staccato"], 232: ["marcato", "staccato"],
 };
 const LEGACY_FONTS = /^(Maestro|Petrucci|Jazz|Broadway Copyist|Engraver Font Set)$/i;
+// Legacy fonts are keyed by Mac Roman byte; the file stores the character those bytes decode to
+// (pp is "π", byte 185). Back to the byte; plain codes under 256 when no Mac Roman character matches.
+const MAC_BYTE = (() => {
+  const m = new Map();
+  try { [...new TextDecoder("macintosh").decode(Uint8Array.from({ length: 128 }, (_, i) => 128 + i))].forEach((c, i) => m.set(c.codePointAt(0), 128 + i)); }
+  catch { /* no Mac Roman decoder: plain codes only */ }
+  return m;
+})();
+const legacyCode = (cp) => (cp < 128 ? cp : MAC_BYTE.get(cp) ?? (cp < 256 ? cp : null));
+
+// Dynamic glyphs -> letters (DESIGN §22): SMuFL U+E520…, and the codes the five legacy fonts share
+// in openmusx/smufl-mapping. The joined letters go through MusicXML's table (pppp -> ppp, sfp -> fp…).
+const SMUFL_DYN = {
+  0xe520: "p", 0xe521: "m", 0xe522: "f", 0xe523: "r", 0xe524: "s", 0xe525: "z", 0xe526: "n", 0xe527: "pppppp", 0xe528: "ppppp",
+  0xe529: "pppp", 0xe52a: "ppp", 0xe52b: "pp", 0xe52c: "mp", 0xe52d: "mf", 0xe52e: "pf", 0xe52f: "ff", 0xe530: "fff", 0xe531: "ffff",
+  0xe532: "fffff", 0xe533: "ffffff", 0xe534: "fp", 0xe535: "fz", 0xe536: "sf", 0xe537: "sfp", 0xe538: "sfpp", 0xe539: "sfz",
+  0xe53a: "sfzp", 0xe53b: "sffz", 0xe53c: "rf", 0xe53d: "rfz",
+};
+const LEGACY_DYN = {
+  70: "mf", 80: "mp", 83: "sf", 90: "fz", 102: "f", 112: "p", 115: "s", 122: "z", 130: "sfp", 141: "sffz", 167: "sfz",
+  175: "pppp", 182: "sfpp", 184: "ppp", 185: "pp", 189: "m", 196: "ff", 234: "fp", 235: "ffff", 236: "fff",
+};
+
+// Lyric text -> syllables, as musxdom's LyricsTextBase::createSyllableInfo: hyphens and whitespace
+// separate; a hyphen counts only right after a syllable, before any space; with smart word
+// extensions underscores separate too and mark an extender. Formatting codes go without a trace.
+export function syllablesOf(text, smartExt) {
+  const raw = text.replace(/\^\w+\([^)]*\)/g, "").replace(/\^\^/g, "^");
+  const out = [];
+  let cur = "", inSep = false, sawSpace = false, hyph = false, unders = 0;
+  for (const c of raw) {
+    if (c === "-" || c <= " " || (smartExt && c === "_")) {
+      if (!inSep) { inSep = true; sawSpace = false; }
+      if (c === "-") { if (!sawSpace && cur) hyph = true; }
+      else { if (c === "_") unders++; sawSpace = true; }
+    } else {
+      if (inSep) {
+        if (cur) { out.push({ text: cur, hyph, ext: unders > 0 }); cur = ""; }
+        hyph = false; inSep = false; unders = 0;
+      }
+      cur += c;
+    }
+  }
+  if (cur) out.push({ text: cur, hyph, ext: unders > 0 });
+  return out;
+}
 
 // Key change (fifths) of a diatonic interval plus chromatic alteration, as musxdom's
 // calcKeySigChangeFromInterval: second +2, third +4, fourth −1, fifth +1, sixth +3, seventh +5.
@@ -217,7 +262,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     const d = articDefs.get(defId);
     const c = num(d, "charMain", -1);
     if (c >= 0xe000) return smuflMarks(c);
-    return LEGACY_FONTS.test(fontNames.get(String(num(d, "fontMain", 0))) || "") ? LEGACY_MARKS[c] || null : null;
+    return LEGACY_FONTS.test(fontNames.get(String(num(d, "fontMain", 0))) || "") ? LEGACY_MARKS[legacyCode(c)] || null : null;
   };
 
   // Transpositions (DESIGN §21). Finale gives the interval from concert to written: a diatonic step
@@ -244,6 +289,39 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
   const styled = others("staffStyleAssign").filter((a) => trStyles.has(String(num(a, "style", -1)))).length;
   if (styled) report.count("Transposition changes from staff styles (not imported)", styled);
 
+  // lyrics (DESIGN §24): details lyrDataVerse/Chorus/Section per entry -> texts verse/chorus/section
+  const smartExt = has(kid(kid(root, "options"), "lyricOptions"), "useSmartWordExtensions");
+  const LYR_KINDS = [["lyrDataVerse", "verse"], ["lyrDataChorus", "chorus"], ["lyrDataSection", "section"]];
+  const lyrTexts = new Map(LYR_KINDS.flatMap(([, t]) => kids(textsEl, t).map((e) => [`${t}/${e.getAttribute("number")}`, e.textContent])));
+  const sylCache = new Map();
+  const syllable = (key, n) => {
+    if (!sylCache.has(key)) sylCache.set(key, syllablesOf(lyrTexts.get(key) || "", smartExt));
+    return sylCache.get(key)[n - 1] || null;
+  };
+  const lyrics = new Map(); // entnum -> assignments, first verse first
+  LYR_KINDS.forEach(([d, t], k) => {
+    for (const a of details(d)) {
+      const id = a.getAttribute("entnum");
+      if (!lyrics.has(id)) lyrics.set(id, []);
+      lyrics.get(id).push({ order: k * 10000 + num(a, "lyricNumber"), key: `${t}/${num(a, "lyricNumber")}`, syll: num(a, "syll") });
+    }
+  });
+  for (const l of lyrics.values()) l.sort((a, b) => a.order - b.order);
+  // each verse, chorus and section used becomes one lyric line, verses first
+  const lines = [...new Map([...lyrics.values()].flat().sort((a, b) => a.order - b.order).map((a) => [a.key, 0])).keys()];
+
+  const clefLists = new Map();
+  for (const c of others("clefList")) {
+    const id = c.getAttribute("cmper");
+    if (!clefLists.has(id)) clefLists.set(id, []);
+    clefLists.get(id).push({ inci: attr(c, "inci") || 0, clef: num(c, "clef"), at: num(c, "xEduPos") });
+  }
+  for (const l of clefLists.values()) l.sort((a, b) => a.inci - b.inci);
+
+  // where each entry landed: entnum -> {si, L (Coda layer, 1-based), ev} or {grace: true}; startOf: file time in the bar
+  const placed = new Map(), startOf = new Map(), v2Layer = new Map(); // v2Layer: "si/mi/src" -> Coda layer
+  const graceIds = new Set();
+
   staffIds.forEach((sid, si) => {
     const spec = staffSpecs.get(sid);
     let clefId = num(spec, "defaultClef", 0);
@@ -265,9 +343,8 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     const readEntry = (e, id, mi, ts) => {
       const skip = (label) => { report.count(label, Math.max(1, num(e, "numNotes", 0))); return null; };
       ts.last = 0; // the entry's real length in ticks, from the file (tuplet ratio applied)
-      if (has(e, "graceNote")) return skip("Grace notes skipped");
+      if (has(e, "graceNote")) return null; // the caller keeps it for the next note
       if (has(e, "ignore")) { ts.last = (num(e, "dura", 0) * 480) / 1024; report.count("Hidden placeholder entries shown as rests"); return null; }
-      for (const [flag, label] of DETAILS) if (has(e, flag)) report.count(label);
       const dura = num(e, "dura", 0);
       if (has(e, "tupletStart") && tupletDefs.has(id)) {
         const t = tupletDefs.get(id);
@@ -296,6 +373,17 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
         }
         ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
       }
+      for (const a of lyrics.get(id) || []) {
+        const sy = syllable(a.key, a.syll), v = lines.indexOf(a.key);
+        if (!sy) report.count("Lyrics with missing text (not imported)");
+        else if (!ev.pitches.length) report.count("Lyrics on rests (not imported)");
+        else if (v >= MAX_VERSES || ev.lyrics?.[v]) report.count(`Lyrics beyond verse ${MAX_VERSES} (not imported)`);
+        else {
+          if (sy.text.length > MAX_LYRIC) report.count("Long lyrics shortened");
+          if (sy.ext) report.count("Lyric extender lines (not imported)");
+          setLyric(ev, sy.text, sy.hyph, v);
+        }
+      }
       const defs = artics.get(id) || [];
       if (has(e, "articDetail") && !defs.length) report.count("Notes with articulations (not imported)");
       for (const def of defs) {
@@ -309,17 +397,43 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
       return ev;
     };
 
+    // grace notes (DESIGN §26): first note of each grace entry, put on the next note of the voice
+    const readGrace = (e, id, mi) => {
+      graceIds.add(id);
+      if (!has(e, "isNote")) { report.count("Grace rests (not imported)"); return null; }
+      const ns = kids(e, "note");
+      if (ns.length > 1) report.count("Grace-note chords reduced to their first note");
+      if (artics.has(id) || lyrics.has(id) || ns.some((n) => has(n, "tieStart"))) report.count("Marks, slurs, ties and lyrics on grace notes (not imported)");
+      return ns.length ? { p: pitchOf(mKeys[mi], num(ns[0], "harmLev"), num(ns[0], "harmAlt")), dura: num(e, "dura", 0) } : null;
+    };
+    const giveGraces = (pend, ev) => {
+      if (!pend.length) return;
+      const g = pend.splice(0);
+      if (!ev || !ev.pitches.length) { report.count("Grace notes before rests (not imported)", g.length); return; }
+      if (g.length > MAX_GRACE) report.count(`Grace notes beyond ${MAX_GRACE} before a note (not imported)`, g.length - MAX_GRACE);
+      const kept = g.slice(0, MAX_GRACE);
+      if (kept.length === 1 ? kept[0].dura !== 512 : kept.some((x) => x.dura !== 256)) report.count("Grace notes redrawn: one as a slashed eighth, more as sixteenths", kept.length);
+      ev.grace = kept.map((x) => x.p);
+    };
     // a hidden entry still takes time: rests in its place keep later notes where the file has them
     const gapRests = (ticks) => splitTicks(Math.floor(ticks / 60) * 60).map((d) => ({ dur: d.dur, dots: d.dots, tie: false, pitches: [] }));
     measures.forEach((m, mi) => {
       const g = gf.get(`${sid}/${m.cmper}`);
       staff.bars.push([]);
       if (!g) return;
-      if (has(g, "clefListID")) report.count("Clef changes ignored");
-      else if (has(g, "clefID")) {
-        if (mi === 0) clefId = num(g, "clefID");
-        else if (num(g, "clefID") !== clefId) report.count("Clef changes ignored");
+      // clef changes (DESIGN §25): the bar's clef, or the last of its clef list; mid-bar ones move to the bar's start
+      let c = null;
+      if (has(g, "clefListID")) {
+        const list = clefLists.get(String(num(g, "clefListID"))) || [];
+        if (list.some((x) => x.at > 0)) report.count("Clef changes inside a bar moved to its start");
+        if (list.length) c = list[list.length - 1].clef;
+      } else if (has(g, "clefID")) c = num(g, "clefID");
+      if (c !== null && mi === 0) clefId = c;
+      else if (c !== null && c !== (staff.lastClef ?? clefId)) {
+        const name = clefFor(c);
+        if (name) (staff.clefs ||= {})[mi] = name; else report.count("Unsupported clef changes (not imported)");
       }
+      if (c !== null) staff.lastClef = c;
       // each frame (layer 1–4) becomes a layer of the staff (DESIGN §15); voice-2 runs start where
       // their launching voice-1 entry starts and go to a layer no frame uses in this bar
       const used = new Set(), runs = [];
@@ -328,27 +442,36 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
         const frame = frames.get(String(num(g, `frame${l}`)));
         if (!frame) { report.count("Measures with missing note data"); continue; }
         used.add(l);
-        const bar = layerBar(l, mi), v1 = { tup: null, left: 0 }, v2 = { tup: null, left: 0 };
+        const bar = layerBar(l, mi), v1 = { tup: null, left: 0 }, v2 = { tup: null, left: 0 }, g1 = [], g2 = [];
+        const at = (ev, t0) => { startOf.set(ev, t0); return ev; };
+        const rests = (ticks, t0) => gapRests(ticks).map((r) => { const x = at(r, t0); t0 += eventTicks(r); return x; });
         const end = String(num(frame, "endEntry", -1));
         let id = String(num(frame, "startEntry", -1)), guard = 0, run = null, t = 0; // t: voice-1 time from the file
         while (id !== "0" && entries.has(id) && guard++ < 10000) {
           const e = entries.get(id);
-          if (has(e, "v2") || has(e, "voice2")) {
-            const ev = readEntry(e, id, mi, v2);
-            if (!ev && run && v2.last > 0) run.events.push(...gapRests(v2.last));
-            else if (ev && run) run.events.push(ev);
+          const voice2 = has(e, "v2") || has(e, "voice2");
+          if (has(e, "graceNote")) { const gr = readGrace(e, id, mi); if (gr) (voice2 ? g2 : g1).push(gr); }
+          else if (voice2) {
+            const t0 = run ? run.t : 0, ev = readEntry(e, id, mi, v2);
+            if (run) run.t += v2.last;
+            giveGraces(g2, ev);
+            if (!ev && run && v2.last > 0) run.events.push(...rests(v2.last, t0));
+            else if (ev && run) { run.events.push(at(ev, t0)); run.ids.push([id, ev]); }
             else if (ev) report.count("Second-voice notes with no start skipped", Math.max(1, ev.pitches.length));
           } else {
             const start = t, ev = readEntry(e, id, mi, v1);
             t += v1.last;
-            if (ev) bar.push(ev);
-            else if (v1.last > 0) bar.push(...gapRests(v1.last));
-            run = has(e, "controller") ? { src: l, start, events: [] } : null;
+            giveGraces(g1, ev);
+            if (ev) { bar.push(at(ev, start)); placed.set(id, { si, L: l, ev }); }
+            else if (v1.last > 0) bar.push(...rests(v1.last, start));
+            run = has(e, "controller") ? { src: l, start, t: start, events: [], ids: [] } : null;
             if (run) { runs.push(run); Object.assign(v2, { tup: null, left: 0 }); }
           }
           if (id === end) break;
           id = e.getAttribute("next") || "0";
         }
+        const left = g1.length + g2.length;
+        if (left) report.count("Grace notes with no note after them in the bar (not imported)", left);
       }
       const target = {};
       for (const run of runs) {
@@ -358,13 +481,18 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
         const lost = () => report.count("Notes in second voices skipped", run.events.reduce((n, e) => n + Math.max(1, e.pitches.length), 0));
         if (!L) { lost(); continue; }
         used.add(L);
+        v2Layer.set(`${si}/${mi}/${run.src}`, L);
         const bar = layerBar(L, mi), at = barTicks(bar), rests = splitTicks(run.start - at).map((d) => ({ dur: d.dur, dots: d.dots, pitches: [] }));
         // starts before the layer's end, can't be reached with plain rests, or overfills the bar
         if (run.start < at || barTicks(rests) !== run.start - at || run.start + barTicks(run.events) > barCapacity(m.attrs.time)) { lost(); continue; }
+        let t0 = at;
+        for (const r of rests) { startOf.set(r, t0); t0 += eventTicks(r); }
         bar.push(...rests, ...run.events);
+        for (const [id, ev] of run.ids) placed.set(id, { si, L, ev });
       }
     });
     staff.clef = clefFor(clefId);
+    delete staff.lastClef;
     if (!staff.clef) { staff.clef = "treble"; report.count("Unsupported clefs shown as treble"); }
 
     // a tie needs the same pitch next in its layer; ties into another voice are dropped
@@ -380,9 +508,22 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     const t = trs[si];
     if (t) {
       const all = allLayers(staff).flat(2);
-      if (all.every((ev) => ev.pitches.every((p) => midi(p) - t[0] >= 0 && midi(p) - t[0] <= 127))) {
-        for (const ev of all) ev.pitches = ev.pitches.map((p) => shiftPitch(p, -t[0], -t[1]));
+      const ok = (p) => midi(p) - t[0] >= 0 && midi(p) - t[0] <= 127;
+      if (all.every((ev) => ev.pitches.every(ok) && (ev.grace || []).every(ok))) {
+        for (const ev of all) {
+          ev.pitches = ev.pitches.map((p) => shiftPitch(p, -t[0], -t[1]));
+          if (ev.grace) ev.grace = ev.grace.map((p) => shiftPitch(p, -t[0], -t[1]));
+        }
         staff.transpose = [...t];
+        // "set to clef": Finale writes the whole staff in its transposed clef
+        const tx = kid(spec, "transposition");
+        if (has(tx, "setToClef")) {
+          const tc = clefFor(num(spec, "transposedClef", 0));
+          if (tc) {
+            if (staff.clefs) { report.count("Clef changes on staves with a transposed clef (not imported)", Object.keys(staff.clefs).length); delete staff.clefs; }
+            staff.clef = tc;
+          } else report.count("Unsupported clefs shown as treble");
+        }
       } else report.count("Transposed notes out of range (shown at concert pitch)");
     }
     score.staves.push(staff);
@@ -398,9 +539,100 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     const bpm = Math.round((num(d, "value", 0) * num(d, "auxdata1", 1024)) / 1024);
     if (bpm > 0) score.tempo = Math.max(20, Math.min(400, bpm));
   }
-  const expr = assigns.length - (t0 ? 1 : 0);
-  if (expr) report.count("Expressions (dynamics, tempo and text marks) skipped", expr);
+  // the event at file time t (ticks) in a layer's bar: one starting within ~4 EDU, else the one covering t
+  const mIndex = new Map(measures.map((m, i) => [m.cmper, i]));
+  const bar = (si, L, mi) => (L === 1 ? score.staves[si]?.bars[mi] : score.staves[si]?.layers?.[L - 2]?.[mi]) || [];
+  const eventAt = (evs, t) => evs.find((ev) => Math.abs(startOf.get(ev) - t) <= 2) ||
+    evs.find((ev) => startOf.get(ev) <= t && t < startOf.get(ev) + eventTicks(ev)) || null;
+
+  // dynamics (DESIGN §22): expressions in the dynamics category, or whose text is a dynamic
+  const cats = byCmper(others("markingsCategory"));
+  const exprText = new Map(kids(textsEl, "expression").map((e) => [e.getAttribute("number"), e]));
+  const dynOf = (def) => {
+    const raw = exprText.get(String(num(textBlocks.get(String(num(def, "textIDKey", -1))), "textID", -1)))?.textContent || "";
+    const isDyn = str(cats.get(String(num(def, "categoryID", -1))), "categoryType") === "dynamics";
+    let font = null;
+    const m = /\^font(?:Mus|Txt|Num)?\(([^,)]*)/.exec(raw) || null;
+    if (m) font = /^Font(\d+)$/.test(m[1]) ? fontNames.get(m[1].slice(4)) : m[1];
+    const id = /\^fontid\((\d+)/.exec(raw);
+    if (id) font = fontNames.get(id[1]);
+    const body = [...raw.replace(/\^\w+\([^)]*\)/g, "").replace(/\^\^/g, "^").trim()];
+    let word;
+    if (body.length && body.every((c) => SMUFL_DYN[c.codePointAt(0)])) word = body.map((c) => SMUFL_DYN[c.codePointAt(0)]).join("");
+    else if (body.length === 1 && LEGACY_FONTS.test(font || "")) word = LEGACY_DYN[legacyCode(body[0].codePointAt(0))];
+    else if (isDyn) word = body.join("").toLowerCase();
+    const d = word && (DYNS.includes(word) ? word : DYN_IN[word]);
+    return d ? { dyn: d } : isDyn ? { odd: true } : null;
+  };
+  const dynCache = new Map();
+  let expr = 0;
+  for (const a of assigns) {
+    if (a === t0) continue;
+    const defId = String(num(a, "textExprID", -1));
+    if (!dynCache.has(defId)) dynCache.set(defId, dynOf(exprDefs.get(defId)));
+    const d = dynCache.get(defId), mi = mIndex.get(a.getAttribute("cmper"));
+    if (!d) { expr++; continue; }
+    if (d.odd) { report.count("Unusual dynamics (not imported)"); continue; }
+    if (has(a, "hidden")) { report.count("Hidden dynamics (not imported)"); continue; }
+    if (num(a, "graceNoteIndex", 0)) { report.count("Dynamics on grace notes (not imported)"); continue; }
+    const sa = num(a, "staffAssign", 0), si = sa === -1 ? 0 : sa === -2 ? staffIds.length - 1 : staffIds.indexOf(String(sa));
+    if (si < 0 || mi === undefined) { report.count("Dynamics on staves or bars not found (not imported)"); continue; }
+    const t = (num(a, "horzEduOff", 0) * 480) / 1024, l = num(a, "layer", 0);
+    const Ls = l ? [has(a, "v2") ? v2Layer.get(`${si}/${mi}/${l}`) : l] : [1, 2, 3, 4];
+    let ev = null;
+    for (const L of Ls) if (L && (ev = eventAt(bar(si, L, mi).filter((x) => x.pitches.length), t))) break;
+    // between notes: the next note, as MusicXML does; a bar with no notes is a whole-bar rest
+    const notes = (m) => Ls.flatMap((L) => (L ? bar(si, L, m) : [])).filter((x) => x.pitches.length).sort((x, y) => startOf.get(x) - startOf.get(y));
+    if (!ev && !notes(mi).length) { report.count("Dynamics on whole-bar rests (not imported)"); continue; }
+    if (!ev) ev = notes(mi).find((x) => startOf.get(x) >= t);
+    for (let m = mi + 1; !ev && m < measures.length; m++) ev = notes(m)[0];
+    if (!ev) report.count("Dynamics after the last note (not imported)");
+    else if (ev.dyn) report.count("Two dynamics on one note (the first kept)");
+    else ev.dyn = d.dyn;
+  }
+  if (expr) report.count("Expressions (tempo and text marks) skipped", expr);
+
+  // slurs and hairpins (DESIGN §23) from smart shapes; the rest are counted
+  const SLURS = /^(slur|dashSlur|dashContourSlur)(Up|Down|Auto)$|^$/;
+  const endOf = (pt, entryBased) => {
+    if (!pt) return null;
+    if (entryBased) {
+      const id = String(num(pt, "entryNum", -1));
+      return placed.get(id) || (graceIds.has(id) ? { grace: true } : null);
+    }
+    const si = staffIds.indexOf(String(num(pt, "inst", -1))), mi = mIndex.get(String(num(pt, "meas", -1)));
+    if (si < 0 || mi === undefined) return null;
+    const evs = bar(si, 1, mi), t = (num(pt, "edu", 0) * 480) / 1024;
+    const ev = eventAt(evs, t) || (t >= barTicks(evs) ? evs[evs.length - 1] : null);
+    return ev ? { si, L: 1, ev } : null;
+  };
+  for (const sh of others("smartShape")) {
+    const type = str(sh, "shapeType") || "";
+    const kind = SLURS.test(type) ? "slur" : type === "cresc" || type === "decresc" ? "hp" : null;
+    if (!kind) {
+      if (type === "wordExt") report.count("Lyric extender lines (not imported)");
+      else if (type !== "hyphen") report.count("Lines, trills, octave signs and other shapes (not imported)");
+      continue;
+    }
+    const eb = has(sh, "entryBased");
+    const a = endOf(kid(kid(sh, "startTermSeg"), "endPt"), eb), b = endOf(kid(kid(sh, "endTermSeg"), "endPt"), eb);
+    const label = kind === "slur" ? "Slurs" : "Hairpins";
+    if (a?.grace || b?.grace) report.count("Marks, slurs, ties and lyrics on grace notes (not imported)");
+    else if (!a || !b) report.count(`${label} on notes not found (not imported)`);
+    else if (a.si !== b.si || a.L !== b.L) report.count(`${label} across staves or voices (not imported)`);
+    else if (a.ev === b.ev) report.count(kind === "hp" ? "Hairpins over a single note (not imported)" : "Slurs over a single note (not imported)");
+    else if (a.ev[kind] || b.ev[`${kind}End`]) report.count("Unfinished or overlapping slurs and hairpins (not imported)");
+    else {
+      a.ev[kind] = kind === "hp" ? (type === "cresc" ? "<" : ">") : true;
+      b.ev[`${kind}End`] = true;
+      if (/^dash/.test(type)) report.count("Dashed slurs shown solid");
+    }
+  }
   padBars(score);
+  const broken = clearBrokenSpans(score);
+  if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
+  const lateClefs = finishClefs(score);
+  if (lateClefs) report.count("Clef changes after the last bar (not imported)", lateClefs);
   report.notes = noteCount(score);
   return { score, report: report.done() };
 }

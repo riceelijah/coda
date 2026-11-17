@@ -629,7 +629,7 @@ the CC0 decrypt routine above):
 - Reference reader (C++, MIT): `https://github.com/openmusx/musxdom` — `src/musx/dom/Entries.cpp`,
   `CommonClasses.cpp`, `Others.h`, `Details.h`, `Options.h`. (The old `rpatters1/musxdom` URL redirects here.)
 
-**Structure — [verified]** against thirteen real `.musx` files (musxdom's test data, kept in
+**Structure — [verified]** against nineteen real `.musx` files (musxdom's test data, kept in
 `samples/musx/`) and musxdom's source and tests. Everything below was seen in decoded files
 unless marked otherwise.
 
@@ -644,7 +644,10 @@ unless marked otherwise.
 - Clef: `staffSpec > defaultClef` (absent = 0), overridden by `gfhold > clefID` in bar 1. Map
   through `options > clefOptions > clefDef[index]` by shape (`clefChar`, `clefYDisp`):
   38/−6 treble, 66/−4 alto, 66/−2 tenor, 63/−2 bass. Other shapes → treble, reported.
-  A `clefListID` (several clefs in a bar) or a later different `clefID` → "Clef changes ignored".
+  Later bars: `gfhold > clefID`, or `clefListID` → `others > clefList[cmper]` (by `inci`, each a
+  `clef` at `xEduPos`); a bar with no `gfhold` keeps the clef the last one ended with. "Set to
+  clef" transpositions (`transposition > setToClef`) write the whole staff in
+  `staffSpec > transposedClef`.
 - Bars: `others > measSpec` by `cmper`. `<beats>` × `<divbeat>` EDU (quarter = 1024): time is
   `beats / (4096 / divbeat)`; `divbeat` 1536 (dotted quarter) gives `beats*3 / 8`.
 - Key: `measSpec > keySig > key`. Linear key when `key & 0xC000` is 0: low byte = signed
@@ -687,6 +690,21 @@ unless marked otherwise.
 - C/¢: as musxdom `TimeSignature::getAbbreviatedSymbol`: with `measSpec > useDisplayTimesig` the
   bar's `abbrvTime` decides; otherwise `options > timeSignatureOptions > timeSigDoAbrvCommon` /
   `timeSigDoAbrvCut`.
+- Expressions: `measExprAssign[cmper=measure]` with `textExprID`, `horzEduOff` (EDU from the bar
+  start), `staffAssign` (a staff cmper; −1 top, −2 bottom staff), `layer` (0 = all), `<v2/>`,
+  `<hidden/>`, `graceNoteIndex`. `textExprDef > textIDKey` → `textBlock` → `texts > expression`;
+  `categoryID` → `markingsCategory > categoryType` (`dynamics`, `tempoMarks`, …). The text holds
+  codes (`^fontMus(Font0,0)`, `^fontid(n)`, `^size(…)`) then the characters: SMuFL U+E520–E53D,
+  or in a legacy music font the Mac Roman byte (stored decoded: pp is "π" = 185, mp "P", ff "ƒ").
+- Smart shapes: `others > smartShape` with `shapeType` (absent = `slurDown`; `slurUp`/`Auto`,
+  `dashSlur*`, `dashContourSlur*`, `cresc`, `decresc`, `hyphen`, `wordExt`, lines, trills, …),
+  `startTermSeg`/`endTermSeg > endPt` with `inst`, `meas`, `edu`, and `entryNum` when
+  `<entryBased/>`.
+- Lyrics: `details > lyrDataVerse` / `lyrDataChorus` / `lyrDataSection` [entnum] with
+  `lyricNumber` (the text block) and `syll` (1-based) → `texts > verse` / `chorus` / `section`.
+  Syllables split as musxdom `createSyllableInfo`: spaces and hyphens separate, a hyphen right
+  after a syllable joins it to the next, formatting codes vanish (checked against its tests).
+- Grace notes: `<graceNote/>` entries sit in the chain before the entry they lead to.
 - **[expected], not seen in a sample:** title and composer from `texts > fileInfo[type]`,
   multiple `frameSpec` incis.
 
@@ -694,8 +712,7 @@ unless marked otherwise.
 
 - Frames 1–4 become layers 1–4. Voice-2 runs go to the first layer no frame uses in that bar,
   after rests up to their launch point; a run that starts before the layer's end, can't be
-  reached with plain rests (inside a tuplet) or overfills the bar is skipped and counted. Grace
-  notes are skipped and counted. A tie whose next note in the same layer has no matching pitch
+  reached with plain rests (inside a tuplet) or overfills the bar is skipped and counted. A tie whose next note in the same layer has no matching pitch
   is dropped and counted.
 - Non-linear and microtonal keys: pitches keep their real spelling (microtonal alterations are
   rounded to semitones and counted); the key signature shown is the nearest standard one.
@@ -704,9 +721,26 @@ unless marked otherwise.
   transposed), braced staves that disagree, microtonal keys, non-integer intervals, notes out of
   range, and staff-style changes.
 - Marks: unknown symbols, and articulations other than a fermata on rests, are counted.
-- Tempo: the first tempo mark at the very start of bar 1 sets the score tempo (20–400); every
-  other expression (`measExprAssign`), `<ignore/>` entries and notes flagged `lyricDetail` or
-  `smartShapeDetail` are counted. A display time signature different from the real one is
+- Tempo: the first tempo mark at the very start of bar 1 sets the score tempo (20–400); other
+  tempo and text expressions and `<ignore/>` entries are counted.
+- Dynamics (§22): an expression in the dynamics category, or whose text is a dynamic, goes on the
+  note it starts on (within 2 ticks) or covers in its layer (all layers when 0; `<v2/>` the voice-2
+  layer), else the next note, as MusicXML. Rarer marks map as MusicXML's (pppp → ppp, sfp → fp …).
+  Counted: hidden ones, ones on grace notes, other text in the dynamics category, a second one on
+  a note, ones on empty bars or after the last note.
+- Slurs and hairpins (§23): slur shapes (dashed shown solid, counted) and `cresc`/`decresc` from
+  their two end points (entries, or bar + EDU in layer 1, an end past the bar's notes on its last
+  event). Counted: ends on grace notes or entries not kept, ends in different staves or layers,
+  single-note ones, overlaps (also `clearBrokenSpans`), `wordExt` as extender lines, and every
+  other shape.
+- Lyrics (§24): each verse, chorus and section used becomes a lyric line, verses first, up to 5.
+  Counted: more lines, lyrics on rests, missing text, long syllables (shortened), extenders.
+- Clefs (§25): bar 1 sets the staff clef; a later different clef goes in `staff.clefs`. A clef
+  list gives the bar its last clef; mid-bar changes are counted as moved to the bar start.
+  Unsupported clefs, changes on "set to clef" staves and ones after the last bar are counted.
+- Grace notes (§26): the first note of each grace entry goes on the next note of its voice, up to
+  8. Counted: grace chords (first note kept), grace rests, graces before rests or at a bar end,
+  graces with marks, ties, lyrics or slurs, and runs not drawn as one slashed eighth or sixteenths. A display time signature different from the real one is
   counted (the real one is used).
 - Sound: the staff's full name matched against the General MIDI names, like MuseScore; the
   lower staff of a braced pair takes the upper one's.
