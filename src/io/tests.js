@@ -50,7 +50,9 @@ export function roundTripFixture() {
         [ev("h", "D2 A2", { dots: 1 })],
       ] },
       { name: "Viola", clef: "alto", brace: false, bars: [
-        [ev("w", "C4")], [], [ev("w", "D4")], [ev("q", "A3", { dots: 1 }), ev("q", "B3", { dots: 1 })], [],
+        [ev("w", "C4")],
+        [ev("16", "C4", { tup: [5, 4] }), ev("16", "D4", { tup: [5, 4] }), ev("16", "E4", { tup: [5, 4] }), ev("16", "F4", { tup: [5, 4] }), ev("16", "G4", { tup: [5, 4] }), ev("h", "A4"), ev("q", "B4")],
+        [ev("w", "D4")], [ev("q", "A3", { dots: 1 }), ev("q", "B3", { dots: 1 })], [],
       ] },
     ],
   };
@@ -121,6 +123,18 @@ export async function run({ check, eq }) {
     let peak = 0, late = 0;
     for (let i = 0; i < res.length; i++) { peak = Math.max(peak, Math.abs(res[i])); if (i > rate * 5 && i < rate * 5.1) late = Math.max(late, Math.abs(res[i])); }
     return (late > 0.1 && peak < 1 && peak > 0.1) || `peak ${peak.toFixed(2)}, at 5 s ${late.toFixed(2)}`;
+  });
+
+  await check("tuplets: setTuplet any ratio, refused when it can't be whole ticks; partial 5:4 export completes (DESIGN §14.4)", () => {
+    const s = M.newScore({ bars: 1 });
+    for (let i = 0; i < 2; i++) M.appendEvent(s, 0, 0, ev("16", "C5"));
+    if (M.setTuplet(s, 0, 0, 0, [5, 4]) || M.setTuplet(s, 0, 0, 1, [5, 4])) return "set 5:4";
+    if (!M.setTuplet(s, 0, 0, 0, [7, 4])) return "7:4 accepted";
+    const back = importMusicXML(exportMusicXML(s)).score.staves[0].bars[0];
+    const runs = back.filter((e) => e.tup && e.tup[0] === 5);
+    if (runs.length !== 5) return `5:4 group has ${runs.length}`;
+    if (M.setTuplet(s, 0, 0, 0, null) || s.staves[0].bars[0][0].tup) return "remove";
+    return true;
   });
 
   await check("MusicXML export pads an underfull bar to capacity", () => {

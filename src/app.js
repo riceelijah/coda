@@ -25,6 +25,8 @@ const state = {
   selEnd: null, // other end of a range on the same staff, {bar, idx} (DESIGN §11.7)
   clip: null,
   armed: { dur: "q", dots: 0, rest: false, alter: null, chord: false, tup: null },
+  lastTup: [3, 2], // ratio 9 / ; re-arms (DESIGN §14.4)
+  tool: "entry", // or "select" (DESIGN §14.2)
   undo: [], redo: [],
   hit: null,
 };
@@ -180,7 +182,7 @@ function updateStatus() {
   const n = range().length;
   if (n > 1) parts.push(`${n} notes selected`);
   else if (ev) parts.push("Selected: " + (ev.pitches.length ? ev.pitches.map(M.pitchName).join(" ") : "rest") + " " + DUR_NAMES[ev.dur].toLowerCase());
-  else parts.push(["", "Dotted ", "Double-dotted "][a.dots] + (a.dots ? DUR_NAMES[a.dur].toLowerCase() : DUR_NAMES[a.dur]) + (a.rest ? " rest" : "") + (a.tup ? " triplet" : "") + (a.chord ? " · chord mode" : ""));
+  else parts.push(["", "Dotted ", "Double-dotted "][a.dots] + (a.dots ? DUR_NAMES[a.dur].toLowerCase() : DUR_NAMES[a.dur]) + (a.rest ? " rest" : "") + (a.tup ? ` · ${a.tup[0]}:${a.tup[1]} tuplet` : "") + (a.chord ? " · chord mode" : ""));
   $("status-pos").textContent = parts.join(" · ");
 }
 
@@ -213,12 +215,39 @@ const ICONS = {
   natural: '<g stroke="currentColor" fill="none"><path d="M8.5 3 v14 l7-2.5" stroke-width="1.5"/><path d="M15.5 21 v-14 l-7 2.5" stroke-width="1.5"/></g>',
   tie: '<path d="M3 11 q9 9 18 0 q-9 6 -18 0z" fill="currentColor"/>',
   tup: '<path d="M3 9 v-4 h7 M14 5 h7 v4" fill="none" stroke="currentColor" stroke-width="1.4"/><text x="12" y="10" font-size="9" text-anchor="middle" fill="currentColor" font-family="serif" font-style="italic" font-weight="bold">3</text><g fill="currentColor"><ellipse cx="5" cy="19" rx="2.6" ry="1.9"/><ellipse cx="12" cy="19" rx="2.6" ry="1.9"/><ellipse cx="19" cy="19" rx="2.6" ry="1.9"/></g>',
+  select: '<path d="M6 3 l12 10 l-5.5 1 l3.2 6.2 l-2.4 1.2 l-3.2 -6.2 l-4.1 3.6z" fill="currentColor"/>',
+  entry: '<path d="M4 20 l1.2-4.6 l10.6-10.6 l3.4 3.4 l-10.6 10.6z M14.6 6 l3.4 3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>',
   chord: '<g fill="currentColor"><ellipse cx="9" cy="19" rx="4.4" ry="3.1" transform="rotate(-20 9 19)"/><ellipse cx="9" cy="12" rx="4.4" ry="3.1" transform="rotate(-20 9 12)"/></g><line x1="13" y1="18" x2="13" y2="2" stroke="currentColor" stroke-width="1.4"/>',
 };
 const svg = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>`;
 
+function setTool(t) {
+  state.tool = t;
+  $("systems").classList.toggle("select-tool", t === "select");
+  $("ghost").style.display = "none";
+  document.querySelectorAll(".pal[data-tool]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.tool === t)));
+  message(t === "select" ? "Selection tool: click a note, drag across notes, Shift+click to extend" : "Note entry: click a staff to add a note");
+}
+
 function buildPalette() {
   const pal = $("palette");
+  const tools = document.createElement("div");
+  tools.setAttribute("role", "radiogroup");
+  tools.setAttribute("aria-label", "Tool");
+  tools.style.display = "contents";
+  for (const [t, title] of [["select", "Selection tool (V)"], ["entry", "Note entry tool (V)"]]) {
+    const b = document.createElement("button");
+    b.className = "pal"; b.dataset.tool = t;
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-label", title.replace(/ \(.*\)$/, ""));
+    b.setAttribute("aria-checked", String(t === state.tool));
+    b.title = title;
+    b.innerHTML = svg(t);
+    b.onclick = () => setTool(t);
+    tools.appendChild(b);
+  }
+  pal.appendChild(tools);
+  pal.appendChild(document.createElement("hr"));
   const durKeys = { w: 7, h: 6, q: 5, 8: 4, 16: 3, 32: 2 };
   const group = document.createElement("div");
   group.setAttribute("role", "radiogroup");
@@ -239,7 +268,7 @@ function buildPalette() {
   const toggles = [
     ["rest", "Rest (R enters one)", () => { state.armed.rest = !state.armed.rest; updatePalette(); updateStatus(); }],
     ["dot", "Dot (.)", () => toggleDot()],
-    ["tup", "Triplet: next notes are triplets (;)", () => toggleTriplet()],
+    ["tup", "Tuplet: triplets and other groups (9 or ; for the last one)", () => openTuplet()],
     ["sharp", "Sharp (+)", () => accidental(1)],
     ["flat", "Flat (-)", () => accidental(-1)],
     ["natural", "Natural (N)", () => accidental(0)],
@@ -270,10 +299,18 @@ function updatePalette() {
 
 // ---------- commands used by palette + keyboard ----------
 
+// Run fn(score, staff, pos, event) on every selected event in one edit: all or nothing (DESIGN §14.2).
+function eachSel(fn) {
+  const s = state.sel, r = range();
+  return edit((sc) => {
+    for (const p of r) { const e = fn(sc, s.staff, p, sc.staves[s.staff].bars[p.bar][p.idx]); if (e) return e; }
+    return null;
+  });
+}
+
 function setDuration(d) {
   state.armed.dur = d;
-  const s = state.sel;
-  if (s) edit((sc) => M.setDuration(sc, s.staff, s.bar, s.idx, d, selEvent().dots));
+  if (state.sel) eachSel((sc, st, p, ev) => M.setDuration(sc, st, p.bar, p.idx, d, ev.dots));
   else { updatePalette(); updateStatus(); }
 }
 
@@ -285,22 +322,24 @@ function toggleDot() {
     // if a second dot doesn't fit, go back to none rather than getting stuck at one
     if (dots === 2 && M.setDuration(JSON.parse(JSON.stringify(state.score)), s.staff, s.bar, s.idx, ev.dur, 2)) dots = 0;
     state.armed.dots = dots;
-    edit((sc) => M.setDuration(sc, s.staff, s.bar, s.idx, ev.dur, dots));
+    eachSel((sc, st, p, e) => M.setDuration(sc, st, p.bar, p.idx, e.dur, dots));
   } else {
     state.armed.dots = (state.armed.dots + 1) % 3;
     updatePalette(); updateStatus();
   }
 }
 
-function toggleTriplet() {
-  state.armed.tup = state.armed.tup ? null : [3, 2];
+// 9 (NotePad) or ;: arm or disarm the last-used tuplet ratio for the next notes.
+function toggleTuplet() {
+  state.armed.tup = state.armed.tup ? null : [...state.lastTup];
+  if (state.armed.tup && !M.tupletOk(state.armed.dur, state.armed.dots, state.armed.tup)) message(`A ${state.armed.tup[0]}:${state.armed.tup[1]} tuplet doesn't fit that note value`, true);
   updatePalette(); updateStatus();
 }
 
 function accidental(v) {
   const s = state.sel;
-  if (s && selEvent().pitches.length) {
-    if (edit((sc) => M.setAlter(sc, s.staff, s.bar, s.idx, v))) hear(selEvent());
+  if (s && range().some((p) => selStaff().bars[p.bar][p.idx].pitches.length)) {
+    if (eachSel((sc, st, p, e) => (e.pitches.length ? M.setAlter(sc, st, p.bar, p.idx, v) : null)) && range().length === 1) hear(selEvent());
   } else {
     state.armed.alter = state.armed.alter === v ? null : v;
     updatePalette(); updateStatus();
@@ -310,13 +349,27 @@ function accidental(v) {
 function tie() {
   const s = state.sel;
   if (!s) { message("Select a note first", true); return; }
-  edit((sc) => M.toggleTie(sc, s.staff, s.bar, s.idx));
+  const r = range();
+  if (r.length === 1) { edit((sc) => M.toggleTie(sc, s.staff, s.bar, s.idx)); return; }
+  // a range: tie every note that can be tied to the next; if they all already are, untie them
+  const body = r.slice(0, -1), bars = selStaff().bars;
+  const allTied = body.every((p) => bars[p.bar][p.idx].tie || !bars[p.bar][p.idx].pitches.length);
+  let n = 0;
+  edit((sc) => {
+    for (const p of body) {
+      const ev = sc.staves[s.staff].bars[p.bar][p.idx];
+      if (allTied) ev.tie = false;
+      else if (!ev.tie && !M.toggleTie(sc, s.staff, p.bar, p.idx)) n++;
+    }
+    return allTied || n ? null : "Nothing to tie to";
+  });
 }
 
 function makeEvent(pitch) {
   const a = state.armed;
   const ev = { dur: a.dur, dots: a.dots, tie: false, pitches: pitch ? [pitch] : [] };
   if (a.tup && M.tupletOk(a.dur, a.dots, a.tup)) ev.tup = [...a.tup];
+  else if (a.tup) message(`A ${a.tup[0]}:${a.tup[1]} tuplet doesn't fit that note value, so this note isn't one`, true);
   return ev;
 }
 
@@ -477,7 +530,7 @@ function deleteSel() {
 
 // ---------- mouse ----------
 
-function locate(e) {
+function locate(e, forceStaff = null) {
   const sysEl = e.target.closest?.(".system");
   if (!sysEl || !state.hit) return null;
   const si = state.hit.systems.findIndex((s) => s.el === sysEl);
@@ -496,6 +549,7 @@ function locate(e) {
     const d = y < c.yTop ? c.yTop - y : y > c.yBottom ? y - c.yBottom : 0;
     if (d < bestD) { bestD = d; staff = s; }
   }
+  if (forceStaff !== null && staffIds.includes(forceStaff)) staff = forceStaff;
   const row = cells.filter((c) => c.staff === staff);
   let cell = row.find((c) => x >= c.x0 && x < c.x1);
   if (!cell) cell = x < row[0].x0 ? row[0] : row[row.length - 1];
@@ -509,6 +563,7 @@ function locate(e) {
 }
 
 function onClick(e) {
+  if (state.tool === "select") return; // handled by onDown / onDrag
   const L = locate(e);
   if (!L) return;
   state.caret = { staff: L.staff, bar: L.bar };
@@ -542,6 +597,7 @@ function onClick(e) {
 
 function onMove(e) {
   const g = $("ghost");
+  if (state.tool === "select") { g.style.display = "none"; return; }
   const L = locate(e);
   const chordish = state.armed.chord || e.shiftKey;
   if (!L || (L.near && !chordish) || (state.armed.rest && !chordish)) { g.style.display = "none"; return; }
@@ -557,6 +613,47 @@ function onMove(e) {
   });
 }
 
+// ---------- Selection tool (DESIGN §14.2) ----------
+
+let drag = null;
+const nearestIdx = (L) => (L.cell.notes.length
+  ? L.cell.notes.reduce((b, n) => (Math.abs(n.x - L.x) < Math.abs(b.x - L.x) ? n : b)).idx : null);
+
+function onDown(e) {
+  if (state.tool !== "select" || e.button !== 0) return;
+  const L = locate(e);
+  if (!L) return;
+  e.preventDefault();
+  state.caret = { staff: L.staff, bar: L.bar };
+  const idx = nearestIdx(L);
+  if (idx === null) { if (!e.shiftKey) { state.sel = null; state.selEnd = null; } refresh(); return; } // empty bar
+  const pos = { bar: L.bar, idx }, s = state.sel;
+  if (e.shiftKey && s && s.staff === L.staff) {
+    state.selEnd = s.bar === pos.bar && s.idx === pos.idx ? null : pos;
+  } else {
+    state.sel = { staff: L.staff, ...pos };
+    state.selEnd = null;
+    drag = { staff: L.staff, x: e.clientX, y: e.clientY, moved: false };
+    hear(selEvent());
+  }
+  refresh();
+}
+
+function onDrag(e) {
+  if (!drag) return;
+  if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
+  drag.moved = true;
+  const L = locate(e, drag.staff);
+  const idx = L && nearestIdx(L);
+  if (idx === null || idx === undefined) return;
+  const s = state.sel, end = s.bar === L.bar && s.idx === idx ? null : { bar: L.bar, idx };
+  const cur = state.selEnd;
+  if ((cur && end && cur.bar === end.bar && cur.idx === end.idx) || (!cur && !end)) return;
+  state.selEnd = end;
+  state.caret.bar = L.bar;
+  refresh();
+}
+
 // ---------- keyboard ----------
 
 function onKey(e) {
@@ -567,35 +664,32 @@ function onKey(e) {
   if (t && t.tagName === "BUTTON" && (e.key === " " || e.key === "Enter")) return;
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key;
-  if (mod && k.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && runShortcut(e)) return;
   if (mod && k.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
-  if (mod && k.toLowerCase() === "s") { e.preventDefault(); saveFile(); return; }
-  if (mod && k.toLowerCase() === "o") { e.preventDefault(); $("file").click(); return; }
   if (mod && (k === "ArrowUp" || k === "ArrowDown")) { e.preventDefault(); transposeSel(k === "ArrowUp" ? 7 : -7); return; }
-  if (mod && k.toLowerCase() === "c") { if (copySel(false)) e.preventDefault(); return; }
-  if (mod && k.toLowerCase() === "x") { if (copySel(true)) e.preventDefault(); return; }
-  if (mod && k.toLowerCase() === "v") { if (paste()) e.preventDefault(); return; }
   if (mod || e.altKey) return;
   const durKey = { 7: "w", 6: "h", 5: "q", 4: "8", 3: "16", 2: "32" }[k];
   let handled = true;
   if (e.shiftKey && /^[A-G]$/.test(k)) chordLetter(k);
   else if (/^[a-gA-G]$/.test(k)) typeLetter(k.toUpperCase());
-  else if (k === "r" || k === "R") enterAtCaret(null);
+  else if (k === "r" || k === "R" || k === "0") enterAtCaret(null); // 0: NotePad's rest key
   else if (durKey) setDuration(durKey);
   else if (k === ".") toggleDot();
   else if (k === "+" || k === "=") accidental(1);
   else if (k === "-" || k === "_") accidental(-1);
   else if (k === "n" || k === "N") accidental(0);
   else if (k === "t" || k === "T") tie();
-  else if (k === "ArrowUp") transposeSel(1);
-  else if (k === "ArrowDown") transposeSel(-1);
+  else if (k === "ArrowUp") transposeSel(e.shiftKey ? 7 : 1); // Shift: an octave, as in NotePad
+  else if (k === "ArrowDown") transposeSel(e.shiftKey ? -7 : -1);
   else if (k === "ArrowLeft") e.shiftKey ? extendSel(-1) : moveSel(-1);
   else if (k === "ArrowRight") e.shiftKey ? extendSel(1) : moveSel(1);
-  else if (k === ";") toggleTriplet();
+  else if (k === ";" || k === "9") toggleTuplet();
   else if (k === "Delete" || k === "Backspace") deleteSel();
   else if (k === "Escape") { state.sel = null; state.selEnd = null; refresh(); }
   else if (k === " ") togglePlay();
   else if (k === "?") $("help").showModal();
+  else if (k === "ContextMenu" || (e.shiftKey && k === "F10")) ctxFromKeyboard();
+  else if (k === "v" || k === "V") setTool(state.tool === "select" ? "entry" : "select");
   else handled = false;
   if (handled) e.preventDefault();
 }
@@ -713,6 +807,34 @@ function closeInstruments() {
   if (edit((sc) => { for (const [s, p] of picks) M.setStaffProgram(sc, s, p); return null; })) prefetch(state.score);
 }
 
+// ---------- tuplets (DESIGN §14.4) ----------
+
+function openTuplet() {
+  const has = !!state.sel;
+  $("t-ratio").value = String(state.lastTup);
+  $("tuplet-ok").textContent = has ? "Apply to selection" : "Use for next notes";
+  $("tuplet").returnValue = "";
+  $("tuplet").showModal();
+}
+
+function closeTuplet() {
+  if ($("tuplet").returnValue !== "ok") return;
+  const tup = $("t-ratio").value.split(",").map(Number);
+  state.lastTup = tup;
+  if (state.sel) { tupletSel(tup); return; }
+  state.armed.tup = tup;
+  updatePalette(); updateStatus();
+  if (!M.tupletOk(state.armed.dur, state.armed.dots, tup)) message(`A ${tup[0]}:${tup[1]} tuplet doesn't fit that note value`, true);
+}
+
+// Set (or with null, remove) a tuplet ratio on every selected event, all or nothing.
+function tupletSel(tup) {
+  const s = state.sel;
+  if (!s) { message("Select notes first", true); return; }
+  const r = range();
+  edit((sc) => { for (const p of r) { const e = M.setTuplet(sc, s.staff, p.bar, p.idx, tup); if (e) return e; } return null; });
+}
+
 // ---------- key / time change at a bar (DESIGN §11.3) ----------
 
 function openAttrs() {
@@ -740,14 +862,149 @@ function closeAttrs() {
   }
 }
 
+// ---------- commands (DESIGN §14.1) ----------
+// One table for the menu bar, the context menu and modifier shortcuts, keyed by menu item id.
+
+const hasSel = () => !!state.sel;
+const CMD = {
+  "b-new": { run: () => openSetup(true) },
+  "b-open": { run: () => $("file").click() },
+  "b-lib": { run: () => openLibrary() },
+  "b-save": { run: () => saveFile() },
+  "b-print": { run: () => window.print() },
+  "b-undo": { run: () => undo(), on: () => state.undo.length > 0 },
+  "b-redo": { run: () => redo(), on: () => state.redo.length > 0 },
+  "m-cut": { run: () => copySel(true), on: hasSel },
+  "m-copy": { run: () => copySel(false), on: hasSel },
+  "m-paste": { run: () => paste(), on: () => !!state.clip },
+  "m-delete": { run: () => deleteSel(), on: hasSel },
+  "m-zoomin": { run: () => setZoom(zoom * 1.2) },
+  "m-zoomout": { run: () => setZoom(zoom / 1.2) },
+  "m-zoom1": { run: () => setZoom(1) },
+  "n-selall": { run: () => selectAll() },
+  "n-up": { run: () => transposeSel(1), on: hasSel },
+  "n-down": { run: () => transposeSel(-1), on: hasSel },
+  "n-octup": { run: () => transposeSel(7), on: hasSel },
+  "n-octdown": { run: () => transposeSel(-7), on: hasSel },
+  "n-tie": { run: () => tie(), on: hasSel },
+  "n-tuplet": { run: () => openTuplet() },
+  "n-untup": { run: () => tupletSel(null), on: () => range().some((p) => selStaff().bars[p.bar][p.idx].tup) },
+  "b-addbar": { run: () => edit((sc) => { M.addMeasure(sc, state.caret.bar); state.caret.bar++; return null; }) },
+  "b-delbar": { run: () => {
+    const b = state.caret.bar;
+    const has = state.score.staves.some((s) => s.bars[b].length);
+    if (has && !confirm(`Delete bar ${b + 1} and its notes?`)) return;
+    edit((sc) => M.deleteMeasure(sc, b));
+  }, on: () => state.score.measures.length > 1 },
+  "b-attrs": { run: () => openAttrs() },
+  "m-details": { run: () => openSetup(false) },
+  "m-instruments": { run: () => openInstruments() },
+  "b-help": { run: () => $("help").showModal() },
+  "m-about": { run: () => $("about").showModal() },
+};
+
+// "mod+Shift+Z" style names, from each menu item's data-short.
+const SHORTS = {};
+function setupCommands() {
+  for (const [id, c] of Object.entries(CMD)) $(id).onclick = () => c.run();
+  for (const b of document.querySelectorAll('#menubar [data-short^="mod+"]')) SHORTS[b.dataset.short.toUpperCase()] = b.id;
+}
+
+// Run the command bound to a modifier shortcut. True when one ran.
+function runShortcut(e) {
+  const id = SHORTS[("mod+" + (e.shiftKey ? "Shift+" : "") + e.key).toUpperCase()];
+  const c = id && CMD[id];
+  if (!c || (c.on && !c.on())) return false;
+  e.preventDefault();
+  c.run();
+  return true;
+}
+
+function enableItems(list) {
+  for (const b of list.querySelectorAll("button")) {
+    const c = CMD[b.dataset.cmd || b.id];
+    b.disabled = !!(c && c.on && !c.on());
+  }
+}
+
+const selStaff = () => state.score.staves[state.sel ? state.sel.staff : state.caret.staff];
+
+function selectAll() {
+  const s = state.sel ? state.sel.staff : state.caret.staff, sc = state.score;
+  const first = M.nextEventPos(sc, s, 0, -1), last = M.prevEventPos(sc, s, sc.measures.length - 1, sc.staves[s].bars[sc.measures.length - 1].length);
+  if (!first) { message("This staff is empty", true); return; }
+  state.sel = { staff: s, ...first };
+  state.selEnd = last && (last.bar !== first.bar || last.idx !== first.idx) ? last : null;
+  refresh();
+}
+
+// ---------- context menu (DESIGN §14.3) ----------
+
+const CTX_NOTE = ["m-cut", "m-copy", "m-paste", "m-delete", "-", "n-up", "n-down", "n-tie", "n-tuplet", "n-untup", "-", "b-attrs", "m-instruments"];
+const CTX_STAFF = ["m-paste", "-", "b-addbar", "b-delbar", "-", "b-attrs", "m-instruments"];
+
+function openCtx(x, y, ids) {
+  closeMenus();
+  const box = $("ctx");
+  box.replaceChildren();
+  for (const id of ids) {
+    if (id === "-") { box.appendChild(document.createElement("hr")); continue; }
+    const b = $(id).cloneNode(true); // same label and shortcut as the menu bar
+    b.removeAttribute("id");
+    b.dataset.cmd = id;
+    b.onclick = () => { box.hidden = true; CMD[id].run(); };
+    box.appendChild(b);
+  }
+  enableItems(box);
+  box.hidden = false;
+  box.style.left = Math.max(4, Math.min(x, innerWidth - box.offsetWidth - 4)) + "px";
+  box.style.top = Math.max(4, Math.min(y, innerHeight - box.offsetHeight - 4)) + "px";
+  box.querySelector("button:not(:disabled)")?.focus();
+}
+
+function onContext(e) {
+  const L = locate(e);
+  if (!L) return; // off the staves: the browser's own menu
+  e.preventDefault();
+  state.caret = { staff: L.staff, bar: L.bar };
+  const idx = L.near ? L.near.idx : null;
+  if (idx !== null && !(state.sel && state.sel.staff === L.staff && range().some((p) => p.bar === L.bar && p.idx === idx))) {
+    state.sel = { staff: L.staff, bar: L.bar, idx };
+    state.selEnd = null;
+  }
+  refresh();
+  openCtx(e.clientX, e.clientY, idx !== null ? CTX_NOTE : CTX_STAFF);
+}
+
+// Shift+F10 or the Menu key: open it at the caret bar.
+function ctxFromKeyboard() {
+  const r = $("caret-hl").getBoundingClientRect();
+  openCtx(r.left + 8, r.bottom, state.sel ? CTX_NOTE : CTX_STAFF);
+}
+
+function setupCtx() {
+  const box = $("ctx");
+  box.onkeydown = (e) => {
+    const items = [...box.querySelectorAll("button:not(:disabled)")], at = items.indexOf(document.activeElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+    } else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); box.hidden = true; }
+  };
+  $("systems").addEventListener("contextmenu", onContext);
+  addEventListener("scroll", () => (box.hidden = true), true);
+  addEventListener("resize", () => (box.hidden = true));
+}
+
 // ---------- menu bar (DESIGN §13.1) ----------
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-const openMenu = () => document.querySelector("#menubar .mlist:not([hidden])");
+const openMenu = () => document.querySelector("#menubar .mlist:not([hidden]), #ctx:not([hidden])");
 
 function closeMenus(focusButton = false) {
   const list = openMenu();
   if (!list) return;
+  if (list.id === "ctx") { list.hidden = true; return; }
   list.hidden = true;
   const mb = list.previousElementSibling;
   mb.setAttribute("aria-expanded", "false");
@@ -757,11 +1014,7 @@ function closeMenus(focusButton = false) {
 function showMenu(mb, focusFirst) {
   closeMenus();
   const list = mb.nextElementSibling;
-  if (mb.textContent === "Edit") { // enable what can act now
-    const has = !!state.sel;
-    $("m-cut").disabled = $("m-copy").disabled = $("m-delete").disabled = !has;
-    $("m-paste").disabled = !state.clip;
-  }
+  enableItems(list);
   list.hidden = false;
   mb.setAttribute("aria-expanded", "true");
   if (focusFirst) list.querySelector("button:not(:disabled)")?.focus();
@@ -803,7 +1056,7 @@ function setupMenus() {
       if (document.activeElement?.closest?.("#menubar")) document.activeElement.blur();
     });
   });
-  document.addEventListener("mousedown", (e) => { if (!e.target.closest("#menubar")) closeMenus(); });
+  document.addEventListener("mousedown", (e) => { if (!e.target.closest("#menubar, #ctx")) closeMenus(); });
 }
 
 // View zoom: the sheet's width; the SVGs scale with it and clicks map through their real size.
@@ -947,55 +1200,36 @@ function init() {
   buildPalette();
   buildKeySelect("f-key");
   buildKeySelect("a-key");
-  $("b-attrs").onclick = openAttrs;
   $("attrs").addEventListener("close", closeAttrs);
   $("attrs-cancel").onclick = () => $("attrs").close("cancel");
   $("attrs-remove").onclick = () => $("attrs").close("remove");
-  $("b-new").onclick = () => openSetup(true);
-  $("b-lib").onclick = openLibrary;
   $("title").onclick = $("composer").onclick = () => openSetup(false);
   $("setup").addEventListener("close", closeSetup);
   $("setup-cancel").onclick = () => $("setup").close("cancel");
-  $("b-open").onclick = () => $("file").click();
   $("file").onchange = (e) => { openFile(e.target.files[0]); e.target.value = ""; };
-  $("b-save").onclick = saveFile;
-  $("b-print").onclick = () => window.print();
-  $("b-undo").onclick = undo;
-  $("b-redo").onclick = redo;
   $("b-play").onclick = startPlay;
   $("b-stop").onclick = stopPlay;
-  $("b-help").onclick = () => $("help").showModal();
-  $("m-about").onclick = () => $("about").showModal();
-  $("m-details").onclick = () => openSetup(false);
-  $("m-instruments").onclick = openInstruments;
   $("instruments").addEventListener("close", closeInstruments);
   $("inst-cancel").onclick = () => $("instruments").close("cancel");
   fillSounds($("f-sound"), 0);
   $("f-preset").onchange = (e) => ($("f-sound").value = e.target.value === "satb" ? 52 : 0);
-  $("m-cut").onclick = () => copySel(true);
-  $("m-copy").onclick = () => copySel(false);
-  $("m-paste").onclick = () => paste();
-  $("m-delete").onclick = () => deleteSel();
-  $("m-zoomin").onclick = () => setZoom(zoom * 1.2);
-  $("m-zoomout").onclick = () => setZoom(zoom / 1.2);
-  $("m-zoom1").onclick = () => setZoom(1);
+  setupCommands();
+  setupCtx();
+  $("tuplet").addEventListener("close", closeTuplet);
+  $("tuplet-cancel").onclick = () => $("tuplet").close("cancel");
   setupMenus();
   $("report-close").onclick = () => ($("report").style.display = "none");
   $("tempo").onchange = (e) => {
     const v = Math.max(20, Math.min(400, Math.round(+e.target.value) || 100));
     edit((sc) => { sc.tempo = v; return null; });
   };
-  $("b-addbar").onclick = () => edit((sc) => { M.addMeasure(sc, state.caret.bar); state.caret.bar++; return null; });
-  $("b-delbar").onclick = () => {
-    const b = state.caret.bar;
-    const has = state.score.staves.some((s) => s.bars[b].length);
-    if (has && !confirm(`Delete bar ${b + 1} and its notes?`)) return;
-    edit((sc) => M.deleteMeasure(sc, b));
-  };
   const systems = $("systems");
   systems.addEventListener("click", onClick);
   systems.addEventListener("mousemove", onMove);
   systems.addEventListener("mouseleave", () => ($("ghost").style.display = "none"));
+  systems.addEventListener("pointerdown", onDown);
+  document.addEventListener("pointermove", onDrag);
+  document.addEventListener("pointerup", () => (drag = null));
   document.addEventListener("keydown", onKey);
   document.addEventListener("dragover", (e) => e.preventDefault());
   document.addEventListener("drop", (e) => { e.preventDefault(); openFile(e.dataTransfer.files[0]); });

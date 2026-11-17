@@ -13,6 +13,7 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 - **File ▸ New** sets up a score: title, composer, staves (single staff, piano, SATB…), key, time, tempo, number of bars.
 - **Click** on a staff to add a note of the selected length; clicking between two notes inserts it there. Click a note to select it. To build a chord, select a note and press **Shift+A–G**, **Shift+click** the staff, or turn on the chord button so clicks add to the selected note.
 - **Type** letters to add notes quickly. Coda picks the octave closest to the previous note and moves to the next bar when one fills up.
+- The **Selection tool** (arrow, top of the left palette, or `V`) selects instead of adding notes: click a note, drag across notes, Shift+click to extend. Duration, dot, accidentals, tie, transpose and tuplets then apply to all the selected notes. Right-click a note or bar for a menu of actions.
 - **Score ▸ Key and time** changes the key or time signature from the current bar on. **View** zooms the score.
 - **Score ▸ Instruments** picks a sound for each part from the 128 General MIDI instruments (New also asks for one). Sounds download the first time a part uses them and are then kept in your browser; without a connection, parts play a plain tone.
 - **Play** plays from the current bar. **File ▸ Print** prints the score, or saves it as a PDF from your browser's print dialog.
@@ -24,16 +25,19 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 |---|---|
 | `A`–`G` | Add that note after the selected note (or at the end of the bar) |
 | `Shift+A`–`G` | Add that note above the selected note (chord) |
-| `R` | Add a rest |
+| `R` or `0` | Add a rest |
 | `7` `6` `5` `4` `3` `2` | Whole, half, quarter, eighth, 16th, 32nd (also changes the selected note) |
 | `.` | Dot (again for a double dot, again for none) |
 | `+` `-` `N` | Sharp, flat, natural |
 | `T` | Tie the selected note to the next |
-| `↑` `↓` | Move the selected note by a step (with Ctrl/Cmd: an octave) |
+| `↑` `↓` | Move the selected notes by a step (with Shift or Ctrl/Cmd: an octave) |
 | `←` `→` | Select the previous / next note (with Shift: extend the selection) |
 | `Ctrl/Cmd+C`, `X`, `V` | Copy, cut, paste the selected notes |
-| `;` | Triplets on/off for the next notes |
-| `Delete` | Delete the selected note |
+| `9` or `;` | Tuplets on/off for the next notes (Notes ▸ Tuplet… picks 3:2, 2:3, 4:3, 5:4 or 6:4) |
+| `Delete` | Delete the selected notes |
+| `V` | Switch between the Selection tool and the Note entry tool |
+| `Ctrl/Cmd+A` | Select all notes in this staff |
+| Right-click, `Shift+F10` | Actions for the note or bar under the pointer |
 | `Space` | Play / stop |
 | `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z` | Undo, redo |
 | `Ctrl/Cmd+S`, `Ctrl/Cmd+O` | Save, open |
@@ -55,7 +59,7 @@ voices, grace notes, clef changes…), it opens the rest and lists what it left 
 
 ## Not supported yet
 
-Lyrics, articulations, dynamics, slurs, grace notes, tuplets other than triplets, more than one
+Lyrics, articulations, dynamics, slurs, grace notes, septuplets, more than one
 voice per staff, repeats and endings, mid-score clef changes, transposing instruments, page layout
 controls, your own instrument samples, and MIDI export. See [docs/ROADMAP.md](docs/ROADMAP.md).
 

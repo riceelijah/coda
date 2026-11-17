@@ -21,10 +21,10 @@ Smart Shape, Lyrics, Repeat, Key Signature, Mass Mover).
 
 | Feature | Notes | Size |
 |---|---|---|
-| **Select a range, then copy / paste / delete / transpose it** | **Done (Phase 9)** with Shift+←/→. Mouse range selection is still to do. | — |
+| **Select a range, then copy / paste / delete / transpose it** | **Done (Phases 9, 15):** Shift+←/→, or the Selection tool (click, drag, Shift+click). Ranges are one staff. | — |
 | **Insert notes mid-bar** | **Done (Phase 9):** typing goes after the selected note; clicking between notes inserts there. An overwrite mode is not done. | — |
-| **Tuplet entry** (triplets first) | **Done (Phase 9)** for triplets (`;`). Other ratios still to do. | — |
-| **Second voice** (stems up/down in one staff) | Needed for piano and SATB on two staves. Importers currently drop voice 2 and say so. | L |
+| **Tuplet entry** | **Done (Phases 9, 17):** 3:2, 2:3, 4:3, 5:4, 6:4 (`9`/`;`, Notes ▸ Tuplet…). 7-tuplets don't fit the tick grid. | — |
+| **Second voice** (stems up/down in one staff) | **Next (Phase 18).** Needed for piano and SATB on two staves; a real hymn-style file lost about half its notes on import. | L |
 | **Articulations**: staccato, accent, tenuto, marcato, fermata | VexFlow draws them. Playback should shorten staccato notes. | S |
 | **Dynamics and hairpins** (p, mf, ff, cresc.) | NotePad's Expression tool also did tempo text and rehearsal letters. | M |
 | **Slurs** | | M |

@@ -808,8 +808,8 @@ Palette toggle and key `;` set `armed.tup = [3, 2]` (sticky, shown in the status
 
 ### 11.7 Range selection and clipboard (Phase 9)
 
-- `state.selEnd` (same staff as `state.sel`) extends with Shift+←/→. Mouse ranges are not
-  supported, because Shift+click adds chord notes.
+- `state.selEnd` (same staff as `state.sel`) extends with Shift+←/→, or with the mouse in the
+  Selection tool (§14.2). In the entry tool Shift+click still adds chord notes.
 - Delete, ↑/↓ transpose, Ctrl/Cmd+C, X and V act on the whole range, each as one `edit()`
   (one undo step, rolled back whole on failure).
 - The clipboard is an in-page copy of the events. Paste inserts them after the selection (or
@@ -908,3 +908,43 @@ Minimum checks, added in the phase that introduces the code:
 
 Interactive behaviour (clicking, typing, playback, printing) is verified by hand in the browser
 pane, following the checklist at the end of each phase in `docs/PLAN.md`.
+
+## 14. Selection tool, commands, context menu, tuplets (Phases 14–17)
+
+Rule for this and later rounds: **a NotePad user should feel at home.** Keep every existing
+shortcut; add NotePad's where they don't clash (checked against the NotePad 2012 manual:
+Keyboard Shortcuts, Simple Entry, Selection tool, Tuplets pages). New power (context menus,
+range-wide commands) is added alongside, never instead.
+
+### 14.1 Command table (Phase 14)
+
+`CMD[id] = { run, on? }` in app.js, keyed by the menu item ids. Menu items, the context menu and
+modifier shortcuts (read from each item's `data-short`) all call `CMD[id].run()`; a menu disables
+an item when `on()` is false. Letter, digit and arrow entry keys stay in `onKey`.
+New **Notes** menu: Select all (mod+A), Transpose up/down a step (↑/↓), up/down an octave
+(Shift+↑/↓, NotePad's; Ctrl+↑/↓ still works), Tie (T), Tuplet…, Remove tuplet.
+
+### 14.2 Selection tool (Phase 15)
+
+- `state.tool`: `"entry"` (default, current behaviour) or `"select"`. Two buttons at the top of
+  the palette (arrow, pencil); **V** toggles. Typing letters enters notes in either tool.
+- Select tool, mouse: click selects the nearest event in that staff and bar; drag (> 4 px)
+  selects a range on the anchor's staff; Shift+click extends (NotePad's gestures). No ghost note.
+  Empty bars move the caret only. Ranges stay on one staff.
+- Range-wide commands: duration, dot, accidental, tie, transpose, tuplet act on every event in
+  `range()` inside one `edit()`, so any failure rolls back the whole change.
+
+### 14.3 Context menu (Phase 16)
+
+Right-click (or Shift+F10 / the Menu key) opens `#ctx`, built from clones of menu items.
+On a note (selected first if outside the range): Cut, Copy, Paste, Delete · Transpose up/down ·
+Tie · Tuplet… · Key and time… · Instruments…. Elsewhere on a staff: Paste · Add bar · Delete bar ·
+Key and time… · Instruments…. Clamped to the viewport; Esc, a click outside, or scrolling closes it.
+
+### 14.4 Tuplets (Phase 17)
+
+- Palette **Tuplet** button and Notes ▸ Tuplet… open `#tuplet`: "N in the space of M" with the
+  presets 3:2, 2:3, 4:3, 5:4, 6:4 (all whole-tick on every duration; 7-tuplets can't be, §3.1).
+- With a selection: `setTuplet` on the range. Without: arms the ratio for the next notes.
+- `;` and NotePad's **9** toggle the last-used ratio (3:2 at first).
+- An armed ratio that doesn't fit the duration gives a message instead of being dropped.

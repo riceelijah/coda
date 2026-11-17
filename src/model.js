@@ -253,6 +253,16 @@ export function setDuration(score, s, b, i, dur, dots) {
   return null;
 }
 
+// Make an event a tuplet member (tup = [actual, normal]) or plain (tup = null).
+export function setTuplet(score, s, b, i, tup) {
+  const ev = score.staves[s].bars[b][i];
+  if (tup && !tupletOk(ev.dur, ev.dots, tup)) return `A ${tup[0]}:${tup[1]} tuplet doesn't fit that note value`;
+  const old = ev.tup;
+  if (tup) ev.tup = [...tup]; else delete ev.tup;
+  if (!fits(score, b, score.staves[s].bars[b])) { if (old) ev.tup = old; else delete ev.tup; return "Bar is full"; }
+  return null;
+}
+
 export function toggleTie(score, s, b, i) {
   const ev = score.staves[s].bars[b][i];
   if (ev.tie) { ev.tie = false; return null; }

@@ -38,6 +38,11 @@ only says what to build in what order and how to know each phase is finished.
 | 11 | Menu bar (File, Edit, View, Score, Help) | done |
 | 12 | Instrument per staff (model + formats) | done |
 | 13 | Instrument sounds on demand (all 128 GM) | done |
+| 14 | Command table, Notes menu, NotePad key aliases | done |
+| 15 | Selection tool, mouse ranges, range-wide commands | done |
+| 16 | Right-click context menu | done |
+| 17 | General tuplets (3:2, 2:3, 4:3, 5:4, 6:4) | done |
+| 18 | Multiple voices per staff (import, draw, play, enter) | next |
 
 ---
 
