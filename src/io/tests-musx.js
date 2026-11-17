@@ -77,9 +77,9 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
     const got = `${tags(st.bars)} + ${tags(st.layers[0])}`;
     if (got !== "f . pp . + . mp ." || !/Two dynamics on one note \(the first kept\): 1/.test(warn(r))) return `${got} / ${warn(r)}`;
     const v = await open("exprv2");
-    // one hidden; one over the closing rest, with no note after it
-    return (tags(v.score.staves[0].bars) === ". ." && /Hidden dynamics \(not imported\): 1/.test(warn(v)) && /after the last note \(not imported\): 1/.test(warn(v))) ||
-      `${tags(v.score.staves[0].bars)} / ${warn(v)}`;
+    // one hidden; one in layer 1 where its second voice starts a note
+    const got2 = `${tags(v.score.staves[0].bars)} + ${tags(v.score.staves[0].layers[0])}`;
+    return (got2 === ". . + . . f" && /Hidden dynamics \(not imported\): 1/.test(warn(v))) || `${got2} / ${warn(v)}`;
   });
 
   await check("musx sample: slurs from smart shapes (DESIGN §23)", async () => {

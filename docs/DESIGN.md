@@ -724,8 +724,8 @@ unless marked otherwise.
 - Tempo: the first tempo mark at the very start of bar 1 sets the score tempo (20–400); other
   tempo and text expressions and `<ignore/>` entries are counted.
 - Dynamics (§22): an expression in the dynamics category, or whose text is a dynamic, goes on the
-  note it starts on (within 2 ticks) or covers in its layer (all layers when 0; `<v2/>` the voice-2
-  layer), else the next note, as MusicXML. Rarer marks map as MusicXML's (pppp → ppp, sfp → fp …).
+  note it starts on (within 2 ticks) or covers in its layer (then that layer's voice 2; all layers when 0;
+  only voice 2 with `<v2/>`), else the next note, as MusicXML. Rarer marks map as MusicXML's (pppp → ppp, sfp → fp …).
   Counted: hidden ones, ones on grace notes, other text in the dynamics category, a second one on
   a note, ones on empty bars or after the last note.
 - Slurs and hairpins (§23): slur shapes (dashed shown solid, counted) and `cresc`/`decresc` from

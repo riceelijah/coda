@@ -341,10 +341,11 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     };
     // one entry -> event, or null when skipped; ts is the voice's tuplet state
     const readEntry = (e, id, mi, ts) => {
-      const skip = (label) => { report.count(label, Math.max(1, num(e, "numNotes", 0))); return null; };
+      const lyrLost = () => lyrics.has(id) && report.count("Lyrics on rests (not imported)", lyrics.get(id).length);
+      const skip = (label) => { report.count(label, Math.max(1, num(e, "numNotes", 0))); lyrLost(); return null; };
       ts.last = 0; // the entry's real length in ticks, from the file (tuplet ratio applied)
       if (has(e, "graceNote")) return null; // the caller keeps it for the next note
-      if (has(e, "ignore")) { ts.last = (num(e, "dura", 0) * 480) / 1024; report.count("Hidden placeholder entries shown as rests"); return null; }
+      if (has(e, "ignore")) { ts.last = (num(e, "dura", 0) * 480) / 1024; report.count("Hidden placeholder entries shown as rests"); lyrLost(); return null; }
       const dura = num(e, "dura", 0);
       if (has(e, "tupletStart") && tupletDefs.has(id)) {
         const t = tupletDefs.get(id);
@@ -426,7 +427,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
       if (has(g, "clefListID")) {
         const list = clefLists.get(String(num(g, "clefListID"))) || [];
         if (list.some((x) => x.at > 0)) report.count("Clef changes inside a bar moved to its start");
-        if (list.length) c = list[list.length - 1].clef;
+        if (list.length) c = list[list.length - 1].clef; else report.count("Unsupported clef changes (not imported)");
       } else if (has(g, "clefID")) c = num(g, "clefID");
       if (c !== null && mi === 0) clefId = c;
       else if (c !== null && c !== (staff.lastClef ?? clefId)) {
@@ -578,7 +579,8 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     const sa = num(a, "staffAssign", 0), si = sa === -1 ? 0 : sa === -2 ? staffIds.length - 1 : staffIds.indexOf(String(sa));
     if (si < 0 || mi === undefined) { report.count("Dynamics on staves or bars not found (not imported)"); continue; }
     const t = (num(a, "horzEduOff", 0) * 480) / 1024, l = num(a, "layer", 0);
-    const Ls = l ? [has(a, "v2") ? v2Layer.get(`${si}/${mi}/${l}`) : l] : [1, 2, 3, 4];
+    // a layer's voice 2 counts as that layer unless the mark is for voice 2 only
+    const v2L = l && v2Layer.get(`${si}/${mi}/${l}`), Ls = !l ? [1, 2, 3, 4] : has(a, "v2") ? [v2L] : [l, v2L];
     let ev = null;
     for (const L of Ls) if (L && (ev = eventAt(bar(si, L, mi).filter((x) => x.pitches.length), t))) break;
     // between notes: the next note, as MusicXML does; a bar with no notes is a whole-bar rest
