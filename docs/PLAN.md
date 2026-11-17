@@ -45,6 +45,7 @@ only says what to build in what order and how to know each phase is finished.
 | 18 | Layers 1–4 per staff | Done (18a model/MusicXML/draw/play, 18b entry, 18c MuseScore/.musx) |
 | 19 | Fermatas and articulations (DESIGN §16) | done |
 | 20 | Common and cut time symbols (DESIGN §17) | done |
+| 21 | Your own sounds (DESIGN §18) | done |
 
 ---
 

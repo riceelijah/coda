@@ -1,7 +1,8 @@
 // Coda — UI wiring. See docs/DESIGN.md §4 and §6.
 import * as M from "./model.js";
 import { render, SHEET_W } from "./render.js";
-import { play, stop, isPlaying, audition, prefetch } from "./play.js";
+import { play, stop, isPlaying, audition, prefetch, noteName, forgetUserSound } from "./play.js";
+import * as usnd from "./usersounds.js";
 import { GM, FAMILIES } from "./gm.js";
 import { demoScore } from "./demo.js";
 import * as store from "./store.js";
@@ -463,7 +464,8 @@ function enterAtCaret(pitch) {
 
 // Sound the pitches of an event (DESIGN §11.2).
 function hear(ev) {
-  if (ev && ev.pitches.length) audition(ev.pitches.map(M.midi), state.score.staves[state.sel?.staff ?? 0].program ?? 0);
+  const st = state.score.staves[state.sel?.staff ?? 0];
+  if (ev && ev.pitches.length) audition(ev.pitches.map(M.midi), st.program ?? 0, st.sound);
 }
 
 // Shift+A–G: add that letter above the selected note's top pitch (DESIGN §11.1).
@@ -833,6 +835,24 @@ function fillSounds(sel, value) {
 
 // ---------- instruments (DESIGN §13.3) ----------
 
+// A part's sound menu value: the GM program number, or "u:<id>" for one of your sounds.
+const soundValue = (st) => (st.sound ? "u:" + st.sound : String(st.program ?? 0));
+
+// Your sounds as an extra group in each part's menu; `picks` keeps choices made before a refresh.
+async function fillOwnSounds(picks = null) {
+  const own = await usnd.listSounds();
+  for (const sel of $("inst-rows").querySelectorAll("select")) {
+    const keep = picks?.get(sel) ?? sel.value;
+    sel.querySelector("optgroup.own")?.remove();
+    const g = document.createElement("optgroup");
+    g.className = "own"; g.label = "Your sounds";
+    for (const u of own) g.appendChild(new Option(u.name, "u:" + u.id));
+    if (keep.startsWith("u:") && !own.some((u) => "u:" + u.id === keep)) g.appendChild(new Option("(sound no longer in this browser)", keep));
+    if (g.children.length) sel.prepend(g);
+    sel.value = keep;
+  }
+}
+
 function openInstruments() {
   const sc = state.score, box = $("inst-rows");
   box.textContent = "";
@@ -844,16 +864,78 @@ function openInstruments() {
     fillSounds(sel, sc.staves[g[0]].program ?? 0);
     box.append(lab, sel);
   });
+  const want = new Map([...box.querySelectorAll("select")].map((x) => [x, soundValue(sc.staves[+x.dataset.staff])]));
   $("instruments").returnValue = "";
   $("instruments").showModal();
+  fillOwnSounds(want);
 }
 
 function closeInstruments() {
   if ($("instruments").returnValue !== "ok") return;
-  const picks = [...$("inst-rows").querySelectorAll("select")].map((x) => [+x.dataset.staff, +x.value])
-    .filter(([s, p]) => (state.score.staves[s].program ?? 0) !== p);
+  const picks = [...$("inst-rows").querySelectorAll("select")].map((x) => [+x.dataset.staff, x.value])
+    .filter(([s, v]) => soundValue(state.score.staves[s]) !== v);
   if (!picks.length) return;
-  if (edit((sc) => { for (const [s, p] of picks) M.setStaffProgram(sc, s, p); return null; })) prefetch(state.score);
+  const ok = edit((sc) => {
+    for (const [s, v] of picks) {
+      const e = v.startsWith("u:") ? M.setStaffSound(sc, s, v.slice(2)) : M.setStaffSound(sc, s, null) || M.setStaffProgram(sc, s, +v);
+      if (e) return e;
+    }
+    return null;
+  });
+  if (ok) prefetch(state.score);
+}
+
+// ---------- your own sounds (DESIGN §18) ----------
+
+function fillNoteSelect(sel, value) {
+  sel.textContent = "";
+  for (let m = 21; m <= 108; m++) sel.appendChild(new Option(noteName(m) + (m === 60 ? " (middle C)" : ""), m));
+  sel.value = value;
+}
+
+async function listOwnSounds() {
+  const list = $("us-list");
+  const own = await usnd.listSounds();
+  list.replaceChildren(...own.map((u) => {
+    const li = document.createElement("li"), name = document.createElement("span"), del = document.createElement("button");
+    name.textContent = `${u.name} — recorded at ${noteName(u.root)}, plays ${noteName(u.low)}–${noteName(u.high)}`;
+    del.type = "button"; del.className = "btn"; del.textContent = "Delete";
+    del.onclick = async () => {
+      if (!confirm(`Delete "${u.name}" from this browser? Parts using it will play their instrument instead.`)) return;
+      await usnd.removeSound(u.id);
+      forgetUserSound(u.id);
+      listOwnSounds();
+    };
+    li.append(name, del);
+    return li;
+  }));
+  if (!own.length) { const li = document.createElement("li"); li.textContent = "No sounds yet."; list.appendChild(li); }
+}
+
+function openOwnSounds() {
+  fillNoteSelect($("us-root"), 60); fillNoteSelect($("us-low"), 36); fillNoteSelect($("us-high"), 84);
+  $("us-file").value = ""; $("us-name").value = "";
+  const msg = $("us-msg");
+  msg.dataset.text ||= msg.textContent;
+  msg.textContent = msg.dataset.text;
+  listOwnSounds();
+  $("usounds").showModal();
+}
+
+async function addOwnSound() {
+  const say = (t) => { $("us-msg").textContent = t; };
+  const file = $("us-file").files[0];
+  if (!file) { say("Choose an audio file first."); return; }
+  if (file.size > usnd.MAX_BYTES) { say(`That file is too big (the limit is ${usnd.MAX_BYTES / 1048576} MB).`); return; }
+  const bytes = await file.arrayBuffer();
+  try { await usnd.checkAudio(bytes); } catch { say("This browser can't play that file. Try WAV, MP3 or OGG."); return; }
+  const name = $("us-name").value.trim() || file.name.replace(/\.[^.]+$/, "") || "Sound";
+  try {
+    await usnd.addSound(bytes, file.type, { name, root: +$("us-root").value, low: +$("us-low").value, high: +$("us-high").value });
+  } catch { say("Couldn't store the sound (browser storage may be full or blocked)."); return; }
+  say(`Added "${name}". Pick it for a part in the Instruments list.`);
+  $("us-file").value = ""; $("us-name").value = "";
+  listOwnSounds();
 }
 
 // ---------- tuplets (DESIGN §14.4) ----------
@@ -1275,6 +1357,9 @@ function init() {
   $("b-stop").onclick = stopPlay;
   $("instruments").addEventListener("close", closeInstruments);
   $("inst-cancel").onclick = () => $("instruments").close("cancel");
+  $("inst-own").onclick = () => openOwnSounds();
+  $("us-add").onclick = () => addOwnSound();
+  $("usounds").addEventListener("close", () => fillOwnSounds());
   fillSounds($("f-sound"), 0);
   $("f-preset").onchange = (e) => ($("f-sound").value = e.target.value === "satb" ? 52 : 0);
   setupCommands();

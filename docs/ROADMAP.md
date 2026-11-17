@@ -64,7 +64,7 @@ Ordered roughly by how often they come up for students, teachers and hobbyists.
 | **Transposing instruments** and a concert-pitch toggle | Needed for band (Bb clarinet, trumpet, F horn, alto sax). | M |
 | **Chord symbols** above the staff | Lead sheets; NotePad couldn't do this. | M |
 | **Part extraction** (print one staff on its own) | | M |
-| **Better playback sounds** | **Done (Phase 13):** all 128 General MIDI sounds, downloaded on demand. Still to do: your own samples, a note-level playback cursor. | — |
+| **Better playback sounds** | **Done (Phase 13):** all 128 General MIDI sounds, downloaded on demand. Your own sounds: done (Phase 21). Still to do: a note-level playback cursor. | — |
 | **Export PDF / PNG / audio** | Printing to PDF works today; direct PDF/PNG and WAV export are the next steps. | M |
 | **Page and system breaks**, staff size, page size | A small set of controls, not full engraving. | M |
 | **Multi-measure rests** | Mostly matters for parts. | S |

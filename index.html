@@ -141,6 +141,8 @@
   #lib-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
   #lib-list li > div:last-child { display: flex; gap: 6px; flex-shrink: 0; }
   #lib-list .meta, dialog .note { font-size: 12px; opacity: .75; }
+  #us-list { list-style: none; margin: 0 0 12px; padding: 0; max-height: 30vh; overflow: auto; }
+  #us-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 0; border-bottom: 1px solid var(--border); }
 
   @media (max-width: 800px) {
     body { grid-template: "top" auto "pal" auto "desk" 1fr "status" auto / 1fr; }
@@ -327,8 +329,28 @@
     <div class="form" id="inst-rows"></div>
     <p class="note">Sounds download the first time a part uses them, then stay in this browser. Without a connection, parts play a plain tone.</p>
     <div class="actions">
+      <button class="btn" type="button" id="inst-own">Your sounds…</button>
       <button class="btn" type="button" id="inst-cancel">Cancel</button>
       <button class="btn primary" value="ok">Apply</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="usounds">
+  <form method="dialog">
+    <h2>Your sounds</h2>
+    <ul id="us-list"></ul>
+    <div class="form">
+      <label for="us-file">Audio file</label><input id="us-file" type="file" accept="audio/*">
+      <label for="us-name">Name</label><input id="us-name" maxlength="80" placeholder="From the file name">
+      <label for="us-root">Recorded note</label><select id="us-root"></select>
+      <label for="us-low">Lowest note</label><select id="us-low"></select>
+      <label for="us-high">Highest note</label><select id="us-high"></select>
+    </div>
+    <p class="note" id="us-msg">One recording, played higher or lower for the other notes in its range; notes outside it use the part's instrument. Sounds stay in this browser. Saved files keep only the part's instrument.</p>
+    <div class="actions">
+      <button class="btn" type="button" id="us-add">Add sound</button>
+      <button class="btn primary" value="done">Done</button>
     </div>
   </form>
 </dialog>
@@ -401,6 +423,7 @@
       <tr><td><kbd>Shift</kbd>+<kbd>A</kbd>–<kbd>G</kbd></td><td>Add that note above the selected note (build a chord)</td></tr>
       <tr><td>Shift+click</td><td>Add or remove a chord note on the clicked note</td></tr>
       <tr><td>Notes ▸ Fermata…Marcato</td><td>Add or remove a fermata or articulation on the selected notes (also on right-click)</td></tr>
+      <tr><td>Score ▸ Instruments… ▸ Your sounds…</td><td>Use your own recording for a part; saved files keep only the part's instrument</td></tr>
       <tr><td>Layer 1–4 (lower left)</td><td>Pick which layer you enter and edit in (Notes ▸ Layer); other layers show grey</td></tr>
       <tr><td>Chord button</td><td>Clicks add notes to the selected note instead of after it</td></tr>
     </table>

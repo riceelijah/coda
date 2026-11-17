@@ -424,6 +424,15 @@ export function setStaffProgram(score, s, program) {
   return null;
 }
 
+// Your own sound for a part (DESIGN §18), by id; null goes back to the part's instrument.
+export function setStaffSound(score, s, id) {
+  if (id !== null && (typeof id !== "string" || !id || id.length > 64)) return "Unknown sound";
+  for (const i of partGroups(score).find((grp) => grp.includes(s))) {
+    if (id) score.staves[i].sound = id; else delete score.staves[i].sound;
+  }
+  return null;
+}
+
 export const PRESETS = {
   treble: [{ name: "Staff", clef: "treble" }],
   bass: [{ name: "Staff", clef: "bass" }],
@@ -477,6 +486,7 @@ export function isValidScore(sc) {
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m))))));
     return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) &&
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
+      (st.sound === undefined || (typeof st.sound === "string" && st.sound.length > 0 && st.sound.length <= 64)) &&
       (st.layers === undefined || (Array.isArray(st.layers) && st.layers.length < MAX_LAYERS && st.layers.every(okBars))));
   } catch { return false; }
 }

@@ -2,6 +2,7 @@
 // See docs/DESIGN.md §7 and §13.3.
 import { attrsAt, barCapacity, eventTicks, midi, PPQ, allLayers } from "./model.js";
 import { GM } from "./gm.js";
+import { getSound } from "./usersounds.js";
 
 let ctx = null;
 let current = null;
@@ -27,7 +28,7 @@ export function schedule(score, from = 0) {
           const m = midi(p);
           let n = open.get(m);
           if (n && n.end === at) n.end = at + len;
-          else { n = { start: at, end: at + len, midi: m, program: st.program ?? 0 }; notes.push(n); }
+          else { n = { start: at, end: at + len, midi: m, program: st.program ?? 0, ...(st.sound ? { sound: st.sound } : {}) }; notes.push(n); }
           if (ev.tie) nextOpen.set(m, n);
           else if (ev.marks?.includes("staccato")) n.end = at + len / 2; // sounds half its length
         }
@@ -151,8 +152,32 @@ export function sampledVoice(c, dest, buf, m, root, start, len, hold) {
   src.stop(start + len + rel + 0.02);
 }
 
-// A note with whatever is available now: the sample if loaded, else the triangle voice.
-function note(dest, m, program, start, len) {
+// ---------- your own sounds (DESIGN §18) ----------
+
+const users = new Map(); // id -> {buf, root, low, high}, or null when missing or undecodable
+const userLoading = new Map();
+function loadUser(id) {
+  if (users.has(id)) return Promise.resolve();
+  if (!userLoading.has(id)) {
+    userLoading.set(id, getSound(id)
+      .then(async (s) => { users.set(id, s && { root: s.root, low: s.low, high: s.high, buf: await audio().decodeAudioData(s.bytes) }); })
+      .catch(() => users.set(id, null))
+      .finally(() => userLoading.delete(id)));
+  }
+  return userLoading.get(id);
+}
+// Forget a sound after it is added, replaced or deleted.
+export function forgetUserSound(id) { users.delete(id); }
+// The user sound for this note, if it's loaded and the note is in its range.
+function userFor(sound, m) {
+  const u = sound && users.get(sound);
+  return u && m >= u.low && m <= u.high ? u : null;
+}
+
+// A note with whatever is available now: your sound, the sample if loaded, else the triangle voice.
+function note(dest, m, program, start, len, sound) {
+  const u = userFor(sound, m);
+  if (u) { sampledVoice(ctx, dest, u.buf, m, u.root, start, len, false); return; }
   const buf = buffers.get(keyOf(program, m));
   if (buf) sampledVoice(ctx, dest, buf, m, rootFor(m), start, len, sustained(program));
   else voice(dest, m, start, len);
@@ -175,7 +200,7 @@ function voice(dest, m, start, len) {
 
 // Sound a chord briefly while editing (DESIGN §11.2). Silent during playback.
 // Uses the sample if it's loaded; otherwise the tone now, and the sample is fetched for next time.
-export function audition(midis, program = 0) {
+export function audition(midis, program = 0, sound) {
   if (current || !midis.length) return;
   try {
     audio();
@@ -183,9 +208,10 @@ export function audition(midis, program = 0) {
     const t = ctx.currentTime + 0.02, out = output(ctx);
     setTimeout(() => out.disconnect(), 2000);
     for (const m of midis) {
-      note(out, m, program, t, 0.35);
-      load(keyOf(program, m)).catch(() => {});
+      note(out, m, program, t, 0.35, sound);
+      if (!userFor(sound, m)) load(keyOf(program, m)).catch(() => {});
     }
+    if (sound) loadUser(sound);
   } catch { /* audio unavailable: editing still works */ }
 }
 
@@ -204,14 +230,20 @@ async function start(me, score, from, onBar, onStatus) {
   if (ctx.state === "suspended") await ctx.resume();
   if (current !== me) return;
   const { notes, barStart, total } = schedule(score, from);
-  const keys = [...new Set(notes.map((n) => keyOf(n.program, n.midi)))].filter((k) => !buffers.has(k));
+  const ids = [...new Set(notes.filter((n) => n.sound).map((n) => n.sound))];
+  if (ids.length) await Promise.all(ids.map(loadUser));
+  if (current !== me) return;
+  // notes your sound can't play (missing, or outside its range) use the part's instrument instead
+  const fell = notes.filter((n) => n.sound && !userFor(n.sound, n.midi)).length;
+  const keys = [...new Set(notes.filter((n) => !userFor(n.sound, n.midi)).map((n) => keyOf(n.program, n.midi)))].filter((k) => !buffers.has(k));
+  const msgs = fell ? [`${fell} note${fell > 1 ? "s" : ""} outside your sound's range (or a missing sound) play the part's instrument.`] : [];
   if (keys.length) {
     onStatus("Loading sounds…");
     await Promise.race([Promise.allSettled(keys.map(load)), new Promise((r) => setTimeout(r, 8000))]);
     if (current !== me) return;
-    const missing = keys.filter((k) => !buffers.has(k)).length;
-    onStatus(missing ? "Some instrument sounds couldn't be loaded, so those notes play a plain tone." : "");
+    if (keys.some((k) => !buffers.has(k))) msgs.push("Some instrument sounds couldn't be loaded, so those notes play a plain tone.");
   }
+  if (msgs.length || keys.length) onStatus(msgs.join(" "));
   const secPerTick = 60 / (score.tempo || 100) / PPQ;
   const master = output(ctx);
   me.master = master;
@@ -221,7 +253,7 @@ async function start(me, score, from, onBar, onStatus) {
   for (const n of notes) {
     const start = t0 + n.start * secPerTick;
     const len = Math.max(0.06, (n.end - n.start) * secPerTick);
-    note(master, n.midi, n.program, start, len);
+    note(master, n.midi, n.program, start, len, n.sound);
   }
   const tick = () => {
     if (current !== me) return;

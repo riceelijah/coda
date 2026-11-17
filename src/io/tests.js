@@ -6,6 +6,7 @@ import { GM } from "../gm.js";
 import * as M from "../model.js";
 import * as store from "../store.js";
 import { markOf } from "./mscz.js";
+import * as usnd from "../usersounds.js";
 
 const P = (name) => {
   const m = /^([A-G])(#{1,2}|b{1,2})?(-?\d)$/.exec(name);
@@ -112,6 +113,39 @@ export async function run({ check, eq }) {
     if (s.measures[0].sym !== "common") return "sym not carried to the new bar 1";
     s.measures[0].sym = "cut";
     return !M.isValidScore(s) || "cut on 4/4 accepted";
+  });
+
+  await check("your sounds: store, list, read back, delete; a part's sound reaches playback (DESIGN §18)", async () => {
+    // a 0.1 s 440 Hz mono 16-bit WAV
+    const n = 800, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    const str = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    str(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); str(8, "WAVEfmt "); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 16000, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, "data"); v.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.sin(i / 8000 * 2 * Math.PI * 440) * 8000, true);
+    await usnd.checkAudio(buf);
+    let bad = false;
+    try { await usnd.checkAudio(new Uint8Array([1, 2, 3]).buffer); } catch { bad = true; }
+    if (!bad) return "garbage decoded";
+    const cacheName = "coda-test-user-sounds";
+    await caches.delete(cacheName);
+    const id = await usnd.addSound(buf, "audio/wav", { name: "Bell <b>& co</b>", root: 69, low: 80, high: 50 }, { cacheName });
+    const list = await usnd.listSounds({ cacheName });
+    if (list.length !== 1 || !eq(list[0], { id, name: "Bell <b>& co</b>", root: 69, low: 50, high: 80 })) return JSON.stringify(list);
+    const got = await usnd.getSound(id, { cacheName });
+    if (got?.bytes.byteLength !== buf.byteLength) return "bytes";
+    await usnd.removeSound(id, { cacheName });
+    const gone = !(await usnd.listSounds({ cacheName })).length && !(await usnd.getSound(id, { cacheName }));
+    await caches.delete(cacheName);
+    if (!gone) return "not removed";
+    const s = M.newScore({ preset: "piano", bars: 1 });
+    s.staves[1].bars[0] = [ev("w", "C3")];
+    if (M.setStaffSound(s, 0, "abc") || s.staves[1].sound !== "abc" || !M.isValidScore(s)) return "setStaffSound pair";
+    if (schedule(s).notes[0].sound !== "abc") return "schedule";
+    M.setStaffSound(s, 1, null);
+    if (s.staves[0].sound || s.staves[1].sound) return "cleared";
+    s.staves[0].sound = 5;
+    return !M.isValidScore(s) || "a non-string sound accepted";
   });
 
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {

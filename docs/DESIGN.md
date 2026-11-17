@@ -468,8 +468,7 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
 ## 8. Things deliberately not in the first version
 
 Lyrics, dynamics, slurs, grace notes, other articulations, repeats
-and endings, mid-score clef changes, transposing instruments, page-layout controls, user-supplied
-instrument samples, MIDI export. (Sampled General MIDI sounds: §13.3.) (Tuplet entry, inserting mid-bar and copy/paste: §11.)
+and endings, mid-score clef changes, transposing instruments, page-layout controls, MIDI export. (Sampled General MIDI sounds: §13.3.) (Tuplet entry, inserting mid-bar and copy/paste: §11.)
 
 All are additive on this model. Importers must **count and report** anything in these
 categories that they skip (§9.6).
@@ -882,7 +881,7 @@ item runs. Zoom sets the sheet width (menu items only; Ctrl +/− stays the brow
 - Pickers: Score ▸ Instruments… (one row per part), and a Sound select in New. SATB defaults to
   Choir Aahs (52).
 - Credits: FluidR3_GM (MIT; CC BY 3.0 per the gleitz README) in the README and Help ▸ About.
-- User-supplied sounds are a later phase (first: one audio file mapped to a range).
+- Your own sounds: §18.
 
 ## 10. Testing
 
@@ -1001,4 +1000,18 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
 - **Files:** MusicXML `<time symbol="common|cut">` both ways; MuseScore `TimeSig` subtype 1 =
   common, 2 = cut. Importers build `measures` with the shared `measuresFrom`. `.musx` time
   symbols are not read yet (drawn as numbers).
+
+## 18. Your own sounds (Phase 21)
+
+- **What:** one audio file, the note it was recorded at, and the lowest and highest notes it
+  plays. No loop points: long notes stop when the recording does.
+- **Storage:** `src/usersounds.js`, Cache API `coda-user-sounds-v1`, one entry per sound (the
+  file as stored, name/root/low/high in `x-` headers, the name URL-encoded). A file over 20 MB
+  is refused before reading; a file the browser can't decode is refused before storing.
+- **Model:** optional `staff.sound` (the id), set for a whole part by `setStaffSound`;
+  `program` stays as the fallback and is what MusicXML saves.
+- **Playback:** each sound is decoded once and repitched from its root. Notes outside its range,
+  or a sound no longer in this browser, play the part's instrument, with one status line.
+- **UI:** Instruments ▸ Your sounds… adds and deletes sounds; each part's menu lists them under
+  "Your sounds". Names go into the page with `textContent` / `Option` text only.
 
