@@ -306,6 +306,15 @@ export async function run({ check, eq }) {
     return w === "Hairpins over a single note (not imported): 1; Slurs inside other slurs (not imported): 1" || w;
   });
 
+  await check("hairpins in playback: ramp to the next dynamic, else 16 steps that hold (DESIGN §23)", () => {
+    const s = M.newScore({ preset: "treble", bars: 3 });
+    s.staves[0].bars[0] = [ev("q", "C5", { dyn: "p", hp: "<" }), ev("q", "D5"), ev("q", "E5"), ev("q", "F5", { hpEnd: true })];
+    s.staves[0].bars[1] = [ev("q", "G5", { dyn: "f", hp: ">" }), ev("q", "F5", { hpEnd: true }), ev("h", "E5")];
+    s.staves[0].bars[2] = [ev("w", "C5", { dyn: "sfz" })];
+    const v = schedule(s).notes.map((n) => n.vel).join(" ");
+    return v === "50 62 73 85 96 88 80 112" || v;
+  });
+
   await check("lyrics: setLyric, syllabics, validation, import counts (DESIGN §24)", () => {
     const s = M.newScore({ preset: "treble", bars: 1 });
     s.staves[0].bars[0] = [ev("q", "C4"), ev("q", "D4"), ev("q", "E4"), ev("q", null)];

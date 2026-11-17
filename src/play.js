@@ -54,21 +54,41 @@ function dynamics(score, from) {
   score.measures.forEach((m, b) => { starts.push(t); t += barCapacity(attrsAt(score, b).time); });
   const off = starts[from] || 0, byStaff = [];
   for (const g of partGroups(score)) {
-    const levels = [], accents = new Map();
-    for (const s of g) allLayers(score.staves[s]).forEach((bars) => bars.forEach((bar, b) => {
-      let at = starts[b] - off;
-      for (const ev of bar) {
-        if (DYN_VEL[ev.dyn]) levels.push([at, DYN_VEL[ev.dyn]]);
-        else if (ev.dyn) { accents.set(at, ACCENT_VEL[ev.dyn]); if (ev.dyn === "fp") levels.push([at + 1, DYN_VEL.p]); }
-        at += eventTicks(ev);
-      }
-    }));
-    levels.sort((a, b) => a[0] - b[0]);
-    const at = (tick) => {
-      if (accents.has(tick)) return accents.get(tick);
+    const levels = [], accents = new Map(), ramps = [];
+    for (const s of g) allLayers(score.staves[s]).forEach((bars) => {
+      let open = null; // hairpin started in this layer: {t0, dir}
+      bars.forEach((bar, b) => {
+        let at = starts[b] - off;
+        for (const ev of bar) {
+          if (DYN_VEL[ev.dyn]) levels.push([at, DYN_VEL[ev.dyn]]);
+          else if (ev.dyn) { accents.set(at, ACCENT_VEL[ev.dyn]); if (ev.dyn === "fp") levels.push([at + 1, DYN_VEL.p]); }
+          if (ev.hpEnd && open) { ramps.push({ ...open, t1: at + eventTicks(ev) }); open = null; } // an end first: a new one may start here
+          if (ev.hp) open = { t0: at, dir: ev.hp === "<" ? 1 : -1 };
+          at += eventTicks(ev);
+        }
+      });
+    });
+    const byTime = (a, b) => a[0] - b[0];
+    levels.sort(byTime);
+    const levelAt = (tick) => {
       let v = DYN_VEL.mf;
       for (const [lt, lv] of levels) { if (lt > tick) break; v = lv; }
       return v;
+    };
+    // hairpins (DESIGN §23): from the level where they start to the next dynamic when it comes by a
+    // beat after the end and goes their way, else 16 steps; the level reached holds afterwards
+    ramps.sort((a, b) => a.t0 - b.t0);
+    for (const r of ramps) {
+      r.v0 = levelAt(r.t0);
+      const next = levels.find(([lt]) => lt > r.t0 && lt <= r.t1 + PPQ);
+      r.v1 = next && (next[1] - r.v0) * r.dir > 0 ? next[1] : Math.max(16, Math.min(127, r.v0 + 16 * r.dir));
+      levels.push([r.t1 - 0.5, r.v1]); // just before t1, so a dynamic on the next note still wins
+      levels.sort(byTime);
+    }
+    const at = (tick) => {
+      if (accents.has(tick)) return accents.get(tick);
+      const r = ramps.find((x) => tick >= x.t0 && tick < x.t1);
+      return r ? Math.round(r.v0 + ((r.v1 - r.v0) * (tick - r.t0)) / (r.t1 - r.t0)) : levelAt(tick);
     };
     for (const s of g) byStaff[s] = at;
   }
