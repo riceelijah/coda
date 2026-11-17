@@ -1072,5 +1072,10 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   `<transpose>`, octaves as `<octave-change>`.
 - **MuseScore:** `Instrument > transposeChromatic/transposeDiatonic` (full interval). Notes:
   `pitch` and `tpc` are concert, `tpc2` written; KeySig `concertKey` and `actualKey`.
+- **Paste** into a part with a different transposition shifts the notes so they sound the same.
+- **Known:** a concert key far from C can wrap the written key to the other side (concert F♯ with
+  a B♭ part shows A♭ major, as G♯ would need 8 sharps) while notes keep sharp spellings, so expect extra accidentals.
+  MuseScore 3 files with only `<accidental>` in a transposing first part are counted, not
+  converted (no MuseScore 3 file to check against).
 - Not yet: a concert-pitch view toggle, and `.musx` transpositions (still shown at concert pitch).
 

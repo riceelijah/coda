@@ -126,6 +126,8 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
           case "KeySig": {
             const k = txt(el, "concertKey") ?? txt(el, "accidental");
             if (k !== null) key = Math.max(-7, Math.min(7, parseInt(k, 10) || 0));
+            // older files may give only the written key; not checked against a real MuseScore 3 file
+            if (si === 0 && (tc || td) && txt(el, "concertKey") === null && k !== null) report.count("Key signatures of a transposing first part that may be written, not concert");
             break;
           }
           case "TimeSig": {

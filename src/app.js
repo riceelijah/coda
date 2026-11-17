@@ -529,6 +529,7 @@ function copySel(cut) {
   if (!r.length) return false;
   const bars = lb(state.sel.staff);
   state.clip = JSON.parse(JSON.stringify(r.map((p) => bars[p.bar][p.idx])));
+  state.clipTr = state.score.staves[state.sel.staff].transpose || [0, 0]; // to keep the sound in another part
   message(`${r.length} note${r.length > 1 ? "s" : ""} copied`);
   if (cut) deleteSel();
   return true;
@@ -541,8 +542,10 @@ function paste() {
   const bar = last ? last.bar : state.caret.bar;
   const idx = last ? last.idx + 1 : lb(staff)[bar].length;
   edit((sc) => {
-    const placed = [];
-    const r = M.pasteEvents(sc, staff, bar, idx, state.clip, placed);
+    const placed = [], [c, d] = state.clipTr || [0, 0], [c2, d2] = sc.staves[staff].transpose || [0, 0];
+    const clip = c === c2 && d === d2 ? state.clip
+      : state.clip.map((e) => ({ ...e, pitches: e.pitches.map((p) => M.shiftPitch(p, c - c2, d - d2)) }));
+    const r = M.pasteEvents(sc, staff, bar, idx, clip, placed);
     if (r) return r;
     const first = placed[0], last = placed[placed.length - 1];
     state.sel = { staff, ...first };

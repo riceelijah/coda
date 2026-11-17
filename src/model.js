@@ -304,7 +304,11 @@ const okTranspose = (t) => Array.isArray(t) && t.length === 2 && t.every(Number.
 export function setStaffTranspose(score, s, t) {
   if (t && !okTranspose(t)) return "Unknown transposition";
   const nt = t && (t[0] || t[1]) ? [...t] : null;
-  for (const i of partGroups(score).find((g) => g.includes(s))) {
+  const group = partGroups(score).find((g) => g.includes(s));
+  const dc = (score.staves[s].transpose?.[0] || 0) - (nt?.[0] || 0);
+  for (const i of group) for (const bars of allLayers(score.staves[i])) for (const bar of bars) for (const ev of bar)
+    if (ev.pitches.some((p) => midi(p) + dc < 0 || midi(p) + dc > 127)) return "Some notes would be written too high or too low";
+  for (const i of group) {
     const st = score.staves[i], ot = st.transpose || [0, 0], dc = ot[0] - (nt?.[0] || 0), dd = ot[1] - (nt?.[1] || 0);
     if (dc || dd) for (const bars of allLayers(st)) for (const bar of bars) for (const ev of bar) ev.pitches = sortPitches(ev.pitches.map((p) => shiftPitch(p, dc, dd)));
     if (nt) st.transpose = nt; else delete st.transpose;

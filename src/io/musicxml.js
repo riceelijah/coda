@@ -248,7 +248,9 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           const tx = kid(el, "transpose"); // written → sounding (DESIGN §21)
           if (tx) {
             const oc = parseInt(txt(tx, "octave-change"), 10) || 0;
-            const t = [(parseInt(txt(tx, "chromatic"), 10) || 0) + 12 * oc, (parseInt(txt(tx, "diatonic"), 10) || 0) + 7 * oc];
+            const c = parseInt(txt(tx, "chromatic"), 10) || 0, dia = parseInt(txt(tx, "diatonic"), 10);
+            // <diatonic> is optional: take the nearest step for the semitones
+            const t = [c + 12 * oc, (Number.isInteger(dia) ? dia : Math.round((c * 7) / 12)) + 7 * oc];
             if (kids(el, "transpose").length > 1) report.count("Different transpositions on staves of one part (first one used)");
             if (tr === null && t.every(Number.isInteger) && Math.abs(t[0]) <= 36 && Math.abs(t[1]) <= 21) {
               tr = t[0] || t[1] ? t : [0, 0];

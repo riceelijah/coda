@@ -206,13 +206,19 @@ export async function run({ check, eq }) {
     M.setAttrs(s, 0, { key: -1 }); // concert F major
     s.staves[0].bars[0] = [ev("h", "C4 Bb4"), ev("h", "F#4")];
     const before = s.staves[0].bars[0].map((e) => e.pitches.map((p) => M.midi(p)));
+    const heard = () => schedule(s).notes.map((n) => n.midi).join();
+    const heard0 = heard();
     if (M.setStaffTranspose(s, 0, [-2, -1])) return "B♭ refused";
+    if (heard() !== heard0) return "playback changed " + heard();
     if (M.keyAt(s, 0, 0) !== 1) return "written key " + M.keyAt(s, 0, 0); // G major for B♭ clarinet
     if (brief(s.staves[0]) !== "D4+C5:h G#4:h") return brief(s.staves[0]);
     const sounding = s.staves[0].bars[0].map((e) => e.pitches.map((p) => M.soundingMidi(s.staves[0], p)));
     if (!eq(sounding, before)) return "sound changed";
     if (M.setStaffTranspose(s, 0, [-7, -4]) || M.keyAt(s, 0, 0) !== 0 || brief(s.staves[0]) !== "G4+F5:h C#5:h") return "F horn " + brief(s.staves[0]);
     if (M.setStaffTranspose(s, 0, null) || s.staves[0].transpose || brief(s.staves[0]) !== "C4+Bb4:h F#4:h") return "clear";
+    const hi = M.newScore({ preset: "treble", bars: 1 });
+    hi.staves[0].bars[0] = [ev("w", "F9")];
+    if (!M.setStaffTranspose(hi, 0, [-21, -12]) || hi.staves[0].transpose || brief(hi.staves[0]) !== "F9:w") return "too high not refused";
     if (M.keyAt(s, 0, 0) !== -1) return "concert key";
     const p = M.newScore({ preset: "piano", bars: 1 });
     M.setStaffTranspose(p, 1, [-12, -7]);
@@ -228,6 +234,8 @@ export async function run({ check, eq }) {
       `<part id="P2"><measure number="1">${att(2, "<transpose><diatonic>-1</diatonic><chromatic>-2</chromatic><octave-change>-1</octave-change></transpose>")}<note><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure></part>` +
       `<part id="P3"><measure number="1">${att(0, "")}<note><pitch><step>D</step><octave>5</octave></pitch><duration>4</duration><type>whole</type></note></measure></part></score-partwise>`;
     const a = importMusicXML(xml, "x.musicxml").score;
+    const noDia = importMusicXML(xml.replace("<diatonic>-1</diatonic><chromatic>-2</chromatic></transpose>", "<chromatic>-2</chromatic></transpose>"), "x.musicxml").score;
+    if (!eq(noDia.staves[0].transpose, [-2, -1])) return "diatonic not inferred " + noDia.staves[0].transpose;
     if (a.measures[0].key !== 0) return "concert key " + a.measures[0].key; // B♭ clarinet in D = concert C
     if (!eq(a.staves.map((st) => st.transpose || null), [[-2, -1], [-14, -8], null])) return JSON.stringify(a.staves.map((st) => st.transpose));
     if (brief(a.staves[0]) !== "E4:h C#5:h" || M.keyAt(a, 1, 0) !== 2 || M.keyAt(a, 2, 0) !== 0) return brief(a.staves[0]);
