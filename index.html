@@ -152,6 +152,7 @@
   <span class="sep"></span>
   <button class="tb" id="b-addbar" title="Add a bar after the current bar">+ Bar</button>
   <button class="tb" id="b-delbar" title="Delete the current bar">− Bar</button>
+  <button class="tb" id="b-attrs" title="Change the key or time signature from the current bar">Key/Time</button>
   <span class="sep"></span>
   <button class="tb" id="b-help" title="Keyboard shortcuts (?)">? Help</button>
   <input type="file" id="file" hidden>
@@ -172,7 +173,7 @@
 
 <footer id="status">
   <span id="status-pos"></span>
-  <span><span id="status-msg" aria-live="polite"></span> <span class="hint" id="status-hint">Click a staff to add a note · A–G to type · ? for help</span></span>
+  <span><span id="status-msg" aria-live="polite"></span> <span class="hint" id="status-hint">Click a staff to add a note · A–G to type · Shift+A–G or Shift+click for chords · ? for help</span></span>
 </footer>
 
 <div id="report" role="status">
@@ -211,6 +212,25 @@
   </form>
 </dialog>
 
+<dialog id="attrs">
+  <form method="dialog">
+    <h2 id="attrs-head">Key and time</h2>
+    <div class="form">
+      <label for="a-key">Key</label><select id="a-key"></select>
+      <label for="a-time">Time</label>
+      <select id="a-time">
+        <option>2/4</option><option>3/4</option><option>4/4</option><option>5/4</option><option>6/8</option>
+        <option>2/2</option><option>3/8</option><option>9/8</option><option>12/8</option>
+      </select>
+    </div>
+    <div class="actions">
+      <button class="btn" type="button" id="attrs-remove">Remove change</button>
+      <button class="btn" type="button" id="attrs-cancel">Cancel</button>
+      <button class="btn primary" value="ok">Apply</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="help">
   <form method="dialog">
     <h2>Keyboard shortcuts</h2>
@@ -218,7 +238,7 @@
       <tr><td><kbd>A</kbd>–<kbd>G</kbd></td><td>Add that note at the current bar (nearest octave)</td></tr>
       <tr><td><kbd>R</kbd></td><td>Add a rest</td></tr>
       <tr><td><kbd>7</kbd> <kbd>6</kbd> <kbd>5</kbd> <kbd>4</kbd> <kbd>3</kbd> <kbd>2</kbd></td><td>Whole, half, quarter, eighth, 16th, 32nd (also changes the selected note)</td></tr>
-      <tr><td><kbd>.</kbd></td><td>Dot</td></tr>
+      <tr><td><kbd>.</kbd></td><td>Dot (press again for a double dot, again for none)</td></tr>
       <tr><td><kbd>+</kbd> <kbd>-</kbd> <kbd>N</kbd></td><td>Sharp, flat, natural</td></tr>
       <tr><td><kbd>T</kbd></td><td>Tie the selected note to the next</td></tr>
       <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Move the selected note by a step (with Ctrl/Cmd: an octave)</td></tr>
@@ -229,7 +249,9 @@
       <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>Z</kbd></td><td>Undo (add <kbd>Shift</kbd> to redo)</td></tr>
       <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>S</kbd> / <kbd>O</kbd></td><td>Save / open</td></tr>
       <tr><td>Click</td><td>Add a note; click a note to select it</td></tr>
+      <tr><td><kbd>Shift</kbd>+<kbd>A</kbd>–<kbd>G</kbd></td><td>Add that note above the selected note (build a chord)</td></tr>
       <tr><td>Shift+click</td><td>Add or remove a chord note on the clicked note</td></tr>
+      <tr><td>Chord button</td><td>Clicks add notes to the selected note instead of after it</td></tr>
     </table>
     <div class="actions"><button class="btn primary">Close</button></div>
   </form>

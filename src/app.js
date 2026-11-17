@@ -1,7 +1,7 @@
 // Coda — UI wiring. See docs/DESIGN.md §4 and §6.
 import * as M from "./model.js";
 import { render, SHEET_W } from "./render.js";
-import { play, stop, isPlaying } from "./play.js";
+import { play, stop, isPlaying, audition } from "./play.js";
 import { demoScore } from "./demo.js";
 
 const $ = (id) => document.getElementById(id);
@@ -19,7 +19,7 @@ const state = {
   score: null,
   caret: { staff: 0, bar: 0 },
   sel: null,
-  armed: { dur: "q", dots: 0, rest: false, alter: null },
+  armed: { dur: "q", dots: 0, rest: false, alter: null, chord: false },
   undo: [], redo: [],
   hit: null,
 };
@@ -148,7 +148,7 @@ function updateStatus() {
   const parts = [`Bar ${bar + 1}`, `Staff ${staff + 1}${sc.staves[staff].name ? " (" + sc.staves[staff].name + ")" : ""}`];
   const ev = selEvent();
   if (ev) parts.push("Selected: " + (ev.pitches.length ? ev.pitches.map(M.pitchName).join(" ") : "rest") + " " + DUR_NAMES[ev.dur].toLowerCase());
-  else parts.push((a.dots ? "Dotted " + DUR_NAMES[a.dur].toLowerCase() : DUR_NAMES[a.dur]) + (a.rest ? " rest" : ""));
+  else parts.push(["", "Dotted ", "Double-dotted "][a.dots] + (a.dots ? DUR_NAMES[a.dur].toLowerCase() : DUR_NAMES[a.dur]) + (a.rest ? " rest" : "") + (a.chord ? " · chord mode" : ""));
   $("status-pos").textContent = parts.join(" · ");
 }
 
@@ -180,6 +180,7 @@ const ICONS = {
   flat: '<path d="M9 2 v19 c4-2 8-5 8-8 c0-3-4-4-8-1" fill="none" stroke="currentColor" stroke-width="1.7"/>',
   natural: '<g stroke="currentColor" fill="none"><path d="M8.5 3 v14 l7-2.5" stroke-width="1.5"/><path d="M15.5 21 v-14 l-7 2.5" stroke-width="1.5"/></g>',
   tie: '<path d="M3 11 q9 9 18 0 q-9 6 -18 0z" fill="currentColor"/>',
+  chord: '<g fill="currentColor"><ellipse cx="9" cy="19" rx="4.4" ry="3.1" transform="rotate(-20 9 19)"/><ellipse cx="9" cy="12" rx="4.4" ry="3.1" transform="rotate(-20 9 12)"/></g><line x1="13" y1="18" x2="13" y2="2" stroke="currentColor" stroke-width="1.4"/>',
 };
 const svg = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>`;
 
@@ -209,6 +210,7 @@ function buildPalette() {
     ["flat", "Flat (-)", () => accidental(-1)],
     ["natural", "Natural (N)", () => accidental(0)],
     ["tie", "Tie to next note (T)", () => tie()],
+    ["chord", "Chord mode: clicks add notes to the selected note (or Shift+A–G)", () => { state.armed.chord = !state.armed.chord; updatePalette(); updateStatus(); }],
   ];
   toggles.forEach(([k, title, fn], i) => {
     if (i === 2 || i === 5) pal.appendChild(document.createElement("hr"));
@@ -228,7 +230,7 @@ function updatePalette() {
   const dur = ev ? ev.dur : a.dur, dots = ev ? ev.dots : a.dots;
   document.querySelectorAll(".pal[data-dur]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.dur === dur)));
   // accidental buttons show what is armed for the next note, not the selection
-  const pressed = { rest: a.rest, dot: dots > 0, sharp: a.alter === 1, flat: a.alter === -1, natural: a.alter === 0, tie: !!(ev && ev.tie) };
+  const pressed = { rest: a.rest, dot: dots > 0, sharp: a.alter === 1, flat: a.alter === -1, natural: a.alter === 0, tie: !!(ev && ev.tie), chord: a.chord };
   document.querySelectorAll(".pal[data-tog]").forEach((b) => b.setAttribute("aria-pressed", String(pressed[b.dataset.tog])));
 }
 
@@ -245,11 +247,13 @@ function toggleDot() {
   const s = state.sel;
   if (s) {
     const ev = selEvent();
-    const dots = ev.dots ? 0 : 1;
+    let dots = (ev.dots + 1) % 3;
+    // if a second dot doesn't fit, go back to none rather than getting stuck at one
+    if (dots === 2 && M.setDuration(JSON.parse(JSON.stringify(state.score)), s.staff, s.bar, s.idx, ev.dur, 2)) dots = 0;
     state.armed.dots = dots;
     edit((sc) => M.setDuration(sc, s.staff, s.bar, s.idx, ev.dur, dots));
   } else {
-    state.armed.dots = state.armed.dots ? 0 : 1;
+    state.armed.dots = (state.armed.dots + 1) % 3;
     updatePalette(); updateStatus();
   }
 }
@@ -257,7 +261,7 @@ function toggleDot() {
 function accidental(v) {
   const s = state.sel;
   if (s && selEvent().pitches.length) {
-    edit((sc) => M.setAlter(sc, s.staff, s.bar, s.idx, v));
+    if (edit((sc) => M.setAlter(sc, s.staff, s.bar, s.idx, v))) hear(selEvent());
   } else {
     state.armed.alter = state.armed.alter === v ? null : v;
     updatePalette(); updateStatus();
@@ -298,7 +302,29 @@ function enterAtCaret(pitch) {
     state.caret.bar = b;
     state.sel = { staff: s, bar: b, idx: sc.staves[s].bars[b].length - 1 };
     return null;
-  });
+  }) && hear(selEvent());
+}
+
+// Sound the pitches of an event (DESIGN §11.2).
+function hear(ev) {
+  if (ev && ev.pitches.length) audition(ev.pitches.map(M.midi));
+}
+
+// Shift+A–G: add that letter above the selected note's top pitch (DESIGN §11.1).
+function chordLetter(letter) {
+  const s = state.sel;
+  if (!s) { message("Select a note first, then Shift+letter adds to it", true); return; }
+  const step = "CDEFGAB".indexOf(letter);
+  const ev = selEvent();
+  let base = ev.pitches[ev.pitches.length - 1];
+  if (!base) { // a rest: start from the nearest such letter to the previous note
+    const prev = lastPitchBefore() || { step: 0, oct: 4 };
+    base = M.fromDiatonic(M.diatonic(prev) - 4);
+  }
+  const p = M.chordAbove(base, step);
+  const { key } = M.attrsAt(state.score, s.bar);
+  const pitch = { ...p, alter: state.armed.alter ?? M.keyAlter(key, p.step) };
+  if (edit((sc) => M.toggleChordPitch(sc, s.staff, s.bar, s.idx, pitch))) { hear(selEvent()); message(M.pitchName(pitch) + " added"); }
 }
 
 function lastPitchBefore() {
@@ -386,16 +412,19 @@ function onClick(e) {
   const L = locate(e);
   if (!L) return;
   state.caret = { staff: L.staff, bar: L.bar };
-  if (L.near) {
-    const idx = L.near.idx;
-    if (e.shiftKey) {
+  const chord = e.shiftKey || state.armed.chord;
+  const s = state.sel;
+  // chord target: the clicked note, else (chord mode) the selection in this staff and bar
+  const target = L.near ? L.near.idx : chord && s && s.staff === L.staff && s.bar === L.bar ? s.idx : null;
+  if (target !== null && (chord || L.near)) {
+    state.sel = { staff: L.staff, bar: L.bar, idx: target };
+    if (chord) {
       const { key } = M.attrsAt(state.score, L.bar);
       const pitch = { ...L.pitch, alter: state.armed.alter ?? M.keyAlter(key, L.pitch.step) };
-      state.sel = { staff: L.staff, bar: L.bar, idx };
-      edit((sc) => M.toggleChordPitch(sc, L.staff, L.bar, idx, pitch));
+      if (edit((sc) => M.toggleChordPitch(sc, L.staff, L.bar, target, pitch))) hear(selEvent());
     } else {
-      state.sel = { staff: L.staff, bar: L.bar, idx };
       refresh();
+      hear(selEvent());
     }
     return;
   }
@@ -406,13 +435,14 @@ function onClick(e) {
     state.sel = { staff: L.staff, bar: L.bar, idx: sc.staves[L.staff].bars[L.bar].length - 1 };
     return null;
   });
-  if (ok && pitch) message(M.pitchName(pitch));
+  if (ok && pitch) { message(M.pitchName(pitch)); hear(selEvent()); }
 }
 
 function onMove(e) {
   const g = $("ghost");
   const L = locate(e);
-  if (!L || L.near || state.armed.rest) { g.style.display = "none"; return; }
+  const chordish = state.armed.chord || e.shiftKey;
+  if (!L || (L.near && !chordish) || (state.armed.rest && !chordish)) { g.style.display = "none"; return; }
   const sheet = $("sheet").getBoundingClientRect(), r = L.svgEl.getBoundingClientRect();
   const k = r.width / SHEET_W;
   const pos = Math.round((L.cell.yBottom - L.y) / (L.cell.spacing / 2));
@@ -443,7 +473,8 @@ function onKey(e) {
   if (mod || e.altKey) return;
   const durKey = { 7: "w", 6: "h", 5: "q", 4: "8", 3: "16", 2: "32" }[k];
   let handled = true;
-  if (/^[a-gA-G]$/.test(k)) typeLetter(k.toUpperCase());
+  if (e.shiftKey && /^[A-G]$/.test(k)) chordLetter(k);
+  else if (/^[a-gA-G]$/.test(k)) typeLetter(k.toUpperCase());
   else if (k === "r" || k === "R") enterAtCaret(null);
   else if (durKey) setDuration(durKey);
   else if (k === ".") toggleDot();
@@ -468,7 +499,7 @@ function transposeSel(steps) {
   if (!s) { message("Select a note first", true); return; }
   if (!edit((sc) => M.transpose(sc, s.staff, s.bar, s.idx, steps))) return;
   const ev = selEvent();
-  if (ev && ev.pitches.length) message(ev.pitches.map(M.pitchName).join(" "));
+  if (ev && ev.pitches.length) { message(ev.pitches.map(M.pitchName).join(" ")); hear(ev); }
 }
 
 // ---------- playback ----------
@@ -493,8 +524,8 @@ function stopPlay() {
 
 // ---------- setup dialog ----------
 
-function buildKeySelect() {
-  const sel = $("f-key");
+function buildKeySelect(id) {
+  const sel = $(id);
   for (let k = -7; k <= 7; k++) {
     const o = document.createElement("option");
     o.value = k; o.textContent = KEY_LABELS[k];
@@ -532,6 +563,31 @@ function closeSetup() {
     }));
   } else {
     edit((sc) => { sc.title = title; sc.composer = composer; sc.tempo = tempo; return null; });
+  }
+}
+
+// ---------- key / time change at a bar (DESIGN §11.3) ----------
+
+function openAttrs() {
+  const b = state.caret.bar, sc = state.score;
+  const { key, time } = M.attrsAt(sc, b);
+  const m = sc.measures[b];
+  $("attrs-head").textContent = `Key and time from bar ${b + 1}`;
+  $("a-key").value = key;
+  const ts = $("a-time"), t = `${time[0]}/${time[1]}`;
+  if (![...ts.options].some((o) => o.value === t)) ts.add(new Option(t, t));
+  ts.value = t;
+  $("attrs-remove").hidden = b === 0 || (m.key === undefined && !m.time);
+  $("attrs").returnValue = "";
+  $("attrs").showModal();
+}
+
+function closeAttrs() {
+  const how = $("attrs").returnValue, b = state.caret.bar;
+  if (how === "remove") edit((sc) => M.clearAttrs(sc, b));
+  else if (how === "ok") {
+    const time = $("a-time").value.split("/").map(Number);
+    edit((sc) => M.setAttrs(sc, b, { key: +$("a-key").value, time }));
   }
 }
 
@@ -602,7 +658,12 @@ function showReport(name, report) {
 function init() {
   state.score = loadInitial();
   buildPalette();
-  buildKeySelect();
+  buildKeySelect("f-key");
+  buildKeySelect("a-key");
+  $("b-attrs").onclick = openAttrs;
+  $("attrs").addEventListener("close", closeAttrs);
+  $("attrs-cancel").onclick = () => $("attrs").close("cancel");
+  $("attrs-remove").onclick = () => $("attrs").close("remove");
   $("b-new").onclick = () => openSetup(true);
   $("title").onclick = $("composer").onclick = () => openSetup(false);
   $("setup").addEventListener("close", closeSetup);

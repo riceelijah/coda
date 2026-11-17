@@ -39,6 +39,32 @@ export function schedule(score, from = 0) {
 
 export function isPlaying() { return !!current; }
 
+// One triangle-wave note into `dest`.
+function voice(dest, m, start, len) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = "triangle";
+  osc.frequency.value = 440 * Math.pow(2, (m - 69) / 12);
+  g.gain.setValueAtTime(0, start);
+  g.gain.linearRampToValueAtTime(0.15, start + 0.01);
+  g.gain.setValueAtTime(0.15, start + len - 0.05);
+  g.gain.linearRampToValueAtTime(0, start + len);
+  osc.connect(g).connect(dest);
+  osc.start(start);
+  osc.stop(start + len + 0.02);
+}
+
+// Sound a chord briefly while editing (DESIGN §11.2). Silent during playback.
+export function audition(midis) {
+  if (current || !midis.length) return;
+  try {
+    ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === "suspended") ctx.resume();
+    const t = ctx.currentTime + 0.02;
+    for (const m of midis) voice(ctx.destination, m, t, 0.35);
+  } catch { /* audio unavailable: editing still works */ }
+}
+
 // Start playback. `onBar(barIndex|null)` is called as each bar starts, and with null at the end.
 export async function play(score, from, onBar) {
   stop();
@@ -55,17 +81,7 @@ export async function play(score, from, onBar) {
   for (const n of notes) {
     const start = t0 + n.start * secPerTick;
     const len = Math.max(0.06, (n.end - n.start) * secPerTick);
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = "triangle";
-    osc.frequency.value = 440 * Math.pow(2, (n.midi - 69) / 12);
-    g.gain.setValueAtTime(0, start);
-    g.gain.linearRampToValueAtTime(0.15, start + 0.01);
-    g.gain.setValueAtTime(0.15, start + len - 0.05);
-    g.gain.linearRampToValueAtTime(0, start + len);
-    osc.connect(g).connect(master);
-    osc.start(start);
-    osc.stop(start + len + 0.02);
+    voice(master, n.midi, start, len);
   }
   const me = { master, raf: 0, lastBar: -1 };
   current = me;

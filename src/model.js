@@ -168,6 +168,13 @@ export function toggleChordPitch(score, s, b, i, pitch) {
   return null;
 }
 
+// The first `step` (0–6) above pitch `top`, as {step, oct} (DESIGN §11.1).
+export function chordAbove(top, step) {
+  let d = top.oct * 7 + step;
+  while (d <= diatonic(top)) d += 7;
+  return fromDiatonic(d);
+}
+
 export function deleteEvent(score, s, b, i) {
   const prev = prevEventPos(score, s, b, i);
   if (prev) score.staves[s].bars[prev.bar][prev.idx].tie = false;
@@ -237,15 +244,30 @@ export function deleteMeasure(score, idx) {
   return null;
 }
 
+// Set key and/or time from bar b on. A value equal to the previous bar's is stored as "no change".
 export function setAttrs(score, b, { key, time }) {
-  const m = score.measures[b];
-  if (key !== undefined) m.key = key;
+  const m = score.measures[b], prev = b > 0 ? attrsAt(score, b - 1) : null;
+  if (key !== undefined) { if (prev && prev.key === key) delete m.key; else m.key = key; }
   if (time) {
-    m.time = time;
+    if (prev && prev.time[0] === time[0] && prev.time[1] === time[1]) delete m.time; else m.time = time;
     for (let j = b; j < score.measures.length; j++) {
       if (j > b && score.measures[j].time) break;
-      for (const st of score.staves) if (!fits(score, j, st.bars[j])) return "Existing bars would overflow";
+      for (const st of score.staves) if (!fits(score, j, st.bars[j])) return `Bar ${j + 1} would overflow`;
     }
+  }
+  return null;
+}
+
+// Remove a mid-score key/time change at bar b (b > 0).
+export function clearAttrs(score, b) {
+  if (b === 0) return "Bar 1 always has a key and time";
+  const m = score.measures[b];
+  if (m.key === undefined && !m.time) return "This bar has no key or time change";
+  const hadTime = !!m.time;
+  delete m.key; delete m.time;
+  if (hadTime) for (let j = b; j < score.measures.length; j++) {
+    if (j > b && score.measures[j].time) break;
+    for (const st of score.staves) if (!fits(score, j, st.bars[j])) return `Bar ${j + 1} would overflow`;
   }
   return null;
 }

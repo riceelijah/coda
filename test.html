@@ -126,6 +126,31 @@ check("edit commands", () => {
   return M.isValidScore(s) || "invalid after edits";
 });
 
+check("chords: chordAbove, rest becomes a chord and back (DESIGN §11.1)", () => {
+  const n = (p) => "CDEFGAB"[p.step] + p.oct;
+  const got = [M.chordAbove({ step: 0, oct: 4 }, 4), M.chordAbove({ step: 4, oct: 4 }, 0), M.chordAbove({ step: 2, oct: 4 }, 2)].map(n).join(" ");
+  if (got !== "G4 C5 E5") return got;
+  const s = M.newScore({ bars: 1 });
+  M.appendEvent(s, 0, 0, { dur: "q", dots: 0, pitches: [], tie: false });
+  M.toggleChordPitch(s, 0, 0, 0, { step: 0, oct: 4, alter: 0 });
+  if (s.staves[0].bars[0][0].pitches.length !== 1) return "rest did not become a note";
+  M.toggleChordPitch(s, 0, 0, 0, { step: 0, oct: 4, alter: 0 });
+  return s.staves[0].bars[0][0].pitches.length === 0 || "last pitch removal did not give a rest";
+});
+
+check("key/time changes: setAttrs, clearAttrs, overflow refused (DESIGN §11.3)", () => {
+  const s = M.newScore({ time: [4, 4], key: 0, bars: 4 });
+  M.setAttrs(s, 2, { key: 0, time: [4, 4] }); // same as before: no change stored
+  if (s.measures[2].key !== undefined || s.measures[2].time) return "redundant change stored";
+  if (M.setAttrs(s, 2, { key: -2, time: [3, 4] })) return "change refused";
+  if (M.attrsAt(s, 3).key !== -2 || M.attrsAt(s, 3).time[0] !== 3) return "change not applied";
+  if (M.clearAttrs(s, 2) || M.attrsAt(s, 3).key !== 0) return "clear failed";
+  if (!/no key or time/.test(M.clearAttrs(s, 2))) return "clear of plain bar allowed";
+  M.appendEvent(s, 0, 3, { dur: "w", dots: 0, pitches: [], tie: false });
+  const r = M.setAttrs(s, 2, { time: [3, 4] });
+  return r === "Bar 4 would overflow" || `overflow: ${r}`;
+});
+
 // Later phases append checks here via test modules.
 const extra = ["./src/io/tests.js"];
 for (const path of extra) {

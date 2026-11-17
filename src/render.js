@@ -167,6 +167,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar) {
     const row = score.staves.map((st, s) => {
       const stave = new VFl.Stave(x, SYS_TOP + s * STAFF_GAP, sys.widths[k]);
       if (firstInSys) stave.addClef(st.clef).addKeySignature(keyName(key));
+      if (firstInSys && si > 0 && s === 0) stave.setMeasure(b + 1); // bar number (DESIGN §11.4)
       else if (b > 0 && m.key !== undefined) stave.addKeySignature(keyName(key), keyName(attrsAt(score, b - 1).key));
       if (b === 0 || (m.time && b > 0)) stave.addTimeSignature(`${time[0]}/${time[1]}`);
       if (b === lastBar) stave.setEndBarType(VFl.Barline.type.END);

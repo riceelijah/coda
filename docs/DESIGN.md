@@ -460,9 +460,9 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
 
 ## 8. Things deliberately not in the first version
 
-Lyrics, articulations, dynamics, slurs, grace notes, tuplet *entry*, more than one voice per
-staff, repeats and endings, mid-score clef changes, transposing instruments, inserting notes in
-the middle of a bar, copy/paste, page-layout controls, sampled instrument sounds, MIDI export.
+Lyrics, articulations, dynamics, slurs, grace notes, more than one voice per staff, repeats
+and endings, mid-score clef changes, transposing instruments, page-layout controls, sampled
+instrument sounds, MIDI export. (Tuplet entry, inserting mid-bar and copy/paste: §11.)
 
 All are additive on this model. Importers must **count and report** anything in these
 categories that they skip (§9.6).
@@ -747,6 +747,67 @@ been tested yet. Findings from the real file that differ from the first draft:
   anything encountered and ignored that falls under §8.
 
 ---
+
+## 11. Entry improvements (Phases 8–9)
+
+Designed after the first release, from `docs/ROADMAP.md` §1–2. Every new score change goes
+through `edit()`; every new model function is pure and gets a `test.html` check.
+
+### 11.1 Chords (Phase 8)
+
+- **Shift+A–G** adds that letter to the selected event, at the first octave *above* its top
+  pitch (`chordAbove(top, step)` in `model.js`). On a rest it adds above the letter's nearest
+  pitch to the previous note, turning the rest into a note. Branch on `e.shiftKey` before the
+  plain-letter path, so Caps Lock does not trigger chord mode.
+- **Chord toggle** in the palette (`armed.chord`): a plain click then behaves like Shift+click.
+  Target: the clicked note if the click is on one, else the selection if it is in the clicked
+  staff and bar. The ghost notehead shows in chord mode.
+- `toggleChordPitch` on a rest turns it into a note; removing the last pitch turns it back into
+  a rest (existing behaviour, now tested).
+- No Alt+digit interval shortcuts: Alt changes `e.key` on macOS.
+
+### 11.2 Audition (Phase 8)
+
+`play.js` exports `audition(pitches)`: a short note (≈0.35 s) on the shared AudioContext with
+the playback voice. `app.js` calls it from one helper after a successful note entry, chord change,
+pitch or accidental change, and when a note is selected by clicking. Never during playback,
+undo/redo or file open, and never for rests.
+
+### 11.3 Key / time change at a bar (Phase 8)
+
+Toolbar button **Key/Time** opens a small `<dialog>` for the caret bar, reusing the key list.
+It applies from that bar on (`setAttrs`); "Remove change" (`clearAttrs`) appears when the bar
+has its own attributes and is not bar 1. A time change that would overfill a bar is refused
+with a reason naming the bar; nothing is truncated. Pitches keep their absolute alters.
+
+### 11.4 Double dots, measure numbers (Phase 8)
+
+- `.` cycles 0 → 1 → 2 → 0. On a selection, if 2 does not fit the bar, it goes to 0.
+- The first bar of every system after the first shows its bar number above the top staff.
+
+### 11.5 Insert at a position (Phase 9)
+
+`insertEvent(score, s, b, idx, ev)`; `appendEvent` is the `idx = bar.length` case.
+
+- Keyboard: the new event goes after the selected event when that is in the caret bar,
+  otherwise at the bar end. Auto-advance to the next bar only when inserting at the end;
+  mid-bar overflow is "Bar is full".
+- Mouse on empty space: the index is the number of notes in the bar left of the click's x.
+
+### 11.6 Triplet entry (Phase 9)
+
+Palette toggle and key `;` set `armed.tup = [3, 2]` (sticky, shown in the status bar).
+`makeEvent` applies it only when `tupletOk`. Display and export already handle `tup`.
+
+### 11.7 Range selection and clipboard (Phase 9)
+
+- `state.selEnd` (same staff as `state.sel`) extends with Shift+←/→. Mouse ranges are not
+  supported, because Shift+click adds chord notes.
+- Delete, ↑/↓ transpose, Ctrl/Cmd+C, X and V act on the whole range, each as one `edit()`
+  (one undo step, rolled back whole on failure).
+- The clipboard is an in-page copy of the events. Paste inserts them after the selection (or
+  at the caret bar's end) using `insertEvent`, carrying into following bars as needed, and
+  clears the tie on the last pasted event. `preventDefault` only when there is something to act on.
 
 ## 10. Testing
 

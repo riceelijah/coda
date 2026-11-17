@@ -8,11 +8,11 @@ Sources are at the end.
 
 | Feature | Today | Fix | Size |
 |---|---|---|---|
-| **Chords** | Only by Shift+clicking a staff. There's no button, no keyboard way, and nothing on screen mentions it. | Add a "chord" toggle in the palette, so the next click stacks onto the selected note. Shift+A–G adds that letter above the selected note (MuseScore uses the same keys). Alt+2–8 adds an interval above it. Put Shift+click in the status-bar hint. | S |
-| **Hear notes as they're entered** | Silent until you press Play. | Play each note as it's added or moved. | S |
-| **Key / time changes mid-score** | The model supports them (`setAttrs`), but only the New dialog sets key and time. | Key and time buttons that apply to the selected bar onwards. | S |
-| **Double dots** | Imported files keep them, but `.` only toggles a single dot. | Press `.` twice for a double dot. | S |
-| **Measure numbers** | Not drawn. | Number the first bar of each system. | S |
+| **Chords** | **Done (Phase 8).** Shift+A–G adds above the selected note; a palette chord button makes clicks stack; the hint mentions both. (Alt+digit intervals dropped: Alt changes keys on macOS.) | — | — |
+| **Hear notes as they're entered** | **Done (Phase 8).** | — | — |
+| **Key / time changes mid-score** | **Done (Phase 8):** Key/Time button. | — | — |
+| **Double dots** | **Done (Phase 8).** | — | — |
+| **Measure numbers** | **Done (Phase 8).** | — | — |
 
 ## 2. NotePad parity: things NotePad users will look for
 

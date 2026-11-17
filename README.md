@@ -11,8 +11,9 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 ## Using Coda
 
 - **New** sets up a score: title, composer, staves (single staff, piano, SATB…), key, time, tempo, number of bars.
-- **Click** on a staff to add a note of the selected length. Click a note to select it; **Shift+click** adds or removes a chord note.
+- **Click** on a staff to add a note of the selected length. Click a note to select it. To build a chord, select a note and press **Shift+A–G**, **Shift+click** the staff, or turn on the chord button so clicks add to the selected note.
 - **Type** letters to add notes quickly. Coda picks the octave closest to the previous note and moves to the next bar when one fills up.
+- **Key/Time** changes the key or time signature from the current bar on.
 - **Play** plays from the current bar. **Print** prints the score, or saves it as a PDF from your browser's print dialog.
 - Your work is saved automatically in this browser. Use **Save** to keep a file (MusicXML) you can open anywhere.
 
@@ -21,9 +22,10 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 | Key | Action |
 |---|---|
 | `A`–`G` | Add that note |
+| `Shift+A`–`G` | Add that note above the selected note (chord) |
 | `R` | Add a rest |
 | `7` `6` `5` `4` `3` `2` | Whole, half, quarter, eighth, 16th, 32nd (also changes the selected note) |
-| `.` | Dot |
+| `.` | Dot (again for a double dot, again for none) |
 | `+` `-` `N` | Sharp, flat, natural |
 | `T` | Tie the selected note to the next |
 | `↑` `↓` | Move the selected note by a step (with Ctrl/Cmd: an octave) |

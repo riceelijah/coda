@@ -32,6 +32,8 @@ only says what to build in what order and how to know each phase is finished.
 | 5 | MuseScore `.mscz` import | done (4.x verified; 3.x untested) |
 | 6 | `.musx` import | done (checked on musxdom's test files; no real-world piece yet) |
 | 7 | Publish to GitHub Pages | done: https://riceelijah.github.io/coda/ |
+| 8 | Fix-first: chords, audition, key/time changes, double dots, bar numbers | done |
+| 9 | Entry: insert mid-bar, triplets, range select + copy/paste | in progress |
 
 ---
 
@@ -216,6 +218,28 @@ is the target and approved a public repo named `coda`, but confirm at the time.
 **Done when:** the live URL loads, a sample opens, and the README link points to it.
 
 ---
+
+## Phase 8 — Fix-first (DESIGN §11.1–11.4)
+
+- [x] Chords: Shift+A–G, palette chord toggle, ghost in chord mode; `chordAbove` + rest-to-chord tests.
+- [x] Audition on entry/selection (`play.js` `audition`).
+- [x] Key/Time dialog for the caret bar; `clearAttrs`; overflow refused with the bar named.
+- [x] `.` cycles to double dots.
+- [x] Bar numbers at the start of each system after the first.
+- [x] Help dialog, README shortcuts, status hint, ROADMAP rows updated.
+
+**Done when:** a chord can be built from the keyboard and from the palette without Shift+click;
+entering a note sounds it; a key and a time change can be added at bar 5 and removed; tests pass.
+
+## Phase 9 — Entry workflow (DESIGN §11.5–11.7)
+
+- [ ] `insertEvent`; keyboard inserts after the selection; click inserts by x.
+- [ ] Triplet toggle (`;`).
+- [ ] Shift+←/→ range; Delete, transpose, copy, cut, paste on the range as single undo steps.
+- [ ] Help, README, ROADMAP updated.
+
+**Done when:** a note can be added between two existing notes by click and by keyboard; three
+triplet eighths fill a quarter; a two-bar passage can be copied and pasted elsewhere and undone in one step.
 
 ## After the first version (not scheduled)
 
