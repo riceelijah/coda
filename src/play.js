@@ -1,6 +1,6 @@
 // Coda playback: sampled General MIDI sounds fetched on demand, with a triangle-wave fallback.
 // See docs/DESIGN.md §7 and §13.3.
-import { attrsAt, barCapacity, eventTicks, midi, PPQ, allLayers } from "./model.js";
+import { attrsAt, barCapacity, eventTicks, midi, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL } from "./model.js";
 import { GM } from "./gm.js";
 import { getSound } from "./usersounds.js";
 
@@ -17,6 +17,7 @@ export function schedule(score, from = 0) {
   }
   const total = t;
   const notes = [];
+  const velAt = dynamics(score, from);
   score.staves.forEach((st, si) => allLayers(st).forEach((bars) => {
     const open = new Map(); // midi -> note awaiting a tie continuation, per layer
     barStart.forEach(({ bar, tick }) => {
@@ -28,7 +29,7 @@ export function schedule(score, from = 0) {
           const m = midi(p) + (st.transpose?.[0] || 0); // sounding pitch (DESIGN §21)
           let n = open.get(m);
           if (n && n.end === at) n.end = at + len;
-          else { n = { start: at, end: at + len, midi: m, program: st.program ?? 0, staff: si, ...(st.sound ? { sound: st.sound } : {}) }; notes.push(n); }
+          else { n = { start: at, end: at + len, midi: m, vel: velAt(si, at), program: st.program ?? 0, staff: si, ...(st.sound ? { sound: st.sound } : {}) }; notes.push(n); }
           if (ev.tie) nextOpen.set(m, n);
           else if (ev.marks?.includes("staccato")) n.end = at + len / 2; // sounds half its length
         }
@@ -39,6 +40,35 @@ export function schedule(score, from = 0) {
     });
   }));
   return { notes, barStart, total };
+}
+
+// Velocity at a tick (relative to bar `from`) for staff si (DESIGN §22). A part's dynamics, from
+// any of its staves and layers, apply to the whole part; mf before the first one.
+function dynamics(score, from) {
+  const starts = [];
+  let t = 0;
+  score.measures.forEach((m, b) => { starts.push(t); t += barCapacity(attrsAt(score, b).time); });
+  const off = starts[from] || 0, byStaff = [];
+  for (const g of partGroups(score)) {
+    const levels = [], accents = new Map();
+    for (const s of g) allLayers(score.staves[s]).forEach((bars) => bars.forEach((bar, b) => {
+      let at = starts[b] - off;
+      for (const ev of bar) {
+        if (DYN_VEL[ev.dyn]) levels.push([at, DYN_VEL[ev.dyn]]);
+        else if (ev.dyn) { accents.set(at, ACCENT_VEL[ev.dyn]); if (ev.dyn === "fp") levels.push([at + 1, DYN_VEL.p]); }
+        at += eventTicks(ev);
+      }
+    }));
+    levels.sort((a, b) => a[0] - b[0]);
+    const at = (tick) => {
+      if (accents.has(tick)) return accents.get(tick);
+      let v = DYN_VEL.mf;
+      for (const [lt, lv] of levels) { if (lt > tick) break; v = lv; }
+      return v;
+    };
+    for (const s of g) byStaff[s] = at;
+  }
+  return (s, tick) => byStaff[s](tick);
 }
 
 export function isPlaying() { return !!current; }
@@ -137,15 +167,15 @@ export function output(c) {
 }
 
 // One sampled note into `dest` on context `c`.
-export function sampledVoice(c, dest, buf, m, root, start, len, hold) {
+export function sampledVoice(c, dest, buf, m, root, start, len, hold, level = 1) {
   const src = c.createBufferSource();
   src.buffer = buf;
   src.playbackRate.value = Math.pow(2, (m - root) / 12);
   // ponytail: fixed 0.8–2.4 s loop with no crossfade; may click on some sounds. Per-instrument loop points if it bothers anyone.
   if (hold && buf.duration > 2.4) { src.loop = true; src.loopStart = 0.8; src.loopEnd = 2.4; }
   const g = c.createGain(), rel = hold ? 0.12 : 0.3;
-  g.gain.setValueAtTime(0.4, start);
-  g.gain.setValueAtTime(0.4, start + len);
+  g.gain.setValueAtTime(0.4 * level, start);
+  g.gain.setValueAtTime(0.4 * level, start + len);
   g.gain.linearRampToValueAtTime(0, start + len + rel);
   src.connect(g).connect(dest);
   src.start(start);
@@ -175,23 +205,24 @@ function userFor(sound, m) {
 }
 
 // A note with whatever is available now: your sound, the sample if loaded, else the triangle voice.
-function note(c, dest, m, program, start, len, sound) {
-  const u = userFor(sound, m);
-  if (u) { sampledVoice(c, dest, u.buf, m, u.root, start, len, false); return; }
+// vel: MIDI velocity, 80 (mf) plays at the usual level.
+function note(c, dest, m, program, start, len, sound, vel = 80) {
+  const u = userFor(sound, m), level = vel / 80;
+  if (u) { sampledVoice(c, dest, u.buf, m, u.root, start, len, false, level); return; }
   const buf = buffers.get(keyOf(program, m));
-  if (buf) sampledVoice(c, dest, buf, m, rootFor(m), start, len, sustained(program));
-  else voice(c, dest, m, start, len);
+  if (buf) sampledVoice(c, dest, buf, m, rootFor(m), start, len, sustained(program), level);
+  else voice(c, dest, m, start, len, level);
 }
 
 // One triangle-wave note into `dest`.
-function voice(c, dest, m, start, len) {
+function voice(c, dest, m, start, len, level = 1) {
   const osc = c.createOscillator();
   const g = c.createGain();
   osc.type = "triangle";
   osc.frequency.value = 440 * Math.pow(2, (m - 69) / 12);
   g.gain.setValueAtTime(0, start);
-  g.gain.linearRampToValueAtTime(0.15, start + 0.01);
-  g.gain.setValueAtTime(0.15, start + len - 0.05);
+  g.gain.linearRampToValueAtTime(0.15 * level, start + 0.01);
+  g.gain.setValueAtTime(0.15 * level, start + len - 0.05);
   g.gain.linearRampToValueAtTime(0, start + len);
   osc.connect(g).connect(dest);
   osc.start(start);
@@ -240,7 +271,7 @@ async function prepare(notes, waitMs, onStatus = () => {}) {
 function scheduleNotes(c, dest, notes, t0, secPerTick) {
   for (const n of notes) {
     const len = Math.max(0.06, (n.end - n.start) * secPerTick);
-    note(c, dest, n.midi, n.program, t0 + n.start * secPerTick, len, n.sound);
+    note(c, dest, n.midi, n.program, t0 + n.start * secPerTick, len, n.sound, n.vel);
   }
 }
 

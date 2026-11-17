@@ -1,7 +1,7 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf } from "../model.js";
-import { completeTuplet } from "./musicxml.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL } from "../model.js";
+import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
 
@@ -100,6 +100,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     const [tc, td] = d.transpose || [0, 0];
     let key = 0, time = [4, 4], sym;
     const tuplets = {}; // MuseScore 3: id -> ratio
+    const pendDyn = []; // per voice: dynamic waiting for its chord or rest (DESIGN §22)
     kids(stEl, "Measure").forEach((meas, mi) => {
       const voices = kids(meas, "voice");
       for (const L of staff.layers || []) L.push([]);
@@ -148,6 +149,11 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             break;
           }
           case "endTuplet": tup = null; break;
+          case "Dynamic": {
+            const d = DYN_IN[txt(el, "subtype")];
+            if (d) pendDyn[vi] = d; else report.count("Unusual dynamics (not imported)");
+            break;
+          }
           case "Fermata": fermata = true; break; // MuseScore 3+: before the chord or rest it belongs to
           case "Chord":
           case "Rest": {
@@ -196,6 +202,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
             }
             for (const m of marks) if (!isRest || m === "fermata") setMark(ev, m, true);
+            if (pendDyn[vi]) { ev.dyn = pendDyn[vi]; pendDyn[vi] = null; }
             // a chord or rest that starts past where this voice has got to: rests in front
             const gap = Math.floor((cur - barTicks(bar)) / 60) * 60;
             if (gap > 0) {
@@ -218,6 +225,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       });
       if (si === 0) firstAttrs.push({ key, time: [...time], sym });
     });
+    if (pendDyn.some(Boolean)) report.count("Dynamics after the last note (not imported)");
     if (!staff.clef) staff.clef = "treble";
     score.staves.push(staff);
   });
@@ -318,6 +326,7 @@ function voiceXml(bar, ties, b, cap, st) {
         `<Number><style>tuplet</style><text>${e.tup[0]}</text></Number></Tuplet>`);
     }
     if (e.marks?.includes("fermata")) x.push("<Fermata><subtype>fermataAbove</subtype></Fermata>");
+    if (e.dyn) x.push(`<Dynamic><subtype>${e.dyn}</subtype><velocity>${DYN_VEL[e.dyn] || ACCENT_VEL[e.dyn]}</velocity></Dynamic>`);
     const head = `${e.dots ? `<dots>${e.dots}</dots>` : ""}<durationType>${TYPE_NAME[e.dur]}</durationType>`;
     if (!e.pitches.length) x.push(`<Rest>${head}</Rest>`);
     else {

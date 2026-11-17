@@ -94,6 +94,10 @@ function makeNote(ev, clef, stem = 0) {
       note.addModifier(new VFl.Articulation(MARK_VF[m]).setPosition(above ? P.ABOVE : P.BELOW), 0);
     }
   }
+  if (ev.dyn) { // dynamics: bold italic text under the note (DESIGN §22)
+    const a = new VFl.Annotation(ev.dyn).setFont("Georgia", 14, "bold", "italic");
+    note.addModifier(a.setVerticalJustification(VFl.Annotation.VerticalJustify.BOTTOM), 0);
+  }
   return note;
 }
 
@@ -134,6 +138,7 @@ export function render(score, container, sel, opts = {}) {
 
     try {
       drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, opts);
+      grow(svg, sys);
     } catch (e) {
       console.error(e);
       errors.push(`Could not draw bars ${sys.bars[0] + 1}–${sys.bars[sys.bars.length - 1] + 1}`);
@@ -179,6 +184,15 @@ export function render(score, container, sel, opts = {}) {
   }));
 
   return { cells, systems, errors };
+}
+
+// Taller drawing when something hangs below it (low notes, dynamics, lyrics), so print, which
+// clips to the drawing, keeps it. The top stays at 0, so click positions don't move.
+function grow(svg, sys) {
+  let bb;
+  try { bb = svg.getBBox(); } catch { return; } // not laid out (hidden)
+  const h = Math.ceil(bb.y + bb.height + 8);
+  if (h > sys.height) { sys.height = h; svg.setAttribute("viewBox", `0 0 ${SHEET_W} ${h}`); }
 }
 
 // Is (b, i) selected? sel may carry `end` for a range (DESIGN §11.7).

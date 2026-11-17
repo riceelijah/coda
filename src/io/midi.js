@@ -227,7 +227,7 @@ export function exportMIDI(score) {
     const evs = [{ tick: 0, bytes: meta(0x03, text(st.name || `Staff ${s + 1}`)) }, { tick: 0, bytes: [0xc0 | ch, st.program ?? 0] }];
     const ons = [];
     for (const n of notes) if (n.staff === s) {
-      ons.push({ tick: n.start, on: 1, bytes: [0x90 | ch, n.midi, 80] }, { tick: n.end, on: 0, bytes: [0x80 | ch, n.midi, 0] });
+      ons.push({ tick: n.start, on: 1, bytes: [0x90 | ch, n.midi, n.vel ?? 80] }, { tick: n.end, on: 0, bytes: [0x80 | ch, n.midi, 0] });
     }
     ons.sort((a, b) => a.tick - b.tick || a.on - b.on); // note-offs first at equal ticks
     tracks.push(track(evs.concat(ons)));

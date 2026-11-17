@@ -61,6 +61,9 @@
   .mlist button:hover:not(:disabled), .mlist button:focus-visible { background: var(--accent); color: #fff; outline: none; }
   .mlist button:disabled { opacity: .4; cursor: default; }
   .mlist button[hidden] { display: none; }
+  .dyns button[id^="d-"]:not(#d-none) { font: italic bold 15px Georgia, serif; }
+  .sub:hover > .submenu.dyns, .sub:focus-within > .submenu.dyns { display: grid; grid-template-columns: repeat(4, auto); min-width: 0; }
+  .dyns hr, .dyns #d-none { grid-column: 1 / -1; }
   .mlist kbd { font: inherit; opacity: .65; }
   .sub { position: relative; display: flex; flex-direction: column; }
   .submenu { display: none; top: -5px; left: calc(100% - 4px); }
@@ -237,6 +240,23 @@
         <button role="menuitem" id="n-accent">Accent</button>
         <button role="menuitem" id="n-tenuto">Tenuto</button>
         <button role="menuitem" id="n-marcato">Marcato</button>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Dynamics<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu dyns" role="menu">
+            <button role="menuitem" id="d-ppp">ppp</button>
+            <button role="menuitem" id="d-pp">pp</button>
+            <button role="menuitem" id="d-p">p</button>
+            <button role="menuitem" id="d-mp">mp</button>
+            <button role="menuitem" id="d-mf">mf</button>
+            <button role="menuitem" id="d-f">f</button>
+            <button role="menuitem" id="d-ff">ff</button>
+            <button role="menuitem" id="d-fff">fff</button>
+            <button role="menuitem" id="d-fp">fp</button>
+            <button role="menuitem" id="d-sf">sf</button>
+            <button role="menuitem" id="d-sfz">sfz</button>
+            <button role="menuitem" id="d-fz">fz</button>
+            <hr>
+            <button role="menuitem" id="d-none">No dynamic</button>
+          </div></div>
         <hr>
         <button role="menuitem" id="n-layer1">Layer 1</button>
         <button role="menuitem" id="n-layer2">Layer 2</button>

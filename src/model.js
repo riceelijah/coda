@@ -361,6 +361,16 @@ export function setMark(ev, mark, on) {
   if (m.size) ev.marks = MARKS.filter((x) => m.has(x)); else delete ev.marks;
 }
 
+// ---------- dynamics (DESIGN §22) ----------
+// Levels last until the next one; accents (sf, sfz, fz, fp) are one loud note, fp then soft.
+export const DYNS = ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff", "fp", "sf", "sfz", "fz"];
+export const DYN_VEL = { ppp: 24, pp: 36, p: 50, mp: 64, mf: 80, f: 96, ff: 110, fff: 124 };
+export const ACCENT_VEL = { fp: 100, sf: 112, sfz: 112, fz: 112 };
+// Set (or, when it's already that, remove) the dynamic on one event.
+export function toggleDyn(ev, dyn) {
+  if (ev.dyn === dyn || !dyn) delete ev.dyn; else ev.dyn = dyn;
+}
+
 export function setTuplet(score, s, b, i, tup) {
   const ev = score.staves[s].bars[b][i];
   if (tup && !tupletOk(ev.dur, ev.dots, tup)) return `A ${tup[0]}:${tup[1]} tuplet doesn't fit that note value`;
@@ -554,7 +564,8 @@ export function isValidScore(sc) {
     const okBars = (bars) => Array.isArray(bars) && bars.length === n && bars.every((bar) => Array.isArray(bar) && bar.every((e) =>
       DURS.includes(e.dur) && Array.isArray(e.pitches) &&
       e.pitches.every((p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2) &&
-      (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m))))));
+      (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m)))) &&
+      (e.dyn === undefined || DYNS.includes(e.dyn))));
     return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) &&
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
       (st.transpose === undefined || okTranspose(st.transpose)) &&

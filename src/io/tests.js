@@ -18,6 +18,7 @@ const ev = (dur, names, o = {}) => ({
   dur, dots: o.dots || 0, tie: !!o.tie, pitches: names ? names.split(" ").map(P) : [],
   ...(o.tup ? { tup: o.tup } : {}),
   ...(o.marks ? { marks: o.marks } : {}),
+  ...(o.dyn ? { dyn: o.dyn } : {}),
 });
 
 // Compact text form of a staff's bars, for readable expected values.
@@ -40,8 +41,8 @@ export function roundTripFixture() {
     measures: [{ key: -3, time: [4, 4], sym: "common" }, {}, { key: 2 }, { time: [6, 8] }, {}],
     staves: [
       { name: "Keys", clef: "treble", brace: true, program: 4, bars: [
-        [ev("q", "C4 E4 G4", { marks: ["staccato", "accent"] }), ev("8", "D5", { dots: 1 }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
-        [ev("q", "F#5"), ev("8", "G5", { tup: [3, 2] }), ev("8", "A5", { tup: [3, 2] }), ev("8", "Bb5", { tup: [3, 2] }), ev("h", null, { marks: ["fermata"] })],
+        [ev("q", "C4 E4 G4", { marks: ["staccato", "accent"], dyn: "p" }), ev("8", "D5", { dots: 1 }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
+        [ev("q", "F#5"), ev("8", "G5", { tup: [3, 2] }), ev("8", "A5", { tup: [3, 2] }), ev("8", "Bb5", { tup: [3, 2] }), ev("h", null, { marks: ["fermata"], dyn: "mf" })],
         [],
         [ev("q", "D5", { dots: 1 }), ev("8", "C#5"), ev("16", "B4"), ev("16", "A4"), ev("8", "G4")],
         [ev("h", "D4 F#4 A4", { dots: 1 })],
@@ -53,7 +54,7 @@ export function roundTripFixture() {
         [],
         [ev("h", "D2 A2", { dots: 1, marks: ["fermata", "tenuto"] })],
       ], layers: [[ // layer 2 (DESIGN §15): bar 1 and a tie into bar 3
-        [ev("h", "G2"), ev("h", "A2")], [], [ev("w", "E2", { tie: true })], [ev("h", "E2", { dots: 1 })], [],
+        [ev("h", "G2"), ev("h", "A2", { dyn: "sfz" })], [], [ev("w", "E2", { tie: true })], [ev("h", "E2", { dots: 1 })], [],
       ]] },
       { name: "Viola", clef: "alto", brace: false, bars: [
         [ev("w", "C4")],
@@ -246,6 +247,24 @@ export async function run({ check, eq }) {
     const c = importMSCX(exportMSCX(a), "x.mscx").score;
     return eq(c.staves.map((st) => [st.transpose, brief(st)]), a.staves.map((st) => [st.transpose, brief(st)])) && c.measures[0].key === 0 ||
       JSON.stringify(c.staves.map((st) => [st.transpose, brief(st)]));
+  });
+
+  await check("dynamics: velocity per part, accents one note, fp then soft; MIDI velocity; validation (DESIGN §22)", () => {
+    const s = M.newScore({ preset: "piano", bars: 2 });
+    s.staves[0].bars[0] = [ev("q", "C5", { dyn: "p" }), ev("q", "D5"), ev("q", "E5", { dyn: "sfz" }), ev("q", "F5")];
+    s.staves[0].bars[1] = [ev("h", "G5", { dyn: "fp" }), ev("h", "A5")];
+    s.staves[1].bars[0] = [ev("w", "C3")]; // same part: takes the p from the top staff
+    s.staves[1].bars[1] = [ev("w", "C3")];
+    const v = (st, at) => schedule(s).notes.find((n) => n.staff === st && n.start === at).vel;
+    const got = [v(0, 0), v(0, 480), v(0, 960), v(0, 1440), v(0, 1920), v(0, 2880), v(1, 0)].join();
+    if (got !== "50,50,112,50,100,50,50") return got;
+    if (schedule(s, 1).notes.find((n) => n.staff === 0).vel !== 100) return "from bar 2";
+    if (!M.isValidScore(s) || M.isValidScore({ ...s, staves: [{ ...s.staves[0], bars: [[{ ...ev("w", "C4"), dyn: "loud" }], []] }, s.staves[1]] })) return "validation";
+    const e = { ...ev("q", "C4") };
+    M.toggleDyn(e, "f"); M.toggleDyn(e, "f");
+    if (e.dyn) return "toggle off";
+    const mid = exportMIDI(s);
+    return [...mid].join(",").includes([0x90, 72, 50].join(",")) || "MIDI velocity";
   });
 
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {

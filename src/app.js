@@ -396,6 +396,13 @@ function mark(m) {
   edit((sc) => M.toggleMark(r.map((p) => sc.staves[s.staff].bars[p.bar][p.idx]), m) ? null : "Only a fermata can go on a rest");
 }
 
+// Set or clear the dynamic on the first selected note or rest (DESIGN §22).
+function dynamic(d) {
+  if (!state.sel) { message("Select a note first", true); return; }
+  const s = state.sel, p = range()[0];
+  edit((sc) => { M.toggleDyn(sc.staves[s.staff].bars[p.bar][p.idx], d); return null; });
+}
+
 function tie() {
   const s = state.sel;
   if (!s) { message("Select a note first", true); return; }
@@ -1103,6 +1110,8 @@ const CMD = {
   "n-octdown": { run: () => transposeSel(-7), on: hasSel },
   "n-tie": { run: () => tie(), on: hasSel },
   ...Object.fromEntries(M.MARKS.map((m) => ["n-" + m, { run: () => mark(m), on: hasSel }])),
+  ...Object.fromEntries(M.DYNS.map((d) => ["d-" + d, { run: () => dynamic(d), on: hasSel }])),
+  "d-none": { run: () => dynamic(null), on: hasSel },
   "n-layer1": { run: () => setLayer(0) },
   "n-layer2": { run: () => setLayer(1) },
   "n-layer3": { run: () => setLayer(2) },

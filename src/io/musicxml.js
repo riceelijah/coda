@@ -83,6 +83,7 @@ function barXml(score, s, b, staffNo, voice, v = 0) {
     const before = i > 0 ? bar[i - 1] : prev;
     const tied = (p) => !!(before && before.tie && before.pitches.some((q) => q.step === p.step && q.oct === p.oct));
     const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i) };
+    if (ev.dyn) out.push(`<direction placement="below"><direction-type><dynamics><${ev.dyn}/></dynamics></direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`);
     if (!ev.pitches.length) out.push(noteXml(ev, null, flags));
     else ev.pitches.forEach((p, k) => out.push(noteXml(ev, p, { ...flags, chord: k > 0, tieStop: tied(p) })));
   });
@@ -208,6 +209,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     }));
     if (nStaves > 2) report.add(`A part with ${nStaves} staves was split into separate staves without a brace`);
     let divisions = 1, key = 0, time = [4, 4], sym, tr = null;
+    const pend = {}; // staff -> dynamic waiting for its note
     // staff -> MusicXML voice ids in layer order: numeric order, so voice 1 is always layer 1
     const voiceOf = {};
     for (const n of part.querySelectorAll("note")) {
@@ -270,6 +272,12 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
         } else if (tag === "direction" || tag === "sound") {
           for (const dt of tag === "direction" ? kids(el, "direction-type") : []) {
             for (const c of dt.children) {
+              if (c.localName === "dynamics") { // goes on the staff's next note or rest (DESIGN §22)
+                const d = DYN_IN[c.firstElementChild?.localName];
+                if (d) pend[+(txt(el, "staff") || 1)] = { dyn: d, at: pos.t, mi };
+                else report.count("Unusual dynamics (not imported)");
+                continue;
+              }
               const label = DIRECTIONS[c.localName];
               if (label && c.getAttribute("type") !== "stop" && c.getAttribute("type") !== "continue") report.count(label);
             }
@@ -283,13 +291,14 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
         } else if (tag === "note") {
           const start = pos.t;
-          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start });
+          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi });
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
       // the file's key is written; the score keeps concert pitch
       if (pi === 0) firstPartAttrs.push({ key: tr ? wrapKey(key + fifthsOf(tr[0], tr[1])) : key, time: [...time], sym });
     });
+    for (const k in pend) if (pend[k]) report.count("Dynamics after the last note (not imported)");
     staves.forEach((st) => { if (!st.clef) st.clef = "treble"; });
     score.staves.push(...staves);
   });
@@ -308,8 +317,11 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   return { score, report: report.done() };
 }
 
+// MusicXML dynamics -> Coda's set; rarer ones go to the nearest (DESIGN §22)
+export const DYN_IN = { ppp: "ppp", pp: "pp", p: "p", mp: "mp", mf: "mf", f: "f", ff: "ff", fff: "fff", fp: "fp", sf: "sf", sfz: "sfz", fz: "fz",
+  pppp: "ppp", ppppp: "ppp", pppppp: "ppp", ffff: "fff", fffff: "fff", ffffff: "fff", sfp: "fp", sfpp: "fp", sffz: "sfz", rfz: "sfz", rf: "sf", sfzp: "fp" };
 const DIRECTIONS = {
-  dynamics: "Dynamics (not imported)", wedge: "Hairpins (not imported)", words: "Text directions (not imported)",
+  wedge: "Hairpins (not imported)", words: "Text directions (not imported)",
   rehearsal: "Rehearsal marks (not imported)", segno: "Segno and coda signs (not imported)", coda: "Segno and coda signs (not imported)",
   pedal: "Pedal marks (not imported)", "octave-shift": "Octave lines (not imported)",
 };
@@ -319,7 +331,7 @@ const MARKS = {
   glissando: "Glissandos (not imported)", slide: "Glissandos (not imported)",
 };
 
-function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start }) {
+function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi }) {
   const isRest = !!kid(el, "rest");
   if (kid(el, "grace")) { if (!isRest) report.count("Grace notes skipped"); return; }
   const staffNo = +(txt(el, "staff") || 1);
@@ -407,6 +419,8 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     report.count("Gaps in a voice filled with rests");
   }
   addMarks(ev);
+  const pd = pend[staffNo];
+  if (pd && (pd.mi < mi || start >= pd.at)) { ev.dyn = pd.dyn; pend[staffNo] = null; }
   bar.push(ev);
   lastEvent[lk] = ev;
 }
