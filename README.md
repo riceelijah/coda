@@ -10,12 +10,12 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 
 ## Using Coda
 
-- **New** sets up a score: title, composer, staves (single staff, piano, SATB…), key, time, tempo, number of bars.
+- **File ▸ New** sets up a score: title, composer, staves (single staff, piano, SATB…), key, time, tempo, number of bars.
 - **Click** on a staff to add a note of the selected length; clicking between two notes inserts it there. Click a note to select it. To build a chord, select a note and press **Shift+A–G**, **Shift+click** the staff, or turn on the chord button so clicks add to the selected note.
 - **Type** letters to add notes quickly. Coda picks the octave closest to the previous note and moves to the next bar when one fills up.
-- **Key/Time** changes the key or time signature from the current bar on.
-- **Play** plays from the current bar. **Print** prints the score, or saves it as a PDF from your browser's print dialog.
-- Your work is saved automatically in this browser. **Scores** lists everything saved here: open, duplicate or delete. Scores stay only in this browser, so use **Save** to keep a file (MusicXML) you can back up or open anywhere.
+- **Score ▸ Key and time** changes the key or time signature from the current bar on. **View** zooms the score.
+- **Play** plays from the current bar. **File ▸ Print** prints the score, or saves it as a PDF from your browser's print dialog.
+- Your work is saved automatically in this browser. **File ▸ Scores in this browser** lists everything saved here: open, duplicate or delete. Scores stay only in this browser, so use **File ▸ Save as MusicXML** to keep a file (MusicXML) you can back up or open anywhere.
 
 ### Keyboard shortcuts
 

@@ -42,6 +42,24 @@
   }
   .tb:hover { background: var(--btn-hover); }
   .tb:disabled { opacity: .4; cursor: default; background: none; }
+  #menubar { display: flex; gap: 2px; }
+  .menu { position: relative; }
+  .mb { background: none; border: 1px solid transparent; border-radius: 6px; padding: 5px 9px; cursor: pointer; }
+  .mb:hover, .mb[aria-expanded="true"] { background: var(--btn-hover); }
+  .mlist {
+    position: absolute; top: calc(100% + 3px); left: 0; z-index: 10; min-width: 230px; padding: 4px;
+    background: var(--chrome); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.18); display: flex; flex-direction: column;
+  }
+  .mlist[hidden] { display: none; }
+  .mlist hr { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; }
+  .mlist button {
+    display: flex; justify-content: space-between; gap: 24px; text-align: left; white-space: nowrap;
+    background: none; border: 0; border-radius: 5px; padding: 5px 10px; cursor: pointer;
+  }
+  .mlist button:hover:not(:disabled), .mlist button:focus-visible { background: var(--accent); color: #fff; outline: none; }
+  .mlist button:disabled { opacity: .4; cursor: default; }
+  .mlist kbd { font: inherit; opacity: .65; }
   #tempo-wrap { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
   #tempo { width: 4.2em; padding: 3px 4px; border: 1px solid var(--border); border-radius: 5px; background: transparent; }
 
@@ -116,7 +134,7 @@
   #lib-list { list-style: none; margin: 0; padding: 0; max-height: 55vh; overflow: auto; }
   #lib-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
   #lib-list li > div:last-child { display: flex; gap: 6px; flex-shrink: 0; }
-  #lib-list .meta, #library .note { font-size: 12px; opacity: .75; }
+  #lib-list .meta, dialog .note { font-size: 12px; opacity: .75; }
 
   @media (max-width: 800px) {
     body { grid-template: "top" auto "pal" auto "desk" 1fr "status" auto / 1fr; }
@@ -143,24 +161,50 @@
 <body>
 <header id="topbar">
   <span class="brand">Coda</span>
-  <button class="tb" id="b-new" title="New score">New</button>
-  <button class="tb" id="b-lib" title="Scores saved in this browser">Scores</button>
-  <button class="tb" id="b-open" title="Open a file (Ctrl/Cmd+O)">Open</button>
-  <button class="tb" id="b-save" title="Save as MusicXML (Ctrl/Cmd+S)">Save</button>
-  <button class="tb" id="b-print" title="Print or save as PDF">Print</button>
-  <span class="sep"></span>
-  <button class="tb" id="b-undo" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↶ Undo</button>
-  <button class="tb" id="b-redo" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">↷ Redo</button>
+  <nav id="menubar" role="menubar" aria-label="Main menu">
+    <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">File</button>
+      <div class="mlist" role="menu" hidden>
+        <button role="menuitem" id="b-new">New…</button>
+        <button role="menuitem" id="b-open" data-short="mod+O">Open file…</button>
+        <button role="menuitem" id="b-lib">Scores in this browser…</button>
+        <hr>
+        <button role="menuitem" id="b-save" data-short="mod+S">Save as MusicXML</button>
+        <button role="menuitem" id="b-print" data-short="mod+P">Print…</button>
+      </div></div>
+    <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Edit</button>
+      <div class="mlist" role="menu" hidden>
+        <button role="menuitem" id="b-undo" data-short="mod+Z">Undo</button>
+        <button role="menuitem" id="b-redo" data-short="mod+Shift+Z">Redo</button>
+        <hr>
+        <button role="menuitem" id="m-cut" data-short="mod+X">Cut</button>
+        <button role="menuitem" id="m-copy" data-short="mod+C">Copy</button>
+        <button role="menuitem" id="m-paste" data-short="mod+V">Paste</button>
+        <button role="menuitem" id="m-delete" data-short="Delete">Delete</button>
+      </div></div>
+    <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">View</button>
+      <div class="mlist" role="menu" hidden>
+        <button role="menuitem" id="m-zoomin">Zoom in</button>
+        <button role="menuitem" id="m-zoomout">Zoom out</button>
+        <button role="menuitem" id="m-zoom1">Actual size</button>
+      </div></div>
+    <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Score</button>
+      <div class="mlist" role="menu" hidden>
+        <button role="menuitem" id="b-addbar">Add bar after this one</button>
+        <button role="menuitem" id="b-delbar">Delete this bar</button>
+        <hr>
+        <button role="menuitem" id="b-attrs">Key and time…</button>
+        <button role="menuitem" id="m-details">Title, composer, tempo…</button>
+      </div></div>
+    <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Help</button>
+      <div class="mlist" role="menu" hidden>
+        <button role="menuitem" id="b-help" data-short="?">Keyboard shortcuts</button>
+        <button role="menuitem" id="m-about">About Coda</button>
+      </div></div>
+  </nav>
   <span class="sep"></span>
   <button class="tb" id="b-play" title="Play from the current bar (Space)">▶ Play</button>
   <button class="tb" id="b-stop" title="Stop (Space)">■ Stop</button>
   <label id="tempo-wrap" title="Tempo in quarter notes per minute">♩ = <input id="tempo" type="number" min="20" max="400" step="1" aria-label="Tempo"></label>
-  <span class="sep"></span>
-  <button class="tb" id="b-addbar" title="Add a bar after the current bar">+ Bar</button>
-  <button class="tb" id="b-delbar" title="Delete the current bar">− Bar</button>
-  <button class="tb" id="b-attrs" title="Change the key or time signature from the current bar">Key/Time</button>
-  <span class="sep"></span>
-  <button class="tb" id="b-help" title="Keyboard shortcuts (?)">? Help</button>
   <input type="file" id="file" hidden>
 </header>
 
@@ -246,6 +290,16 @@
   </form>
 </dialog>
 
+<dialog id="about">
+  <form method="dialog">
+    <h2>About Coda</h2>
+    <p>Coda is a free, open-source music notation editor that runs in your browser. Your scores stay in this browser unless you save them as files.</p>
+    <p>Source code and licence (MIT): <a href="https://github.com/riceelijah/coda" target="_blank" rel="noopener">github.com/riceelijah/coda</a></p>
+    <p class="note">Notation drawn with VexFlow (MIT) and the Bravura font (SIL OFL). Zip support by fflate (MIT).</p>
+    <div class="actions"><button class="btn primary">Close</button></div>
+  </form>
+</dialog>
+
 <dialog id="help">
   <form method="dialog">
     <h2>Keyboard shortcuts</h2>
@@ -265,7 +319,7 @@
       <tr><td><kbd>Space</kbd></td><td>Play / stop</td></tr>
       <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>Z</kbd></td><td>Undo (add <kbd>Shift</kbd> to redo)</td></tr>
       <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>S</kbd> / <kbd>O</kbd></td><td>Save / open</td></tr>
-      <tr><td>Scores button</td><td>Scores saved in this browser: open, duplicate, delete</td></tr>
+      <tr><td>File ▸ Scores</td><td>Scores saved in this browser: open, duplicate, delete</td></tr>
       <tr><td>Click</td><td>Add a note where you click (between notes inserts); click a note to select it</td></tr>
       <tr><td><kbd>Shift</kbd>+<kbd>A</kbd>–<kbd>G</kbd></td><td>Add that note above the selected note (build a chord)</td></tr>
       <tr><td>Shift+click</td><td>Add or remove a chord note on the clicked note</td></tr>

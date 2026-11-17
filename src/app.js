@@ -559,7 +559,7 @@ function onMove(e) {
 // ---------- keyboard ----------
 
 function onKey(e) {
-  if (document.querySelector("dialog[open]")) return;
+  if (document.querySelector("dialog[open]") || openMenu()) return;
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
   // let a focused button handle its own Space/Enter
@@ -698,6 +698,83 @@ function closeAttrs() {
     // only pass time when it changes, so a key change never trips the bar-fit check
     edit((sc) => M.setAttrs(sc, b, changed ? { key: +$("a-key").value, time } : { key: +$("a-key").value }));
   }
+}
+
+// ---------- menu bar (DESIGN §13.1) ----------
+
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const openMenu = () => document.querySelector("#menubar .mlist:not([hidden])");
+
+function closeMenus(focusButton = false) {
+  const list = openMenu();
+  if (!list) return;
+  list.hidden = true;
+  const mb = list.previousElementSibling;
+  mb.setAttribute("aria-expanded", "false");
+  if (focusButton) mb.focus();
+}
+
+function showMenu(mb, focusFirst) {
+  closeMenus();
+  const list = mb.nextElementSibling;
+  if (mb.textContent === "Edit") { // enable what can act now
+    const has = !!state.sel;
+    $("m-cut").disabled = $("m-copy").disabled = $("m-delete").disabled = !has;
+    $("m-paste").disabled = !state.clip;
+  }
+  list.hidden = false;
+  mb.setAttribute("aria-expanded", "true");
+  if (focusFirst) list.querySelector("button:not(:disabled)")?.focus();
+}
+
+function setupMenus() {
+  const bar = $("menubar"), mbs = [...bar.querySelectorAll(".mb")];
+  // shortcut labels
+  for (const b of bar.querySelectorAll("[data-short]")) {
+    const k = document.createElement("kbd");
+    k.textContent = b.dataset.short.replace("mod+", IS_MAC ? "⌘" : "Ctrl+").replace("Shift+", IS_MAC ? "⇧" : "Shift+");
+    const label = document.createElement("span");
+    label.textContent = b.textContent;
+    b.replaceChildren(label, k);
+  }
+  mbs.forEach((mb, i) => {
+    mb.onclick = () => (mb.getAttribute("aria-expanded") === "true" ? closeMenus() : showMenu(mb, false));
+    mb.onmouseenter = () => { if (openMenu() && mb.getAttribute("aria-expanded") !== "true") showMenu(mb, false); };
+    mb.onkeydown = (e) => {
+      if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") { e.preventDefault(); showMenu(mb, true); }
+      else if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); mbs[(i + (e.key === "ArrowRight" ? 1 : mbs.length - 1)) % mbs.length].focus(); }
+    };
+    const list = mb.nextElementSibling;
+    list.onkeydown = (e) => {
+      const items = [...list.querySelectorAll("button:not(:disabled)")], at = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+      } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        showMenu(mbs[(i + (e.key === "ArrowRight" ? 1 : mbs.length - 1)) % mbs.length], true);
+      } else if (e.key === "Escape") { e.preventDefault(); closeMenus(true); }
+      else if (e.key === "Tab") closeMenus();
+    };
+    // after an item's own onclick runs: close, and take focus off the menu so Space plays again
+    list.addEventListener("click", (e) => {
+      if (!e.target.closest("button")) return;
+      closeMenus();
+      if (document.activeElement?.closest?.("#menubar")) document.activeElement.blur();
+    });
+  });
+  document.addEventListener("mousedown", (e) => { if (!e.target.closest("#menubar")) closeMenus(); });
+}
+
+// View zoom: the sheet's width; the SVGs scale with it and clicks map through their real size.
+let zoom = 1;
+function setZoom(z) {
+  zoom = Math.max(0.5, Math.min(2.5, Math.round(z * 100) / 100));
+  const sh = $("sheet");
+  if (zoom === 1) { sh.style.width = ""; sh.style.maxWidth = ""; }
+  else { sh.style.width = 1100 * zoom + "px"; sh.style.maxWidth = "none"; }
+  drawCaret();
+  message(`Zoom ${Math.round(zoom * 100)}%`);
 }
 
 // ---------- score library dialog (DESIGN §12) ----------
@@ -847,6 +924,16 @@ function init() {
   $("b-play").onclick = startPlay;
   $("b-stop").onclick = stopPlay;
   $("b-help").onclick = () => $("help").showModal();
+  $("m-about").onclick = () => $("about").showModal();
+  $("m-details").onclick = () => openSetup(false);
+  $("m-cut").onclick = () => copySel(true);
+  $("m-copy").onclick = () => copySel(false);
+  $("m-paste").onclick = () => paste();
+  $("m-delete").onclick = () => deleteSel();
+  $("m-zoomin").onclick = () => setZoom(zoom * 1.2);
+  $("m-zoomout").onclick = () => setZoom(zoom / 1.2);
+  $("m-zoom1").onclick = () => setZoom(1);
+  setupMenus();
   $("report-close").onclick = () => ($("report").style.display = "none");
   $("tempo").onchange = (e) => {
     const v = Math.max(20, Math.min(400, Math.round(+e.target.value) || 100));

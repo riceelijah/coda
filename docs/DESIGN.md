@@ -35,6 +35,11 @@ Markers used below:
    `textContent` (or VexFlow text drawing) only — **never `innerHTML`** or string-built markup.
    Refuse files larger than 50 MB before reading them, and refuse a zip whose entry to be
    decoded is larger than 200 MB uncompressed. XML is parsed with `DOMParser` only.
+7. **Network:** the only runtime fetches are instrument audio (§13): MP3 files from the
+   FluidR3_GM set, from jsDelivr pinned to one commit of `gleitz/midi-js-soundfonts`, then
+   `gleitz.github.io` as a fallback. Audio data only — never the `*-mp3.js`/`*-ogg.js` script
+   files. Scores are never uploaded, and everything works without these hosts (triangle-wave
+   fallback).
 
 ---
 
@@ -831,6 +836,52 @@ dependency is needed.
   newest remaining one, or a blank one. Built with `textContent`. One line says scores live only
   in this browser and Save makes a file.
 - Tests use the `codatest.` prefix and clean up, because `test.html` shares the app's origin.
+
+## 13. Menus, instruments and sounds (Phases 11–13)
+
+### 13.1 Menu bar (Phase 11)
+
+`#topbar` holds a `role="menubar"` of plain buttons, each opening a `role="menu"` list:
+
+- **File:** New…, Open file…, Scores in this browser…, Save as MusicXML, Print…
+- **Edit:** Undo, Redo, Cut, Copy, Paste, Delete
+- **View:** Zoom in, Zoom out, Actual size
+- **Score:** Add bar, Delete bar, Key/Time…, Score details…, Instruments…
+- **Help:** Keyboard shortcuts, About Coda
+
+Play, Stop and tempo stay as visible buttons. Existing element ids are kept on the menu items.
+Shortcuts are shown right-aligned (⌘ on Mac). Edit items are enabled/disabled when the menu
+opens. Keyboard: ←/→ between menus, ↑/↓ within, Enter/Space activate, Esc closes; a click
+outside closes. `onKey` ignores keys while a menu is open, and focus leaves the menu after an
+item runs. Zoom sets the sheet width (menu items only; Ctrl +/− stays the browser's).
+
+### 13.2 Instrument per staff (Phase 12)
+
+- `staff.program`: optional integer 0–127 (General MIDI, 0-based). Absent = piano. Checked by
+  `isValidScore`. `setStaffProgram(score, staff, program)` changes the whole part (a braced pair).
+- `src/gm.js`: the 128 programs as `{slug, name, family}`; slugs match the sound set's folder names.
+- MusicXML: `<score-instrument>` + `<midi-instrument><midi-channel/><midi-program>` (1-based),
+  written only when `program` is set; import sets it only when present.
+- MIDI: first program change per track; later ones counted. MuseScore: `Instrument > Channel >
+  program@value` if present. `.musx`: not read (one report line when it has instruments).
+
+### 13.3 Sounds on demand (Phase 13)
+
+- URL: `<base>/<slug>-mp3/<note>.mp3`, notes named with flats (`Db4`), A0–C8. Bases: jsDelivr at
+  the pinned commit, then gleitz.github.io. A failed request tries the next base; only `res.ok`
+  responses are cached (`caches.open("coda-sounds-v1")`, in try/catch).
+- Sparse: one sample per 3 semitones (`round(midi/3)*3`, clamped 21–108), repitched with
+  `playbackRate`. Decoded once per session.
+- Play: load what the score needs ("Loading sounds…", ≈ 8 s timeout); anything missing plays the
+  triangle voice, with one status message. The playback token is set before awaiting, so Stop
+  during loading works.
+- Audition: sampled when loaded, else the triangle voice now and a background fetch. Sounds are
+  prefetched after a file opens and after an instrument change.
+- Notes longer than the 3.16 s recordings: sustained families loop 0.8–2.4 s; others ring out.
+- Pickers: Score ▸ Instruments… (one row per part), and a Sound select in New. SATB defaults to
+  Choir Aahs (52).
+- Credits: FluidR3_GM (MIT; CC BY 3.0 per the gleitz README) in the README and Help ▸ About.
+- User-supplied sounds are a later phase (first: one audio file mapped to a range).
 
 ## 10. Testing
 

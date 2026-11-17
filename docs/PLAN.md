@@ -35,6 +35,9 @@ only says what to build in what order and how to know each phase is finished.
 | 8 | Fix-first: chords, audition, key/time changes, double dots, bar numbers | done |
 | 9 | Entry: insert mid-bar, triplets, range select + copy/paste | done |
 | 10 | Score library in the browser | done |
+| 11 | Menu bar (File, Edit, View, Score, Help) | done |
+| 12 | Instrument per staff (model + formats) | in progress |
+| 13 | Instrument sounds on demand (all 128 GM) | not started |
 
 ---
 
@@ -251,6 +254,22 @@ triplet eighths fill a quarter; a two-bar passage can be copied and pasted elsew
 
 **Done when:** two scores can be kept, switched between and deleted; reloading reopens the
 tab's score; an existing autosave survives the upgrade.
+
+## Phase 11 — Menu bar (DESIGN §13.1)
+
+- [x] Menus with keyboard support; existing buttons moved in; zoom.
+**Done when:** every former toolbar action is reachable from a menu by mouse and keyboard, and Space still plays.
+
+## Phase 12 — Instrument per staff (DESIGN §13.2)
+
+- [ ] `program` field, `gm.js`, `setStaffProgram`; MusicXML/MIDI/MuseScore import, MusicXML export.
+**Done when:** a violin part survives a Coda save and reopen with `program: 40`; old autosaves load.
+
+## Phase 13 — Sounds on demand (DESIGN §13.3)
+
+- [ ] Sampler with lazy fetch, cache, fallback; Instruments dialog; Sound in New; About credits.
+**Done when:** a score with piano and strings plays both sounds; with the network off and no
+cache, it plays the triangle voice and says why.
 
 ## After the first version (not scheduled)
 
