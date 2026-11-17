@@ -31,7 +31,7 @@ only says what to build in what order and how to know each phase is finished.
 | 4 | MIDI import | done |
 | 5 | MuseScore `.mscz` import | done (4.x verified; 3.x untested) |
 | 6 | `.musx` import | decode done; mapping **blocked on sample files from the user** |
-| 7 | Publish to GitHub Pages | not started — **needs the user's go-ahead** |
+| 7 | Publish to GitHub Pages | README + subpath check done; **repo creation needs the user's go-ahead** |
 
 ---
 
@@ -205,11 +205,11 @@ corrupt `.musx` produces a message rather than an exception.
 **Ask the user before any step that creates or pushes to a remote.** The user said GitHub Pages
 is the target and approved a public repo named `coda`, but confirm at the time.
 
-- [ ] Finish `README.md`: what Coda is, the live link, how to run locally, keyboard shortcuts,
+- [x] Finish `README.md` (live link still a placeholder): what Coda is, the live link, how to run locally, keyboard shortcuts,
       the format support table (what opens, what is approximated, the `.mus` situation), what is
       not supported yet (DESIGN §8), licence, not-affiliated line.
-- [ ] Serve the project from one directory up (`python3 -m http.server` in the parent, open
-      `/coda/`) and confirm everything loads from a subpath.
+- [x] Serve the project from a subpath and confirm everything loads (done via a scratch folder
+      containing only a `coda` link, so other projects in the parent folder aren't served).
 - [ ] `gh auth status`. If not authenticated, or the repo name is taken, stop and ask.
 - [ ] `gh repo create coda --public --source=. --push`.
 - [ ] Enable Pages from `main`, root. Wait for the build, open the live URL, open a sample file there.
