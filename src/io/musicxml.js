@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ,
+  tupletRuns, padBars, noteCount, PPQ, BASE,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -56,10 +56,22 @@ function restXml(ticks, staffNo, voice, whole) {
   return splitTicks(ticks).map((d) => noteXml({ dur: d.dur, dots: d.dots, pitches: [] }, null, { staffNo, voice })).join("");
 }
 
+// A bar ending part-way through a tuplet group gets tuplet rests to finish the group, so the
+// padding after it is in whole ticks (DESIGN §11.6).
+function completeTuplet(bar, cap) {
+  const runs = tupletRuns(bar), run = runs[runs.length - 1];
+  if (!run || run.idx[run.idx.length - 1] !== bar.length - 1 || run.ticks % run.unit === 0) return bar;
+  const first = bar[run.idx[0]];
+  const one = (BASE[first.dur] * run.tup[1]) / run.tup[0], missing = run.unit - (run.ticks % run.unit);
+  if (missing % one || barTicks(bar) + missing > cap) return bar;
+  const rests = Array.from({ length: missing / one }, () => ({ dur: first.dur, dots: 0, pitches: [], tie: false, tup: [...run.tup] }));
+  return [...bar, ...rests];
+}
+
 // Notes for one staff in one bar. Returns {xml, ticks written}.
 function barXml(score, s, b, staffNo, voice) {
-  const bar = score.staves[s].bars[b];
   const cap = barCapacity(attrsAt(score, b).time);
+  const bar = completeTuplet(score.staves[s].bars[b], cap);
   if (!bar.length) return { xml: restXml(cap, staffNo, voice, true), ticks: cap };
   // last event of the previous bar, for tie stops on this bar's first event
   const pbar = b > 0 ? score.staves[s].bars[b - 1] : [];

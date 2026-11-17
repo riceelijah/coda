@@ -151,6 +151,26 @@ check("key/time changes: setAttrs, clearAttrs, overflow refused (DESIGN §11.3)"
   return r === "Bar 4 would overflow" || `overflow: ${r}`;
 });
 
+check("insert, range, delete range, paste across bars (DESIGN §11.5, §11.7)", () => {
+  const q = (step) => ({ dur: "q", dots: 0, tie: false, pitches: [{ step, oct: 4, alter: 0 }] });
+  const s = M.newScore({ time: [4, 4], bars: 1 });
+  M.appendEvent(s, 0, 0, q(0)); M.appendEvent(s, 0, 0, q(2));
+  M.insertEvent(s, 0, 0, 1, q(1));
+  const names = (bar) => bar.map((e) => "CDEFGAB"[e.pitches[0]?.step] ?? "r").join("");
+  if (names(s.staves[0].bars[0]) !== "CDE") return "insert " + names(s.staves[0].bars[0]);
+  const r = M.rangePositions(s, 0, { bar: 0, idx: 2 }, { bar: 0, idx: 1 });
+  if (r.map((p) => p.idx).join() !== "1,2") return "range order";
+  const clip = [q(0), q(1), q(2)];
+  clip[2].tie = true;
+  const placed = [];
+  if (M.pasteEvents(s, 0, 0, 3, clip, placed)) return "paste refused";
+  if (s.measures.length !== 2 || names(s.staves[0].bars[1]) !== "DE") return "paste carry " + names(s.staves[0].bars[1]);
+  if (placed.map((p) => p.bar + ":" + p.idx).join() !== "0:3,1:0,1:1") return "placed " + JSON.stringify(placed);
+  if (s.staves[0].bars[1][1].tie) return "last pasted note still tied";
+  M.deleteRange(s, 0, { bar: 0, idx: 3 }, { bar: 1, idx: 0 });
+  return (names(s.staves[0].bars[0]) + "|" + names(s.staves[0].bars[1])) === "CDE|E" || "deleteRange";
+});
+
 // Later phases append checks here via test modules.
 const extra = ["./src/io/tests.js"];
 for (const path of extra) {

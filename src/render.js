@@ -155,6 +155,13 @@ export function render(score, container, sel) {
   return { cells, systems, errors };
 }
 
+// Is (b, i) selected? sel may carry `end` for a range (DESIGN §11.7).
+function inSel(sel, b, i) {
+  const a = [sel.bar, sel.idx], z = sel.end ? [sel.end.bar, sel.end.idx] : a;
+  const [lo, hi] = a[0] < z[0] || (a[0] === z[0] && a[1] <= z[1]) ? [a, z] : [z, a];
+  return (b > lo[0] || (b === lo[0] && i >= lo[1])) && (b < hi[0] || (b === hi[0] && i <= hi[1]));
+}
+
 function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar) {
   const VFl = VF();
   // 1. staves
@@ -209,7 +216,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar) {
       } else {
         notes = bar.map((ev) => makeNote(ev, st.clef));
         bar.forEach((ev, i) => {
-          if (sel && sel.staff === s && sel.bar === b && sel.idx === i)
+          if (sel && sel.staff === s && inSel(sel, b, i))
             notes[i].setStyle({ fillStyle: ACCENT, strokeStyle: ACCENT });
         });
         for (const run of tupletRuns(bar)) {

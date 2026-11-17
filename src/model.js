@@ -148,10 +148,49 @@ function fits(score, b, bar) { return barTicks(bar) <= barCapacity(attrsAt(score
 // ---------- edit commands ----------
 
 export function appendEvent(score, s, b, ev) {
+  return insertEvent(score, s, b, score.staves[s].bars[b].length, ev);
+}
+
+// Insert ev before index idx of a bar (DESIGN §11.5).
+export function insertEvent(score, s, b, idx, ev) {
   const bar = score.staves[s].bars[b];
   if (barTicks(bar) + eventTicks(ev) > barCapacity(attrsAt(score, b).time)) return "Bar is full";
   if (ev.pitches) sortPitches(ev.pitches);
-  bar.push(ev);
+  bar.splice(Math.max(0, Math.min(idx, bar.length)), 0, ev);
+  return null;
+}
+
+// Positions from a to z (each {bar, idx}, either order) on staff s, in score order.
+export function rangePositions(score, s, a, z) {
+  const before = (p, q) => p.bar < q.bar || (p.bar === q.bar && p.idx <= q.idx);
+  const [lo, hi] = before(a, z) ? [a, z] : [z, a];
+  const out = [];
+  for (let p = lo; p && before(p, hi); p = nextEventPos(score, s, p.bar, p.idx)) out.push(p);
+  return out;
+}
+
+export function deleteRange(score, s, a, z) {
+  for (const p of rangePositions(score, s, a, z).reverse()) deleteEvent(score, s, p.bar, p.idx);
+  return null;
+}
+
+// Paste copies of events starting at (b, idx), moving to the start of following bars
+// (added at the end if needed) when a bar fills up. The last pasted event is not tied.
+// `placed` receives the {bar, idx} of each pasted event.
+export function pasteEvents(score, s, b, idx, events, placed = []) {
+  if (!events.length) return "Nothing to paste";
+  for (const src of events) {
+    const ev = JSON.parse(JSON.stringify(src));
+    while (barTicks(score.staves[s].bars[b]) + eventTicks(ev) > barCapacity(attrsAt(score, b).time)) {
+      if (eventTicks(ev) > barCapacity(attrsAt(score, b).time)) return "A copied note is longer than a bar";
+      b++; idx = 0;
+      if (b >= score.measures.length) addMeasure(score, score.measures.length - 1);
+    }
+    insertEvent(score, s, b, idx, ev);
+    placed.push({ bar: b, idx });
+    idx++;
+  }
+  score.staves[s].bars[b][idx - 1].tie = false;
   return null;
 }
 

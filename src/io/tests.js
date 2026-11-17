@@ -2,6 +2,7 @@
 import { exportMusicXML, importMusicXML } from "./musicxml.js";
 import { importBytes, sniff, LEGACY_MUS } from "./open.js";
 import { schedule } from "../play.js";
+import * as M from "../model.js";
 
 const P = (name) => {
   const m = /^([A-G])(#{1,2}|b{1,2})?(-?\d)$/.exec(name);
@@ -139,6 +140,16 @@ export async function run({ check, eq }) {
     const { notes } = schedule(sc, 0);
     const fsharp = notes.filter((n) => n.midi === 78); // F#5 h tied to F#5 q
     return (fsharp.length === 1 && fsharp[0].end - fsharp[0].start === 1440) || JSON.stringify(fsharp);
+  });
+
+  await check("triplets: three triplet eighths fill a quarter; a partial group exports cleanly (DESIGN §11.6)", async () => {
+    const t = { dur: "8", dots: 0, tie: false, tup: [3, 2], pitches: [{ step: 0, oct: 5, alter: 0 }] };
+    if (M.eventTicks(t) * 3 !== 480) return "ticks";
+    const s = M.newScore({ time: [4, 4], bars: 1 });
+    M.appendEvent(s, 0, 0, { ...t });
+    const back = importMusicXML(exportMusicXML(s)).score.staves[0].bars[0];
+    const total = back.reduce((n, e) => n + M.eventTicks(e), 0);
+    return (total === 1920 && back.slice(0, 3).every((e) => e.tup)) || `total ${total}: ${JSON.stringify(back.map((e) => e.dur + (e.tup ? "/3" : "")))}`;
   });
 
   // Later phases: MIDI, MuseScore, musx.

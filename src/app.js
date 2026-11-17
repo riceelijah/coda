@@ -19,7 +19,9 @@ const state = {
   score: null,
   caret: { staff: 0, bar: 0 },
   sel: null,
-  armed: { dur: "q", dots: 0, rest: false, alter: null, chord: false },
+  selEnd: null, // other end of a range on the same staff, {bar, idx} (DESIGN §11.7)
+  clip: null,
+  armed: { dur: "q", dots: 0, rest: false, alter: null, chord: false, tup: null },
   undo: [], redo: [],
   hit: null,
 };
@@ -94,6 +96,8 @@ function fixRefs() {
   state.caret.bar = Math.min(state.caret.bar, sc.measures.length - 1);
   const s = state.sel;
   if (s && !(sc.staves[s.staff] && sc.staves[s.staff].bars[s.bar] && sc.staves[s.staff].bars[s.bar][s.idx])) state.sel = null;
+  const e = state.selEnd;
+  if (e && !(state.sel && sc.staves[state.sel.staff].bars[e.bar] && sc.staves[state.sel.staff].bars[e.bar][e.idx])) state.selEnd = null;
 }
 
 function selEvent() {
@@ -110,7 +114,7 @@ function refresh() {
   $("composer").textContent = sc.composer || "";
   $("tempo").value = sc.tempo;
   document.title = (sc.title || "Untitled") + " — Coda";
-  state.hit = render(sc, $("systems"), state.sel);
+  state.hit = render(sc, $("systems"), state.sel && { ...state.sel, end: state.selEnd });
   if (state.hit.errors.length) message(state.hit.errors.join("; "), true);
   $("b-undo").disabled = !state.undo.length;
   $("b-redo").disabled = !state.redo.length;
@@ -147,8 +151,10 @@ function updateStatus() {
   const a = state.armed;
   const parts = [`Bar ${bar + 1}`, `Staff ${staff + 1}${sc.staves[staff].name ? " (" + sc.staves[staff].name + ")" : ""}`];
   const ev = selEvent();
-  if (ev) parts.push("Selected: " + (ev.pitches.length ? ev.pitches.map(M.pitchName).join(" ") : "rest") + " " + DUR_NAMES[ev.dur].toLowerCase());
-  else parts.push(["", "Dotted ", "Double-dotted "][a.dots] + (a.dots ? DUR_NAMES[a.dur].toLowerCase() : DUR_NAMES[a.dur]) + (a.rest ? " rest" : "") + (a.chord ? " · chord mode" : ""));
+  const n = range().length;
+  if (n > 1) parts.push(`${n} notes selected`);
+  else if (ev) parts.push("Selected: " + (ev.pitches.length ? ev.pitches.map(M.pitchName).join(" ") : "rest") + " " + DUR_NAMES[ev.dur].toLowerCase());
+  else parts.push(["", "Dotted ", "Double-dotted "][a.dots] + (a.dots ? DUR_NAMES[a.dur].toLowerCase() : DUR_NAMES[a.dur]) + (a.rest ? " rest" : "") + (a.tup ? " triplet" : "") + (a.chord ? " · chord mode" : ""));
   $("status-pos").textContent = parts.join(" · ");
 }
 
@@ -180,6 +186,7 @@ const ICONS = {
   flat: '<path d="M9 2 v19 c4-2 8-5 8-8 c0-3-4-4-8-1" fill="none" stroke="currentColor" stroke-width="1.7"/>',
   natural: '<g stroke="currentColor" fill="none"><path d="M8.5 3 v14 l7-2.5" stroke-width="1.5"/><path d="M15.5 21 v-14 l-7 2.5" stroke-width="1.5"/></g>',
   tie: '<path d="M3 11 q9 9 18 0 q-9 6 -18 0z" fill="currentColor"/>',
+  tup: '<path d="M3 9 v-4 h7 M14 5 h7 v4" fill="none" stroke="currentColor" stroke-width="1.4"/><text x="12" y="10" font-size="9" text-anchor="middle" fill="currentColor" font-family="serif" font-style="italic" font-weight="bold">3</text><g fill="currentColor"><ellipse cx="5" cy="19" rx="2.6" ry="1.9"/><ellipse cx="12" cy="19" rx="2.6" ry="1.9"/><ellipse cx="19" cy="19" rx="2.6" ry="1.9"/></g>',
   chord: '<g fill="currentColor"><ellipse cx="9" cy="19" rx="4.4" ry="3.1" transform="rotate(-20 9 19)"/><ellipse cx="9" cy="12" rx="4.4" ry="3.1" transform="rotate(-20 9 12)"/></g><line x1="13" y1="18" x2="13" y2="2" stroke="currentColor" stroke-width="1.4"/>',
 };
 const svg = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>`;
@@ -206,6 +213,7 @@ function buildPalette() {
   const toggles = [
     ["rest", "Rest (R enters one)", () => { state.armed.rest = !state.armed.rest; updatePalette(); updateStatus(); }],
     ["dot", "Dot (.)", () => toggleDot()],
+    ["tup", "Triplet: next notes are triplets (;)", () => toggleTriplet()],
     ["sharp", "Sharp (+)", () => accidental(1)],
     ["flat", "Flat (-)", () => accidental(-1)],
     ["natural", "Natural (N)", () => accidental(0)],
@@ -213,7 +221,7 @@ function buildPalette() {
     ["chord", "Chord mode: clicks add notes to the selected note (or Shift+A–G)", () => { state.armed.chord = !state.armed.chord; updatePalette(); updateStatus(); }],
   ];
   toggles.forEach(([k, title, fn], i) => {
-    if (i === 2 || i === 5) pal.appendChild(document.createElement("hr"));
+    if (i === 3 || i === 6) pal.appendChild(document.createElement("hr"));
     const b = document.createElement("button");
     b.className = "pal"; b.dataset.tog = k;
     b.title = title;
@@ -230,7 +238,7 @@ function updatePalette() {
   const dur = ev ? ev.dur : a.dur, dots = ev ? ev.dots : a.dots;
   document.querySelectorAll(".pal[data-dur]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.dur === dur)));
   // accidental buttons show what is armed for the next note, not the selection
-  const pressed = { rest: a.rest, dot: dots > 0, sharp: a.alter === 1, flat: a.alter === -1, natural: a.alter === 0, tie: !!(ev && ev.tie), chord: a.chord };
+  const pressed = { rest: a.rest, dot: dots > 0, sharp: a.alter === 1, flat: a.alter === -1, natural: a.alter === 0, tie: !!(ev && ev.tie), chord: a.chord, tup: !!a.tup };
   document.querySelectorAll(".pal[data-tog]").forEach((b) => b.setAttribute("aria-pressed", String(pressed[b.dataset.tog])));
 }
 
@@ -258,6 +266,11 @@ function toggleDot() {
   }
 }
 
+function toggleTriplet() {
+  state.armed.tup = state.armed.tup ? null : [3, 2];
+  updatePalette(); updateStatus();
+}
+
 function accidental(v) {
   const s = state.sel;
   if (s && selEvent().pitches.length) {
@@ -276,7 +289,9 @@ function tie() {
 
 function makeEvent(pitch) {
   const a = state.armed;
-  return { dur: a.dur, dots: a.dots, tie: false, pitches: pitch ? [pitch] : [] };
+  const ev = { dur: a.dur, dots: a.dots, tie: false, pitches: pitch ? [pitch] : [] };
+  if (a.tup && M.tupletOk(a.dur, a.dots, a.tup)) ev.tup = [...a.tup];
+  return ev;
 }
 
 function withAlter(step, oct) {
@@ -288,6 +303,18 @@ function withAlter(step, oct) {
 function enterAtCaret(pitch) {
   const ev = makeEvent(pitch);
   const need = M.eventTicks(ev);
+  const sl = state.sel;
+  // after the selected note when it's in the caret bar and not the last one: insert there, no auto-advance
+  if (sl && sl.staff === state.caret.staff && sl.bar === state.caret.bar && sl.idx < state.score.staves[sl.staff].bars[sl.bar].length - 1) {
+    if (edit((sc) => {
+      const r = M.insertEvent(sc, sl.staff, sl.bar, sl.idx + 1, ev);
+      if (r) return r;
+      state.sel = { staff: sl.staff, bar: sl.bar, idx: sl.idx + 1 };
+      state.selEnd = null;
+      return null;
+    })) hear(selEvent());
+    return;
+  }
   edit((sc) => {
     const s = state.caret.staff;
     let b = state.caret.bar;
@@ -301,6 +328,7 @@ function enterAtCaret(pitch) {
     if (r) return r;
     state.caret.bar = b;
     state.sel = { staff: s, bar: b, idx: sc.staves[s].bars[b].length - 1 };
+    state.selEnd = null;
     return null;
   }) && hear(selEvent());
 }
@@ -351,7 +379,52 @@ function typeLetter(letter) {
   enterAtCaret(withAlter(step, oct));
 }
 
+// Selected positions in score order (one, or a Shift+arrow range).
+function range() {
+  const s = state.sel;
+  if (!s) return [];
+  return state.selEnd ? M.rangePositions(state.score, s.staff, s, state.selEnd) : [{ bar: s.bar, idx: s.idx }];
+}
+
+function extendSel(dir) {
+  const s = state.sel;
+  if (!s) { moveSel(dir); return; }
+  const from = state.selEnd || { bar: s.bar, idx: s.idx };
+  const n = dir > 0 ? M.nextEventPos(state.score, s.staff, from.bar, from.idx) : M.prevEventPos(state.score, s.staff, from.bar, from.idx);
+  if (n) { state.selEnd = n; state.caret.bar = n.bar; refresh(); }
+}
+
+function copySel(cut) {
+  const r = range();
+  if (!r.length) return false;
+  const st = state.score.staves[state.sel.staff];
+  state.clip = JSON.parse(JSON.stringify(r.map((p) => st.bars[p.bar][p.idx])));
+  message(`${r.length} note${r.length > 1 ? "s" : ""} copied`);
+  if (cut) deleteSel();
+  return true;
+}
+
+function paste() {
+  if (!state.clip) return false;
+  const s = state.sel, last = range().slice(-1)[0];
+  const staff = s ? s.staff : state.caret.staff;
+  const bar = last ? last.bar : state.caret.bar;
+  const idx = last ? last.idx + 1 : state.score.staves[staff].bars[bar].length;
+  edit((sc) => {
+    const placed = [];
+    const r = M.pasteEvents(sc, staff, bar, idx, state.clip, placed);
+    if (r) return r;
+    const first = placed[0], last = placed[placed.length - 1];
+    state.sel = { staff, ...first };
+    state.selEnd = placed.length > 1 ? last : null;
+    state.caret = { staff, bar: last.bar };
+    return null;
+  });
+  return true;
+}
+
 function moveSel(dir) {
+  state.selEnd = null;
   const sc = state.score;
   let s = state.sel;
   if (!s) {
@@ -365,12 +438,13 @@ function moveSel(dir) {
 }
 
 function deleteSel() {
-  const s = state.sel;
+  const s = state.sel, r = range();
   if (!s) return;
-  const prev = M.prevEventPos(state.score, s.staff, s.bar, s.idx);
+  const prev = M.prevEventPos(state.score, s.staff, r[0].bar, r[0].idx);
   edit((sc) => {
-    M.deleteEvent(sc, s.staff, s.bar, s.idx);
+    M.deleteRange(sc, s.staff, r[0], r[r.length - 1]);
     state.sel = prev ? { staff: s.staff, bar: prev.bar, idx: prev.idx } : null;
+    state.selEnd = null;
     return null;
   });
 }
@@ -412,6 +486,7 @@ function onClick(e) {
   const L = locate(e);
   if (!L) return;
   state.caret = { staff: L.staff, bar: L.bar };
+  state.selEnd = null;
   const chord = e.shiftKey || state.armed.chord;
   const s = state.sel;
   // chord target: the clicked note, else (chord mode) the selection in this staff and bar
@@ -430,9 +505,10 @@ function onClick(e) {
   }
   const pitch = state.armed.rest ? null : withAlter(L.pitch.step, L.pitch.oct);
   const ok = edit((sc) => {
-    const r = M.appendEvent(sc, L.staff, L.bar, makeEvent(pitch));
+    const at = L.cell.notes.filter((n) => n.x < L.x).length; // insert by position (DESIGN §11.5)
+    const r = M.insertEvent(sc, L.staff, L.bar, at, makeEvent(pitch));
     if (r) return r;
-    state.sel = { staff: L.staff, bar: L.bar, idx: sc.staves[L.staff].bars[L.bar].length - 1 };
+    state.sel = { staff: L.staff, bar: L.bar, idx: at };
     return null;
   });
   if (ok && pitch) { message(M.pitchName(pitch)); hear(selEvent()); }
@@ -470,6 +546,9 @@ function onKey(e) {
   if (mod && k.toLowerCase() === "s") { e.preventDefault(); saveFile(); return; }
   if (mod && k.toLowerCase() === "o") { e.preventDefault(); $("file").click(); return; }
   if (mod && (k === "ArrowUp" || k === "ArrowDown")) { e.preventDefault(); transposeSel(k === "ArrowUp" ? 7 : -7); return; }
+  if (mod && k.toLowerCase() === "c") { if (copySel(false)) e.preventDefault(); return; }
+  if (mod && k.toLowerCase() === "x") { if (copySel(true)) e.preventDefault(); return; }
+  if (mod && k.toLowerCase() === "v") { if (paste()) e.preventDefault(); return; }
   if (mod || e.altKey) return;
   const durKey = { 7: "w", 6: "h", 5: "q", 4: "8", 3: "16", 2: "32" }[k];
   let handled = true;
@@ -484,10 +563,11 @@ function onKey(e) {
   else if (k === "t" || k === "T") tie();
   else if (k === "ArrowUp") transposeSel(1);
   else if (k === "ArrowDown") transposeSel(-1);
-  else if (k === "ArrowLeft") moveSel(-1);
-  else if (k === "ArrowRight") moveSel(1);
+  else if (k === "ArrowLeft") e.shiftKey ? extendSel(-1) : moveSel(-1);
+  else if (k === "ArrowRight") e.shiftKey ? extendSel(1) : moveSel(1);
+  else if (k === ";") toggleTriplet();
   else if (k === "Delete" || k === "Backspace") deleteSel();
-  else if (k === "Escape") { state.sel = null; refresh(); }
+  else if (k === "Escape") { state.sel = null; state.selEnd = null; refresh(); }
   else if (k === " ") togglePlay();
   else if (k === "?") $("help").showModal();
   else handled = false;
@@ -497,7 +577,10 @@ function onKey(e) {
 function transposeSel(steps) {
   const s = state.sel;
   if (!s) { message("Select a note first", true); return; }
-  if (!edit((sc) => M.transpose(sc, s.staff, s.bar, s.idx, steps))) return;
+  const r = range().filter((p) => state.score.staves[s.staff].bars[p.bar][p.idx].pitches.length);
+  if (!r.length) { message("Rests have no pitch", true); return; }
+  if (!edit((sc) => { for (const p of r) M.transpose(sc, s.staff, p.bar, p.idx, steps); return null; })) return;
+  if (r.length > 1) return;
   const ev = selEvent();
   if (ev && ev.pitches.length) { message(ev.pitches.map(M.pitchName).join(" ")); hear(ev); }
 }

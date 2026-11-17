@@ -21,9 +21,9 @@ Smart Shape, Lyrics, Repeat, Key Signature, Mass Mover).
 
 | Feature | Notes | Size |
 |---|---|---|
-| **Select a range, then copy / paste / delete / transpose it** | The biggest workflow gap. Today you can select one note at a time. | M |
-| **Insert notes mid-bar** | Entry only appends at the end of a bar. Enter should overwrite from the cursor, and Insert should push later notes along. | M |
-| **Tuplet entry** (triplets first) | Display and import already work; only entry is missing. | S |
+| **Select a range, then copy / paste / delete / transpose it** | **Done (Phase 9)** with Shift+←/→. Mouse range selection is still to do. | — |
+| **Insert notes mid-bar** | **Done (Phase 9):** typing goes after the selected note; clicking between notes inserts there. An overwrite mode is not done. | — |
+| **Tuplet entry** (triplets first) | **Done (Phase 9)** for triplets (`;`). Other ratios still to do. | — |
 | **Second voice** (stems up/down in one staff) | Needed for piano and SATB on two staves. Importers currently drop voice 2 and say so. | L |
 | **Articulations**: staccato, accent, tenuto, marcato, fermata | VexFlow draws them. Playback should shorten staccato notes. | S |
 | **Dynamics and hairpins** (p, mf, ff, cresc.) | NotePad's Expression tool also did tempo text and rehearsal letters. | M |

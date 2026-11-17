@@ -11,7 +11,7 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 ## Using Coda
 
 - **New** sets up a score: title, composer, staves (single staff, piano, SATB…), key, time, tempo, number of bars.
-- **Click** on a staff to add a note of the selected length. Click a note to select it. To build a chord, select a note and press **Shift+A–G**, **Shift+click** the staff, or turn on the chord button so clicks add to the selected note.
+- **Click** on a staff to add a note of the selected length; clicking between two notes inserts it there. Click a note to select it. To build a chord, select a note and press **Shift+A–G**, **Shift+click** the staff, or turn on the chord button so clicks add to the selected note.
 - **Type** letters to add notes quickly. Coda picks the octave closest to the previous note and moves to the next bar when one fills up.
 - **Key/Time** changes the key or time signature from the current bar on.
 - **Play** plays from the current bar. **Print** prints the score, or saves it as a PDF from your browser's print dialog.
@@ -21,7 +21,7 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 
 | Key | Action |
 |---|---|
-| `A`–`G` | Add that note |
+| `A`–`G` | Add that note after the selected note (or at the end of the bar) |
 | `Shift+A`–`G` | Add that note above the selected note (chord) |
 | `R` | Add a rest |
 | `7` `6` `5` `4` `3` `2` | Whole, half, quarter, eighth, 16th, 32nd (also changes the selected note) |
@@ -29,7 +29,9 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 | `+` `-` `N` | Sharp, flat, natural |
 | `T` | Tie the selected note to the next |
 | `↑` `↓` | Move the selected note by a step (with Ctrl/Cmd: an octave) |
-| `←` `→` | Select the previous / next note |
+| `←` `→` | Select the previous / next note (with Shift: extend the selection) |
+| `Ctrl/Cmd+C`, `X`, `V` | Copy, cut, paste the selected notes |
+| `;` | Triplets on/off for the next notes |
 | `Delete` | Delete the selected note |
 | `Space` | Play / stop |
 | `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z` | Undo, redo |
@@ -52,9 +54,9 @@ voices, grace notes, clef changes…), it opens the rest and lists what it left 
 
 ## Not supported yet
 
-Lyrics, articulations, dynamics, slurs, grace notes, entering tuplets, more than one voice per
-staff, repeats and endings, mid-score clef changes, transposing instruments, inserting notes in the
-middle of a bar, copy/paste, page layout controls, sampled instrument sounds, and MIDI export.
+Lyrics, articulations, dynamics, slurs, grace notes, tuplets other than triplets, more than one
+voice per staff, repeats and endings, mid-score clef changes, transposing instruments, page layout
+controls, sampled instrument sounds, and MIDI export. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Running it locally
 

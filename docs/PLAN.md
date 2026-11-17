@@ -33,7 +33,7 @@ only says what to build in what order and how to know each phase is finished.
 | 6 | `.musx` import | done (checked on musxdom's test files; no real-world piece yet) |
 | 7 | Publish to GitHub Pages | done: https://riceelijah.github.io/coda/ |
 | 8 | Fix-first: chords, audition, key/time changes, double dots, bar numbers | done |
-| 9 | Entry: insert mid-bar, triplets, range select + copy/paste | in progress |
+| 9 | Entry: insert mid-bar, triplets, range select + copy/paste | done |
 
 ---
 
@@ -233,10 +233,10 @@ entering a note sounds it; a key and a time change can be added at bar 5 and rem
 
 ## Phase 9 — Entry workflow (DESIGN §11.5–11.7)
 
-- [ ] `insertEvent`; keyboard inserts after the selection; click inserts by x.
-- [ ] Triplet toggle (`;`).
-- [ ] Shift+←/→ range; Delete, transpose, copy, cut, paste on the range as single undo steps.
-- [ ] Help, README, ROADMAP updated.
+- [x] `insertEvent`; keyboard inserts after the selection; click inserts by x.
+- [x] Triplet toggle (`;`).
+- [x] Shift+←/→ range; Delete, transpose, copy, cut, paste on the range as single undo steps.
+- [x] Help, README, ROADMAP updated.
 
 **Done when:** a note can be added between two existing notes by click and by keyboard; three
 triplet eighths fill a quarter; a two-bar passage can be copied and pasted elsewhere and undone in one step.
