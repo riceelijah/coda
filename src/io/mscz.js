@@ -3,7 +3,7 @@
 import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE } from "../model.js";
 import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
-import { GM } from "../gm.js";
+import { gmByName } from "../gm.js";
 
 const DUR = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16", "32nd": "32" };
 const LONGER = new Set(["breve", "long"]);
@@ -61,7 +61,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     const prog = parseInt(kid(kid(kid(part, "Instrument"), "Channel"), "program")?.getAttribute("value"), 10);
     let program = prog > 0 && prog <= 127 ? prog : undefined;
     if (program === undefined && name) {
-      const byName = GM.find((g) => g.name.toLowerCase() === name.trim().toLowerCase());
+      const byName = gmByName(name);
       if (byName) program = byName.program;
       else if (!/piano/i.test(name)) report.count("Parts with no instrument sound found (played as piano)");
     }

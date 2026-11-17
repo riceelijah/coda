@@ -132,3 +132,11 @@ export const GM = [
   ["applause", "Applause"],
   ["gunshot", "Gunshot"],
 ].map(([slug, name], program) => ({ program, slug, name, family: FAMILIES[program >> 3] }));
+
+// A part name -> its General MIDI entry, or undefined: "Trumpet in B♭ 2" -> Trumpet,
+// "Alto Saxophone" -> Alto Sax, "Horn in F" -> French Horn.
+export function gmByName(name = "") {
+  const n = name.toLowerCase().replace(/\s+in\s+[a-g]\b.*$/, "").replace(/\s+(\d+|[ivx]+)\.?$/, "").trim()
+    .replace(/\bsaxophone\b/, "sax").replace(/^horn$/, "french horn").replace(/^(double|string) bass$/, "contrabass").replace(/^violoncello$/, "cello");
+  return n ? GM.find((g) => g.name.toLowerCase() === n) : undefined;
+}

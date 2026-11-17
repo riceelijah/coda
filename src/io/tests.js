@@ -3,7 +3,7 @@ import { exportMusicXML, importMusicXML, exportMXL, importMXL } from "./musicxml
 import { exportMIDI, importMIDI } from "./midi.js";
 import { importBytes, sniff, LEGACY_MUS } from "./open.js";
 import { renderAudio, wavBytes, schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES } from "../play.js";
-import { GM } from "../gm.js";
+import { GM, gmByName } from "../gm.js";
 import * as M from "../model.js";
 import * as store from "../store.js";
 import { markOf } from "./mscz.js";
@@ -71,6 +71,10 @@ export function roundTripFixture() {
 }
 
 export async function run({ check, eq }) {
+  await check("instrument sound from a part name", () => {
+    const got = ["Trumpet in B♭ 2", "Alto Saxophone", "Horn in F", "Violin I", "Piano", "Kazoo"].map((n) => gmByName(n)?.name ?? null);
+    return eq(got, ["Trumpet", "Alto Sax", "French Horn", "Violin", null, null]) || JSON.stringify(got);
+  });
   await check("MusicXML round trip (deep equal)", () => {
     const a = roundTripFixture();
     const { score: b } = importMusicXML(exportMusicXML(a), "x.musicxml");

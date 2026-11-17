@@ -6,7 +6,7 @@
 import { padBars, noteCount, tupletOk, durFromTicks, nearestDur, measuresFrom, setMark, splitTicks, barTicks, barCapacity, allLayers, shiftPitch, midi, MAX_LAYERS,
   eventTicks, clearBrokenSpans, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, DYNS } from "../model.js";
 import { DYN_IN } from "./musicxml.js";
-import { GM } from "../gm.js";
+import { gmByName } from "../gm.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
 // Symmetric XOR keystream used for score.dat. Ported from the CC0 routine in
@@ -51,7 +51,7 @@ const nums = (el) => (el ? [...el.children].map((c) => parseInt(c.textContent, 1
 const attr = (el, a) => parseInt(el.getAttribute(a), 10);
 const str = (el, name) => kid(el, name)?.textContent.trim() || "";
 // strip Enigma text codes like ^font(Times,4096)^size(12)
-const plain = (s) => s.replace(/\^\w+\([^)]*\)/g, "").replace(/\^\^/g, "^").trim();
+const plain = (s) => s.replace(/\^(flat|sharp|natural)\(\)/g, (_, a) => ({ flat: "♭", sharp: "♯", natural: "♮" })[a]).replace(/\^\w+\([^)]*\)/g, "").replace(/\^\^/g, "^").trim();
 
 // Articulation symbols -> Coda marks (DESIGN §16). SMuFL fonts use code points U+E4A0…; the older
 // Finale music fonts (Maestro and its look-alikes) use plain character codes.
@@ -77,6 +77,8 @@ const MAC_BYTE = (() => {
   return m;
 })();
 const legacyCode = (cp) => (cp < 128 ? cp : MAC_BYTE.get(cp) ?? (cp < 256 ? cp : null));
+// Files saved on Windows store the Windows character instead (fff is "ì", 236): try that second.
+const legacy = (table, cp) => table[legacyCode(cp)] ?? (cp < 256 ? table[cp] : undefined);
 
 // Dynamic glyphs -> letters (DESIGN §22): SMuFL U+E520…, and the codes the five legacy fonts share
 // in openmusx/smufl-mapping. The joined letters go through MusicXML's table (pppp -> ppp, sfp -> fp…).
@@ -262,7 +264,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     const d = articDefs.get(defId);
     const c = num(d, "charMain", -1);
     if (c >= 0xe000) return smuflMarks(c);
-    return LEGACY_FONTS.test(fontNames.get(String(num(d, "fontMain", 0))) || "") ? LEGACY_MARKS[legacyCode(c)] || null : null;
+    return LEGACY_FONTS.test(fontNames.get(String(num(d, "fontMain", 0))) || "") ? legacy(LEGACY_MARKS, c) || null : null;
   };
 
   // Transpositions (DESIGN §21). Finale gives the interval from concert to written: a diatonic step
@@ -326,11 +328,11 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     const spec = staffSpecs.get(sid);
     let clefId = num(spec, "defaultClef", 0);
     const staff = { name: textOf(num(spec, "fullName", -1)), clef: null, brace: braces.has(si), bars: [] };
-    const gm = staff.name && GM.find((g) => g.name.toLowerCase() === staff.name.trim().toLowerCase());
+    const gm = gmByName(staff.name);
     const upper = si > 0 && braces.has(si - 1) ? score.staves[si - 1] : null; // lower staff of a braced pair
     if (upper) { if (upper.program !== undefined) staff.program = upper.program; }
     else if (gm) staff.program = gm.program;
-    else if (!/piano/i.test(staff.name)) report.count("Parts with no instrument sound found (played as piano)");
+    else if (staff.name && !/piano/i.test(staff.name)) report.count("Parts with no instrument sound found (played as piano)"); // an unnamed staff has nothing to go on
     const layerBar = (l, mi) => {
       if (l === 1) return staff.bars[mi];
       staff.layers ||= [];
@@ -566,7 +568,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     const body = [...raw.replace(/\^\w+\([^)]*\)/g, "").replace(/\^\^/g, "^").trim()];
     let word;
     if (body.length && body.every((c) => SMUFL_DYN[c.codePointAt(0)])) word = body.map((c) => SMUFL_DYN[c.codePointAt(0)]).join("");
-    else if (body.length === 1 && LEGACY_FONTS.test(font || "")) word = LEGACY_DYN[legacyCode(body[0].codePointAt(0))];
+    else if (body.length === 1 && LEGACY_FONTS.test(font || "")) word = legacy(LEGACY_DYN, body[0].codePointAt(0));
     else if (isDyn) word = body.join("").toLowerCase();
     const d = word && (DYNS.includes(word) ? word : DYN_IN[word]);
     return d ? { dyn: d } : isDyn ? { odd: true } : null;
