@@ -410,6 +410,61 @@ function span(kind, type) {
   edit((sc) => M.toggleSpan(r.map((p) => sc.staves[s.staff].bars[p.bar][p.idx]), kind, type));
 }
 
+// ---------- lyrics (DESIGN §24) ----------
+// A box under the selected note: Space or Tab moves on, "-" moves on with a hyphen, Shift+Tab
+// goes back, Enter or clicking away finishes, Escape drops what's typed. Each syllable is one edit.
+function openLyrics() {
+  const s = state.sel;
+  if (!s || !selEvent()?.pitches.length) { message("Select the note the lyrics start on", true); return; }
+  state.selEnd = null;
+  placeLyricBox();
+  const box = $("lyric-box");
+  box.hidden = false; box.focus(); box.select();
+}
+
+function placeLyricBox() {
+  const box = $("lyric-box"), s = state.sel, ev = selEvent();
+  const cell = state.hit.cells.find((c) => c.staff === s.staff && c.bar === s.bar);
+  const n = cell?.notes.find((q) => q.idx === s.idx);
+  if (!cell || !n) { box.hidden = true; return; }
+  const r = cell.svg.getBoundingClientRect(), sheet = $("sheet").getBoundingClientRect(), k = r.width / SHEET_W;
+  box.value = ev.lyric || "";
+  box.style.left = r.left - sheet.left + (n.x + 6) * k - 55 + "px";
+  box.style.top = r.top - sheet.top + (cell.yBottom + 18 - cell.svg.viewBox.baseVal.y) * k + "px";
+}
+
+function commitLyric(hyph) {
+  const s = state.sel, ev = selEvent(), text = $("lyric-box").value.trim();
+  if (!s || !ev || ((ev.lyric || "") === text && !!ev.lyricHyph === (hyph && !!text))) return;
+  edit((sc) => { M.setLyric(sc.staves[s.staff].bars[s.bar][s.idx], text, hyph); return null; });
+}
+
+// Next (dir 1) or previous note with pitches in the layer; false at either end.
+function lyricStep(dir) {
+  const step = dir > 0 ? M.nextEventPos : M.prevEventPos, staff = state.sel.staff, bars = M.layerBars(state.score.staves[staff], state.layer);
+  let p = state.sel;
+  do { const n = step(state.score, staff, p.bar, p.idx, state.layer); p = n && { staff, ...n }; }
+  while (p && !bars[p.bar][p.idx].pitches.length);
+  if (!p) return false;
+  state.sel = p; state.caret = { staff: p.staff, bar: p.bar };
+  refresh(); placeLyricBox();
+  $("lyric-box").focus(); $("lyric-box").select();
+  return true;
+}
+
+function closeLyrics() { const box = $("lyric-box"); box.hidden = true; box.blur(); }
+
+function onLyricKey(e) {
+  const k = e.key;
+  if (k === " " || (k === "Tab" && !e.shiftKey) || k === "-") {
+    e.preventDefault();
+    commitLyric(k === "-");
+    if (!lyricStep(1)) closeLyrics();
+  } else if (k === "Tab") { e.preventDefault(); commitLyric(selEvent()?.lyricHyph); lyricStep(-1); }
+  else if (k === "Enter") { e.preventDefault(); commitLyric(selEvent()?.lyricHyph); closeLyrics(); }
+  else if (k === "Escape") { e.preventDefault(); closeLyrics(); }
+}
+
 function tie() {
   const s = state.sel;
   if (!s) { message("Select a note first", true); return; }
@@ -749,6 +804,7 @@ function onKey(e) {
   else if (k === "n" || k === "N") accidental(0);
   else if (k === "t" || k === "T") tie();
   else if (k === "s" || k === "S") span("slur", true);
+  else if (k === "l" || k === "L") openLyrics();
   else if (k === "ArrowUp") transposeSel(e.shiftKey ? 7 : 1); // Shift: an octave, as in NotePad
   else if (k === "ArrowDown") transposeSel(e.shiftKey ? -7 : -1);
   else if (k === "ArrowLeft") e.shiftKey ? extendSel(-1) : moveSel(-1);
@@ -1121,6 +1177,7 @@ const CMD = {
   ...Object.fromEntries(M.DYNS.map((d) => ["d-" + d, { run: () => dynamic(d), on: hasSel }])),
   "d-none": { run: () => dynamic(null), on: hasSel },
   "n-slur": { run: () => span("slur", true), on: hasSel },
+  "n-lyrics": { run: () => openLyrics(), on: hasSel },
   "n-cresc": { run: () => span("hp", "<"), on: hasSel },
   "n-dim": { run: () => span("hp", ">"), on: hasSel },
   "n-layer1": { run: () => setLayer(0) },
@@ -1532,6 +1589,8 @@ function init() {
   document.addEventListener("pointermove", onDrag);
   document.addEventListener("pointerup", () => (drag = null));
   document.addEventListener("keydown", onKey);
+  $("lyric-box").addEventListener("keydown", onLyricKey);
+  $("lyric-box").addEventListener("blur", () => { if (!$("lyric-box").hidden) { commitLyric(selEvent()?.lyricHyph); closeLyrics(); } });
   document.addEventListener("dragover", (e) => e.preventDefault());
   document.addEventListener("drop", (e) => { e.preventDefault(); openFile(e.dataTransfer.files[0]); });
   let rt = 0;

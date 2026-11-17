@@ -106,6 +106,8 @@
     background: rgba(37, 99, 235, .45); transform: rotate(-20deg);
   }
   .hl { position: absolute; pointer-events: none; border-radius: 3px; }
+  #lyric-box { position: absolute; width: 110px; font: 15px Georgia, serif; text-align: center; padding: 1px 4px;
+    border: 1px solid #2563eb; border-radius: 3px; background: #fff; color: #000; z-index: 5; }
   #caret-hl { background: rgba(37, 99, 235, .06); outline: 1px dashed rgba(37, 99, 235, .35); }
   #play-hl { background: rgba(250, 204, 21, .25); display: none; }
 
@@ -171,7 +173,7 @@
   @media print {
     @page { margin: 12mm; }
     body { display: block; background: #fff; }
-    #topbar, #palette, #status, #report, #ctx, dialog, #ghost, .hl { display: none !important; }
+    #topbar, #palette, #status, #report, #ctx, dialog, #ghost, .hl, #lyric-box { display: none !important; }
     #desk { padding: 0; overflow: visible; }
     #sheet { box-shadow: none; padding: 0; max-width: none; }
     #title:hover, #composer:hover { background: none; }
@@ -240,6 +242,7 @@
         <button role="menuitem" id="n-accent">Accent</button>
         <button role="menuitem" id="n-tenuto">Tenuto</button>
         <button role="menuitem" id="n-marcato">Marcato</button>
+        <button role="menuitem" id="n-lyrics" data-short="L">Lyrics…</button>
         <button role="menuitem" id="n-slur" data-short="S">Slur</button>
         <button role="menuitem" id="n-cresc">Crescendo hairpin</button>
         <button role="menuitem" id="n-dim">Diminuendo hairpin</button>
@@ -298,6 +301,7 @@
     <div id="caret-hl" class="hl"></div>
     <div id="play-hl" class="hl"></div>
     <div id="ghost"></div>
+    <input id="lyric-box" type="text" hidden autocomplete="off" spellcheck="false" aria-label="Lyric for the selected note. Space or Tab: next note. Hyphen: next syllable. Enter: done.">
   </div>
 </main>
 

@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC } from "../model.js";
 import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
@@ -217,6 +217,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               if (sp.getAttribute("type") === "Slur") { if (kid(sp, "next")) ev.slur = true; else if (kid(sp, "prev")) ev.slurEnd = true; }
               else if (kid(sp, "next")) report.count(`Lines (${sp.getAttribute("type")}) not imported`);
             }
+            lyricIn(el, ev, report);
             lastEv[vi] = ev;
             // a chord or rest that starts past where this voice has got to: rests in front
             const gap = Math.floor((cur - barTicks(bar)) / 60) * 60;
@@ -268,7 +269,20 @@ const frac = (ticks) => { const g = gcd(Math.abs(ticks), 1920) || 1; return `${t
 const tpcOf = (p) => [14, 16, 18, 13, 15, 17, 19][p.step] + 7 * p.alter;
 const loc = (dm, dt) => `<location>${dm ? `<measures>${dm}</measures>` : ""}${dt ? `<fractions>${frac(dt)}</fractions>` : ""}</location>`;
 
+// The first verse of a chord's <Lyrics> onto `ev` (DESIGN §24); other verses and extender lines are counted.
+function lyricIn(el, ev, report) {
+  const ls = kids(el, "Lyrics").filter((l) => txt(l, "text"));
+  if (!ls.length) return;
+  if (!ev.pitches.length) { report.count("Lyrics on rests (not imported)"); return; }
+  const l = ls.find((x) => !+(txt(x, "no") || 0)) || ls[0];
+  if (ls.length > 1) report.count("Lyrics beyond the first verse (not imported)", ls.length - 1);
+  if (kid(l, "ticks_f") || kid(l, "ticks")) report.count("Lyric extender lines (not imported)");
+  if (txt(l, "text").length > MAX_LYRIC) report.count("Long lyrics shortened");
+  setLyric(ev, txt(l, "text"), ["begin", "middle"].includes(txt(l, "syllabic")));
+}
+
 export function exportMSCX(score) {
+  const syl = syllabics(score);
   const x = ['<?xml version="1.0" encoding="UTF-8"?>', '<museScore version="4.20">', "<Score>", "<Division>480</Division>"];
   x.push(`<metaTag name="workTitle">${esc(score.title || "")}</metaTag>`, `<metaTag name="composer">${esc(score.composer || "")}</metaTag>`);
   let id = 0;
@@ -302,7 +316,7 @@ export function exportMSCX(score) {
         }
         const bar = layers[v][b];
         if (v === 0 && !bar.length) x.push(`<Rest><durationType>measure</durationType><duration>${frac(cap)}</duration></Rest>`);
-        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st, spans[v]));
+        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st, spans[v], syl));
         x.push("</voice>");
       }
       x.push("</Measure>");
@@ -354,7 +368,7 @@ function spanMap(bars) {
 }
 
 // One voice's events; a first voice is padded with rests to `cap`.
-function voiceXml(bar, ties, b, cap, st, spans = {}) {
+function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
   const x = [];
   let open = null; // {tup, left: ticks still to fill}
   bar.forEach((e, i) => {
@@ -382,7 +396,8 @@ function voiceXml(bar, ties, b, cap, st, spans = {}) {
       // ponytail: MuseScore slurs need chords at both ends; one on a rest is left out of this file
       const slurs = (sp.slurNext ? `<Spanner type="Slur"><Slur/><next>${sp.slurNext}</next></Spanner>` : "") +
         (sp.slurPrev ? `<Spanner type="Slur"><prev>${sp.slurPrev}</prev></Spanner>` : "");
-      x.push(`<Chord>${head}${arts}${slurs}${notes}</Chord>`);
+      const s = syl.get(e), lyr = s ? `<Lyrics>${s === "single" ? "" : `<syllabic>${s}</syllabic>`}<text>${esc(e.lyric)}</text></Lyrics>` : "";
+      x.push(`<Chord>${head}${lyr}${arts}${slurs}${notes}</Chord>`);
     }
     if (sp.hpPrev) x.push(`<Spanner type="HairPin"><prev>${sp.hpPrev}</prev></Spanner>`);
     if (open) { open.left -= eventTicks(e); if (open.left <= 0) { x.push("<endTuplet/>"); open = null; } }

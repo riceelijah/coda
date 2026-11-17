@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -19,7 +19,7 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 // ---------- export ----------
 
-function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop }) {
+function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl }) {
   const x = ["<note>"];
   if (chord) x.push("<chord/>");
   if (p) {
@@ -46,6 +46,7 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop }) {
     if (arts.length) nots.push(`<articulations>${arts.map((m) => ARTIC_OUT[m]).join("")}</articulations>`);
   }
   if (nots.length) x.push(`<notations>${nots.join("")}</notations>`);
+  if (!chord && syl) x.push(`<lyric number="1"><syllabic>${syl}</syllabic><text>${esc(ev.lyric)}</text></lyric>`);
   x.push("</note>");
   return x.join("");
 }
@@ -70,7 +71,7 @@ export function completeTuplet(bar, cap) {
 }
 
 // Notes for one staff in one bar. Returns {xml, ticks written}.
-function barXml(score, s, b, staffNo, voice, v = 0) {
+function barXml(score, s, b, staffNo, voice, v, syl) {
   const cap = barCapacity(attrsAt(score, b).time);
   const bars = layerBars(score.staves[s], v);
   const bar = completeTuplet(bars[b], cap);
@@ -84,7 +85,7 @@ function barXml(score, s, b, staffNo, voice, v = 0) {
   bar.forEach((ev, i) => {
     const before = i > 0 ? bar[i - 1] : prev;
     const tied = (p) => !!(before && before.tie && before.pitches.some((q) => q.step === p.step && q.oct === p.oct));
-    const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i) };
+    const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev) };
     const dir = (body) => `<direction placement="below"><direction-type>${body}</direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`;
     if (ev.dyn) out.push(dir(`<dynamics><${ev.dyn}/></dynamics>`));
     if (ev.hp) out.push(dir(`<wedge type="${ev.hp === "<" ? "crescendo" : "diminuendo"}"/>`));
@@ -98,6 +99,7 @@ function barXml(score, s, b, staffNo, voice, v = 0) {
 }
 
 export function exportMusicXML(score) {
+  const syl = syllabics(score);
   const groups = partGroups(score);
   const x = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -148,7 +150,7 @@ export function exportMusicXML(score) {
       // every layer bar with notes, as voice staff×4 + layer + 1, separated by <backup> (DESIGN §15)
       const chunks = [];
       g.forEach((s, k) => allLayers(score.staves[s]).forEach((bars, v) => {
-        if (v === 0 || bars[b].length) chunks.push(barXml(score, s, b, g.length > 1 ? k + 1 : 0, k * MAX_LAYERS + v + 1, v));
+        if (v === 0 || bars[b].length) chunks.push(barXml(score, s, b, g.length > 1 ? k + 1 : 0, k * MAX_LAYERS + v + 1, v, syl));
       }));
       chunks.forEach((r, i) => {
         x.push(r.xml);
@@ -380,7 +382,6 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     }
   }
   const addMarks = (ev) => { for (const m of marks) setMark(ev, m, true); };
-  if (!isRest && kids(el, "lyric").length) report.count("Notes with lyrics (not imported)");
   const tieStart = kids(el, "tie").some((t) => t.getAttribute("type") === "start");
 
   let pitch = null;
@@ -405,6 +406,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     addMarks(ev);
     if (slur.start) ev.slur = true;
     if (slur.stop) ev.slurEnd = true;
+    if (!ev.lyric) lyricIn(el, ev, report);
     return;
   }
 
@@ -452,9 +454,23 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   if (ph && (ph.mi < mi || start >= ph.at)) { ev.hp = ph.hp; pendHp[staffNo] = null; }
   if (slur.start) ev.slur = true;
   if (slur.stop) ev.slurEnd = true;
+  lyricIn(el, ev, report);
   lastAny[staffNo] = ev;
   bar.push(ev);
   lastEvent[lk] = ev;
+}
+
+// The first verse of a note's lyrics onto `ev` (DESIGN §24); other verses and extender lines are counted.
+function lyricIn(el, ev, report) {
+  const ls = kids(el, "lyric").filter((l) => kids(l, "text").some((t) => t.textContent.trim()));
+  if (!ls.length) return;
+  if (!ev.pitches.length) { report.count("Lyrics on rests (not imported)"); return; }
+  const l = ls.find((x) => (x.getAttribute("number") || "1") === "1") || ls[0];
+  if (ls.length > 1) report.count("Lyrics beyond the first verse (not imported)", ls.length - 1);
+  if (kid(l, "extend") && kid(l, "extend").getAttribute("type") !== "stop") report.count("Lyric extender lines (not imported)");
+  const text = kids(l, "text").map((t) => t.textContent.trim()).join("‿"); // elided syllables share a note
+  if (text.length > MAX_LYRIC) report.count("Long lyrics shortened");
+  setLyric(ev, text, ["begin", "middle"].includes(txt(l, "syllabic")));
 }
 
 // MusicXML voice -> layer index for a staff (numeric voice order); -1 past the fourth (DESIGN §15).

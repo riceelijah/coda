@@ -399,6 +399,30 @@ export function clearBrokenSpans(score) {
   return n;
 }
 
+// ---------- lyrics (DESIGN §24) ----------
+// One verse: ev.lyric is the syllable, ev.lyricHyph a hyphen to the next one. Notes only.
+export const MAX_LYRIC = 40;
+// MusicXML/MuseScore <syllabic> for every lyric in the score, keyed by event: a hyphen after a
+// syllable makes it begin/middle, one before it makes it middle/end.
+export function syllabics(score) {
+  const m = new Map();
+  for (const st of score.staves) for (const bars of allLayers(st)) {
+    let prev = false;
+    for (const bar of bars) for (const ev of bar) if (ev.lyric) {
+      m.set(ev, ev.lyricHyph ? (prev ? "middle" : "begin") : (prev ? "end" : "single"));
+      prev = !!ev.lyricHyph;
+    }
+  }
+  return m;
+}
+
+export function setLyric(ev, text, hyph = false) {
+  const t = String(text || "").trim().slice(0, MAX_LYRIC);
+  if (!t || !ev.pitches.length) { delete ev.lyric; delete ev.lyricHyph; return; }
+  ev.lyric = t;
+  if (hyph) ev.lyricHyph = true; else delete ev.lyricHyph;
+}
+
 export function setTuplet(score, s, b, i, tup) {
   const ev = score.staves[s].bars[b][i];
   if (tup && !tupletOk(ev.dur, ev.dots, tup)) return `A ${tup[0]}:${tup[1]} tuplet doesn't fit that note value`;
@@ -595,7 +619,9 @@ export function isValidScore(sc) {
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m)))) &&
       (e.dyn === undefined || DYNS.includes(e.dyn)) &&
       (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&
-      (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true)));
+      (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true) &&
+      (e.lyric === undefined || (typeof e.lyric === "string" && e.lyric.length > 0 && e.lyric.length <= MAX_LYRIC)) &&
+      (e.lyricHyph === undefined || (e.lyricHyph === true && e.lyric !== undefined))));
     return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) &&
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
       (st.transpose === undefined || okTranspose(st.transpose)) &&

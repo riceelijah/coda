@@ -27,8 +27,18 @@ function tinted(ctx, on, draw) {
 export function keyName(k) { return KEY_NAMES[k + 7]; }
 
 function minWidth(score, b) {
-  const n = Math.max(1, ...score.staves.flatMap((s) => allLayers(s).map((bars) => bars[b].length)));
-  return Math.max(150, 50 + 30 * n);
+  // 30 per note, more under a long lyric (DESIGN §24)
+  const need = (bar) => bar.reduce((w, e) => w + (e.lyric ? Math.max(30, e.lyric.length * 8.5 + 12) : 30), 0);
+  return Math.max(150, 50 + Math.max(30, ...score.staves.flatMap((s) => allLayers(s).map((bars) => need(bars[b])))));
+}
+
+// Top of each staff in a system: a staff with lyrics leaves a line for them below it.
+const LYRIC_ROOM = 30;
+const hasLyrics = (st) => allLayers(st).some((bars) => bars.some((bar) => bar.some((e) => e.lyric)));
+function staffTops(score) {
+  const y = [SYS_TOP];
+  for (let s = 1; s < score.staves.length; s++) y.push(y[s - 1] + STAFF_GAP + (hasLyrics(score.staves[s - 1]) ? LYRIC_ROOM : 0));
+  return y;
 }
 
 function prefixW(key) { return 55 + 13 * Math.abs(key) + 35; }
@@ -116,7 +126,8 @@ export function render(score, container, sel, opts = {}) {
   const noteRef = score.staves.map((st) => allLayers(st).map(() => [])); // [staff][layer][bar][idx] = {note, sys}
   const ctxs = [];
   const nStaves = score.staves.length;
-  const height = SYS_TOP + (nStaves - 1) * STAFF_GAP + 80 + SYS_BOTTOM;
+  const tops = staffTops(score);
+  const height = tops[nStaves - 1] + 80 + SYS_BOTTOM;
   const lastBar = score.measures.length - 1;
 
   systems.forEach((sys, si) => {
@@ -146,7 +157,7 @@ export function render(score, container, sel, opts = {}) {
         while (svg.lastChild) svg.removeChild(svg.lastChild);
         let x = LEFT_PAD;
         sys.bars.forEach((b, k) => {
-          score.staves.forEach((st, s) => new VFl.Stave(x, SYS_TOP + s * STAFF_GAP, sys.widths[k]).setContext(ctx).draw());
+          score.staves.forEach((st, s) => new VFl.Stave(x, tops[s], sys.widths[k]).setContext(ctx).draw());
           x += sys.widths[k];
         });
       } catch { /* nothing more we can do */ }
@@ -183,8 +194,42 @@ export function render(score, container, sel, opts = {}) {
   }));
 
   // Slurs and hairpins (DESIGN §23)
-  // Slurs first: hairpins go below them. floor["sys:staff"] = lowest slur y.
+  // Lyrics on one line per staff and system, below its notes and dynamics (DESIGN §24).
+  // floor["sys:staff"] = lowest thing drawn so far below the staff; hairpins go under it.
   const floor = {};
+  score.staves.forEach((st, s) => {
+    const rows = {}; // sys -> [{ev, note}] in order
+    allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
+      const ref = noteRef[s][v][b]?.[i];
+      if (ev.lyric && ref) (rows[ref.sys] ||= []).push({ ev, note: ref.note, v, b, i });
+    })));
+    for (const si in rows) {
+      const ctx = ctxs[si], row = rows[si].sort((p, q) => p.b - q.b || p.note.getAbsoluteX() - q.note.getAbsoluteX());
+      const stave = row[0].note.checkStave();
+      let y = stave.getYForLine(4) + 32;
+      for (const { ev, note } of row) {
+        const bb = note.getBoundingBox();
+        if (bb) y = Math.max(y, bb.y + bb.h + (ev.dyn ? 34 : 18));
+      }
+      try {
+        tintedAll([ctx], opts.dim && row.every((r) => r.v !== (opts.layer || 0)), () => {
+          ctx.save(); ctx.setFont("Georgia", 15);
+          const spans = row.map(({ ev, note }) => {
+            const w = ctx.measureText(ev.lyric).width, x = note.getAbsoluteX() + 6 - w / 2;
+            ctx.fillText(ev.lyric, x, y);
+            return { x, w };
+          });
+          row.forEach(({ ev }, k) => { // hyphen halfway to the next syllable, or just after at a line end
+            if (!ev.lyricHyph) return;
+            const a = spans[k], z = spans[k + 1], hx = z ? (a.x + a.w + z.x) / 2 - 3 : a.x + a.w + 4;
+            ctx.fillText("-", hx, y);
+          });
+          ctx.restore();
+        });
+      } catch (e) { console.error(e); }
+      floor[si + ":" + s] = y + 6;
+    }
+  });
   for (const [kind, end] of SPAN_KINDS) score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => {
     let open = null;
     bars.forEach((bar, b) => bar.forEach((ev, i) => {
@@ -277,7 +322,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
     const m = score.measures[b];
     const firstInSys = k === 0;
     const row = score.staves.map((st, s) => {
-      const stave = new VFl.Stave(x, SYS_TOP + s * STAFF_GAP, sys.widths[k]);
+      const stave = new VFl.Stave(x, staffTops(score)[s], sys.widths[k]);
       const key = keyAt(score, s, b);
       if (firstInSys) stave.addClef(st.clef).addKeySignature(keyName(key));
       if (firstInSys && si > 0 && s === 0) stave.setMeasure(b + 1); // bar number (DESIGN §11.4)

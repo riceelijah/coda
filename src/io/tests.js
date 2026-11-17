@@ -21,6 +21,7 @@ const ev = (dur, names, o = {}) => ({
   ...(o.dyn ? { dyn: o.dyn } : {}),
   ...(o.slur ? { slur: true } : {}), ...(o.slurEnd ? { slurEnd: true } : {}),
   ...(o.hp ? { hp: o.hp } : {}), ...(o.hpEnd ? { hpEnd: true } : {}),
+  ...(o.lyric ? { lyric: o.lyric } : {}), ...(o.lyricHyph ? { lyricHyph: true } : {}),
 });
 
 // Compact text form of a staff's bars, for readable expected values.
@@ -46,7 +47,7 @@ export function roundTripFixture() {
         [ev("q", "C4 E4 G4", { marks: ["staccato", "accent"], dyn: "p" }), ev("8", "D5", { dots: 1, slur: true }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
         [ev("q", "F#5", { slurEnd: true }), ev("8", "G5", { tup: [3, 2] }), ev("8", "A5", { tup: [3, 2] }), ev("8", "Bb5", { tup: [3, 2] }), ev("h", null, { marks: ["fermata"], dyn: "mf" })],
         [],
-        [ev("q", "D5", { dots: 1 }), ev("8", "C#5"), ev("16", "B4"), ev("16", "A4"), ev("8", "G4")],
+        [ev("q", "D5", { dots: 1, lyric: "Hal", lyricHyph: true }), ev("8", "C#5", { lyric: "le", lyricHyph: true }), ev("16", "B4", { lyric: "lu" }), ev("16", "A4", { lyric: "<you> & me" }), ev("8", "G4")],
         [ev("h", "D4 F#4 A4", { dots: 1 })],
       ] },
       { name: "Keys", clef: "bass", brace: false, program: 4, bars: [
@@ -285,6 +286,29 @@ export async function run({ check, eq }) {
     const flags = s.staves[0].bars.flat().map((e) => ["slur", "slurEnd", "hp", "hpEnd"].filter((k) => e[k]).map((k) => k + (k === "hp" ? e.hp : "")).join("+") || "-").join(" ");
     if (n !== 3 || flags !== "slur slurEnd - - - hp> hpEnd") return n + " " + flags;
     return M.isValidScore(s) && !M.isValidScore({ ...s, staves: [{ ...s.staves[0], bars: [[{ ...ev("w", "C4"), hp: "x" }], []] }] }) || "validation";
+  });
+
+  await check("lyrics: setLyric, syllabics, validation, import counts (DESIGN §24)", () => {
+    const s = M.newScore({ preset: "treble", bars: 1 });
+    s.staves[0].bars[0] = [ev("q", "C4"), ev("q", "D4"), ev("q", "E4"), ev("q", null)];
+    const [a, b, c, r] = s.staves[0].bars[0];
+    M.setLyric(a, "  Hap ", true); M.setLyric(b, "py"); M.setLyric(c, "x".repeat(50), true); M.setLyric(r, "rest");
+    if (a.lyric !== "Hap" || c.lyric.length !== M.MAX_LYRIC || r.lyric) return JSON.stringify(s.staves[0].bars[0]);
+    const syl = M.syllabics(s);
+    if ([a, b, c].map((e) => syl.get(e)).join() !== "begin,end,begin") return [...syl.values()].join();
+    M.setLyric(b, "");
+    if ("lyric" in b || !M.isValidScore(s)) return "clear";
+    if (M.isValidScore({ ...s, staves: [{ ...s.staves[0], bars: [[{ ...ev("w", "C4"), lyricHyph: true }]] }] })) return "hyphen without lyric";
+    const xml = `<score-partwise><part-list><score-part id="P1"><part-name>V</part-name></score-part></part-list><part id="P1"><measure number="1">
+      <attributes><divisions>1</divisions><time><beats>2</beats><beat-type>4</beat-type></time></attributes>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type>
+        <lyric number="1"><syllabic>begin</syllabic><text>la</text></lyric><lyric number="2"><text>two</text></lyric></note>
+      <note><pitch><step>D</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type>
+        <lyric><syllabic>end</syllabic><text>di</text><extend/></lyric></note></measure></part></score-partwise>`;
+    const { score: got, report } = importMusicXML(xml, "l.musicxml");
+    const e = got.staves[0].bars[0], msg = JSON.stringify(report);
+    if (e[0].lyric !== "la" || !e[0].lyricHyph || e[1].lyric !== "di" || e[1].lyricHyph) return JSON.stringify(e);
+    return (/first verse.*1/.test(msg) && /extender.*1/.test(msg)) || msg;
   });
 
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {
