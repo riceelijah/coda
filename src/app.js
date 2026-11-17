@@ -1594,7 +1594,9 @@ async function openFile(file) {
     showReport(file.name, report);
   } catch (e) {
     console.error(e);
-    showReport(file.name, { error: e.message || String(e) });
+    // a module that won't load is almost always old and new files mixed in the cache just after an update
+    const stale = /dynamically imported module|Importing a module script failed|does not provide an export named/i.test(e.message);
+    showReport(file.name, { error: stale ? "Part of Coda didn't load, probably because it was just updated. Reload the page and try again." : e.message || String(e) });
   }
   if (new URLSearchParams(location.search).has("debug") && /\.musx$/i.test(file.name)) debugMusx(file);
 }
