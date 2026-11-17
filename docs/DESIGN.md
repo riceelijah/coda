@@ -672,8 +672,9 @@ unless marked otherwise.
   (+ `fontMain` → `fontName`). SMuFL code points: U+E4A0 accent, E4A2 staccato, E4A4 tenuto,
   E4AC marcato, E4AE marcato+staccato, E4B0 accent+staccato, E4B2 tenuto+staccato, E4B4
   tenuto+accent (odd = below), E4C0–E4CB fermatas. Legacy fonts (Maestro, Petrucci, Jazz,
-  Broadway Copyist, Engraver Font Set): 46 staccato, 62 accent, 45 tenuto, 94 marcato, 85/117
-  fermata (94/85/117 from the font's character map, not yet seen in a file).
+  Broadway Copyist, Engraver Font Set): 45 tenuto, 46 staccato, 62 accent, 94/118 marcato, 85/117
+  fermata, 60/248 tenuto+staccato, 223/249 accent+staccato, 172/232 marcato+staccato: the codes all
+  five share in openmusx/smufl-mapping (46 and 62 also seen in a real file); others are counted.
 - Transposition: `staffSpec > transposition`, the interval concert → written: `keysig > interval`
   (steps) + `adjust` (key change in fifths), or `chromatic > diatonic` + `alteration` (key change
   as musxdom `calcKeySigChangeFromInterval`). Semitones = (fifths + 12·steps) / 7. In chromatic
@@ -705,7 +706,12 @@ unless marked otherwise.
   other expression (`measExprAssign`), `<ignore/>` entries and notes flagged `lyricDetail` or
   `smartShapeDetail` are counted. A display time signature different from the real one is
   counted (the real one is used).
-- Sound: the staff's full name matched against the General MIDI names, like MuseScore.
+- Sound: the staff's full name matched against the General MIDI names, like MuseScore; the
+  lower staff of a braced pair takes the upper one's.
+- Voice-2 launch times come from the file's durations (tuplet ratios applied), not from the
+  converted events, so an unsupported tuplet before a launch doesn't shift it.
+- `staffSpec` transpositions are checked only against synthetic data (the real samples transpose
+  through staff styles); the formula gives the known presets for their values.
 - With `?debug` in the page URL, opening a `.musx` also offers the decoded EnigmaXML as a download.
 
 ### 9.6 Import report

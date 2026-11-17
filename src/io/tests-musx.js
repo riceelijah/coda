@@ -104,7 +104,10 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
     const r = await open("v1v2Ties2");
     const st = r.score.staves[0];
     const marks = [st.bars, ...(st.layers || [])].flat(2).filter((e) => e.marks).map((e) => e.marks.join("+")).join(" ");
-    return marks === "staccato staccato staccato accent" || marks;
+    if (marks !== "staccato staccato staccato accent") return marks;
+    // voice 2 launches after a septuplet Coda can't keep: placed by the file's time, not the kept lengths
+    const L2 = brief({ bars: st.layers[0] }).split(" | ")[0];
+    return L2 === "r:h. F#5:16 A5:16 C#6:16 E6:16" || L2;
   });
 
   await check("musx samples: every one imports to a valid score", async () => {

@@ -61,8 +61,13 @@ const SMUFL_MARKS = {
   0xe4b0: ["accent", "staccato"], 0xe4b2: ["tenuto", "staccato"], 0xe4b4: ["tenuto", "accent"],
 };
 const smuflMarks = (c) => (c >= 0xe4c0 && c <= 0xe4cb ? ["fermata"] : SMUFL_MARKS[c & ~1] || null); // even = above, odd = below
-// ponytail: 46/62/45 seen in real files; 94, 85, 117 from the Maestro character map, not yet seen in a file
-const LEGACY_MARKS = { 46: ["staccato"], 62: ["accent"], 45: ["tenuto"], 94: ["marcato"], 85: ["fermata"], 117: ["fermata"] };
+// The codes all five fonts share, checked against openmusx/smufl-mapping's legacy glyph tables
+// (46 and 62 also seen in a real file). Font-specific codes (tenuto+accent) are counted.
+const LEGACY_MARKS = {
+  45: ["tenuto"], 46: ["staccato"], 62: ["accent"], 94: ["marcato"], 118: ["marcato"], 85: ["fermata"], 117: ["fermata"],
+  60: ["tenuto", "staccato"], 248: ["tenuto", "staccato"], 223: ["accent", "staccato"], 249: ["accent", "staccato"],
+  172: ["marcato", "staccato"], 232: ["marcato", "staccato"],
+};
 const LEGACY_FONTS = /^(Maestro|Petrucci|Jazz|Broadway Copyist|Engraver Font Set)$/i;
 
 // Key change (fifths) of a diatonic interval plus chromatic alteration, as musxdom's
@@ -244,8 +249,10 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     let clefId = num(spec, "defaultClef", 0);
     const staff = { name: textOf(num(spec, "fullName", -1)), clef: null, brace: braces.has(si), bars: [] };
     const gm = staff.name && GM.find((g) => g.name.toLowerCase() === staff.name.trim().toLowerCase());
-    if (gm) staff.program = gm.program;
-    else if (!/piano/i.test(staff.name) && !(si > 0 && braces.has(si - 1))) report.count("Parts with no instrument sound found (played as piano)");
+    const upper = si > 0 && braces.has(si - 1) ? score.staves[si - 1] : null; // lower staff of a braced pair
+    if (upper) { if (upper.program !== undefined) staff.program = upper.program; }
+    else if (gm) staff.program = gm.program;
+    else if (!/piano/i.test(staff.name)) report.count("Parts with no instrument sound found (played as piano)");
     const layerBar = (l, mi) => {
       if (l === 1) return staff.bars[mi];
       staff.layers ||= [];
@@ -257,8 +264,9 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     // one entry -> event, or null when skipped; ts is the voice's tuplet state
     const readEntry = (e, id, mi, ts) => {
       const skip = (label) => { report.count(label, Math.max(1, num(e, "numNotes", 0))); return null; };
+      ts.last = 0; // the entry's real length in ticks, from the file (tuplet ratio applied)
       if (has(e, "graceNote")) return skip("Grace notes skipped");
-      if (has(e, "ignore")) { report.count("Hidden placeholder entries skipped"); return null; }
+      if (has(e, "ignore")) { ts.last = (num(e, "dura", 0) * 480) / 1024; report.count("Hidden placeholder entries skipped"); return null; }
       for (const [flag, label] of DETAILS) if (has(e, flag)) report.count(label);
       const dura = num(e, "dura", 0);
       if (has(e, "tupletStart") && tupletDefs.has(id)) {
@@ -272,6 +280,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
       let dd = durFromTicks(ticks);
       if (!dd) { dd = nearestDur(ticks); report.count("Note lengths rounded"); }
       const ev = { dur: dd.dur, dots: dd.dots, pitches: [] };
+      ts.last = ts.tup ? (ticks * ts.tup[1]) / ts.tup[0] : ticks;
       if (ts.tup) {
         if (tupletOk(dd.dur, dd.dots, ts.tup)) ev.tup = ts.tup;
         else report.count("Notes in unsupported tuplets (kept written lengths)");
@@ -319,7 +328,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
         used.add(l);
         const bar = layerBar(l, mi), v1 = { tup: null, left: 0 }, v2 = { tup: null, left: 0 };
         const end = String(num(frame, "endEntry", -1));
-        let id = String(num(frame, "startEntry", -1)), guard = 0, run = null;
+        let id = String(num(frame, "startEntry", -1)), guard = 0, run = null, t = 0; // t: voice-1 time from the file
         while (id !== "0" && entries.has(id) && guard++ < 10000) {
           const e = entries.get(id);
           if (has(e, "v2") || has(e, "voice2")) {
@@ -327,7 +336,8 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
             if (ev && run) run.events.push(ev);
             else if (ev) report.count("Second-voice notes with no start skipped", Math.max(1, ev.pitches.length));
           } else {
-            const start = barTicks(bar), ev = readEntry(e, id, mi, v1);
+            const start = t, ev = readEntry(e, id, mi, v1);
+            t += v1.last;
             if (ev) bar.push(ev);
             run = has(e, "controller") ? { src: l, start, events: [] } : null;
             if (run) { runs.push(run); Object.assign(v2, { tup: null, left: 0 }); }
