@@ -16,6 +16,12 @@ const REST_KEY_LAYER = { treble: ["e/5", "f/4"], bass: ["g/3", "a/2"], alto: ["f
 const ACC = { "-2": "bb", "-1": "b", 0: "n", 1: "#", 2: "##" };
 const ACCENT = "#2563eb";
 const DIM = "#9aa0a6"; // layers other than the one being edited (screen only)
+// Draw with the grey of an inactive layer: beams, tuplets and ties don't take a note's style.
+function tinted(ctx, on, draw) {
+  if (!on) { draw(); return; }
+  ctx.save(); ctx.setFillStyle(DIM); ctx.setStrokeStyle(DIM);
+  try { draw(); } finally { ctx.restore(); }
+}
 
 export function keyName(k) { return KEY_NAMES[k + 7]; }
 
@@ -155,7 +161,7 @@ export function render(score, container, sel, opts = {}) {
         if (qi >= 0) { fi.push(pi); li.push(qi); }
       });
       if (!fi.length) return;
-      try {
+      try { tinted(ctxs[a.sys], opts.dim && v !== (opts.layer || 0), () => tinted(ctxs[z.sys], opts.dim && v !== (opts.layer || 0) && a.sys !== z.sys, () => {
         if (a.sys === z.sys) {
           new VFl.StaveTie({ first_note: a.note, last_note: z.note, first_indices: fi, last_indices: li })
             .setContext(ctxs[a.sys]).draw();
@@ -165,7 +171,7 @@ export function render(score, container, sel, opts = {}) {
           new VFl.StaveTie({ first_note: null, last_note: z.note, first_indices: li, last_indices: li })
             .setContext(ctxs[z.sys]).draw();
         }
-      } catch (e) { console.error(e); }
+      })); } catch (e) { console.error(e); }
     }));
   }));
 
@@ -244,12 +250,17 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
               notes[i].setStyle({ fillStyle: ACCENT, strokeStyle: ACCENT });
             else if (dim && v !== layer) notes[i].setStyle({ fillStyle: DIM, strokeStyle: DIM });
           });
+          const grey = dim && v !== layer;
           for (const run of tupletRuns(bar)) {
             tuplets.push(new VFl.Tuplet(run.idx.map((i) => notes[i]),
               { num_notes: run.tup[0], notes_occupied: run.tup[1], location: stem < 0 ? -1 : 1 }));
+            tuplets[tuplets.length - 1].grey = grey;
           }
           if (bar.some((e) => e.pitches.length && ["8", "16", "32"].includes(e.dur))) {
-            beams.push(...VFl.Beam.generateBeams(notes, { groups: VFl.Beam.getDefaultBeamGroups(`${time[0]}/${time[1]}`), maintain_stem_directions: !!stem }));
+            for (const bm of VFl.Beam.generateBeams(notes, { groups: VFl.Beam.getDefaultBeamGroups(`${time[0]}/${time[1]}`), maintain_stem_directions: !!stem })) {
+              bm.grey = grey;
+              beams.push(bm);
+            }
           }
         }
         const voice = new VFl.Voice({ num_beats: time[0], beat_value: time[1] }).setMode(VFl.Voice.Mode.SOFT);
@@ -267,8 +278,8 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
     const width = Math.max(10, st0.getNoteEndX() - st0.getNoteStartX() - 10);
     fmt.format(voices, width);
     drawn.forEach(({ stave, voice }) => voice.draw(ctx, stave));
-    beams.forEach((bm) => bm.setContext(ctx).draw());
-    tuplets.forEach((t) => t.setContext(ctx).draw());
+    beams.forEach((bm) => tinted(ctx, bm.grey, () => bm.setContext(ctx).draw()));
+    tuplets.forEach((t) => tinted(ctx, t.grey, () => t.setContext(ctx).draw()));
 
     drawn.forEach(({ s, v, notes, empty }) => { noteRef[s][v][b] = empty ? [] : notes.map((note) => ({ note, sys: si })); });
     // one hit cell per staff and bar; its notes are the edited layer's
