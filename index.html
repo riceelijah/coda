@@ -93,7 +93,7 @@
   #systems { position: relative; cursor: crosshair; user-select: none; -webkit-user-select: none; }
   #systems.select-tool { cursor: default; }
   .system { break-inside: avoid; }
-  .system svg { display: block; }
+  .system svg { display: block; overflow: visible; } /* marks above high notes stay visible */
   #ghost {
     position: absolute; pointer-events: none; display: none; border-radius: 50%;
     background: rgba(37, 99, 235, .45); transform: rotate(-20deg);
@@ -205,6 +205,12 @@
         <button role="menuitem" id="n-tie" data-short="T">Tie to next</button>
         <button role="menuitem" id="n-tuplet" data-short="9">Tuplet…</button>
         <button role="menuitem" id="n-untup">Remove tuplet</button>
+        <hr>
+        <button role="menuitem" id="n-fermata">Fermata</button>
+        <button role="menuitem" id="n-staccato">Staccato</button>
+        <button role="menuitem" id="n-accent">Accent</button>
+        <button role="menuitem" id="n-tenuto">Tenuto</button>
+        <button role="menuitem" id="n-marcato">Marcato</button>
         <hr>
         <button role="menuitem" id="n-layer1">Layer 1</button>
         <button role="menuitem" id="n-layer2">Layer 2</button>
@@ -392,6 +398,7 @@
       <tr><td>Click / drag</td><td>Selection tool: select a note, or drag across notes; <kbd>Shift</kbd>+click extends</td></tr>
       <tr><td><kbd>Shift</kbd>+<kbd>A</kbd>–<kbd>G</kbd></td><td>Add that note above the selected note (build a chord)</td></tr>
       <tr><td>Shift+click</td><td>Add or remove a chord note on the clicked note</td></tr>
+      <tr><td>Notes ▸ Fermata…Marcato</td><td>Add or remove a fermata or articulation on the selected notes (also on right-click)</td></tr>
       <tr><td>Layer 1–4 (lower left)</td><td>Pick which layer you enter and edit in (Notes ▸ Layer); other layers show grey</td></tr>
       <tr><td>Chord button</td><td>Clicks add notes to the selected note instead of after it</td></tr>
     </table>

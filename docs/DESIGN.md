@@ -467,7 +467,7 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
 
 ## 8. Things deliberately not in the first version
 
-Lyrics, articulations, dynamics, slurs, grace notes, repeats
+Lyrics, dynamics, slurs, grace notes, other articulations, repeats
 and endings, mid-score clef changes, transposing instruments, page-layout controls, user-supplied
 instrument samples, MIDI export. (Sampled General MIDI sounds: §13.3.) (Tuplet entry, inserting mid-bar and copy/paste: §11.)
 
@@ -973,3 +973,20 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
   command works on any layer unchanged. Other layers draw grey (not when printing); clicks and
   the caret use the active layer. **18c:** MuseScore
   voices and `.musx` layers.
+
+## 16. Marks: fermata and articulations (Phase 19)
+
+- **Model:** optional `ev.marks`, names from `MARKS` = fermata, staccato, accent, tenuto,
+  marcato, kept in that order and absent when empty. Only a fermata goes on a rest.
+  `toggleMark(events, m)` adds to all, or removes from all when every one has it.
+- **Drawing:** VexFlow articulations. Alone in a bar: a fermata above, the others on the
+  notehead side. Layers sharing a bar: all marks on the stem side. Not printed on rests except
+  a fermata.
+- **Playback:** staccato sounds half its length. A fermata doesn't change timing.
+- **Entry:** Notes ▸ Fermata / Staccato / Accent / Tenuto / Marcato over the selection; the first
+  three are also in the right-click menu.
+- **Files:** MusicXML `<fermata>` and `<articulations>` (`staccato`, `accent`, `tenuto`,
+  `strong-accent` = marcato) both ways; other articulations are counted. A fermata on a
+  whole-bar rest is counted (an empty bar holds no event). MuseScore: `<Fermata>` before the
+  chord or rest, `<Articulation>` subtypes inside it (`markOf`). `.musx` articulations are
+  still counted, not read.

@@ -8,6 +8,8 @@ export const PPQ = 480;
 export const DURS = ["w", "h", "q", "8", "16", "32"];
 export const BASE = { w: 1920, h: 960, q: 480, 8: 240, 16: 120, 32: 60 };
 export const CLEFS = ["treble", "bass", "alto", "tenor"];
+// Marks a note or rest can carry, in drawing and file order (DESIGN §16). Only a fermata goes on a rest.
+export const MARKS = ["fermata", "staccato", "accent", "tenuto", "marcato"];
 export const STEP_NAMES = "CDEFGAB";
 const STEP_SEMIS = [0, 2, 4, 5, 7, 9, 11];
 const SHARP_ORDER = [3, 0, 4, 1, 5, 2, 6];
@@ -285,6 +287,20 @@ export function setDuration(score, s, b, i, dur, dots) {
 }
 
 // Make an event a tuplet member (tup = [actual, normal]) or plain (tup = null).
+// Add `mark` to every event that can take it, or remove it from all if they all have it.
+// Returns how many events changed. `ev.marks` is absent when empty, sorted in MARKS order.
+export function toggleMark(events, mark) {
+  const ok = events.filter((e) => e.pitches.length || mark === "fermata");
+  const on = !ok.every((e) => e.marks?.includes(mark));
+  for (const e of ok) setMark(e, mark, on);
+  return ok.length;
+}
+export function setMark(ev, mark, on) {
+  const m = new Set(ev.marks || []);
+  if (on) m.add(mark); else m.delete(mark);
+  if (m.size) ev.marks = MARKS.filter((x) => m.has(x)); else delete ev.marks;
+}
+
 export function setTuplet(score, s, b, i, tup) {
   const ev = score.staves[s].bars[b][i];
   if (tup && !tupletOk(ev.dur, ev.dots, tup)) return `A ${tup[0]}:${tup[1]} tuplet doesn't fit that note value`;
@@ -430,7 +446,8 @@ export function isValidScore(sc) {
     if (!n || !sc.measures[0].time) return false;
     const okBars = (bars) => Array.isArray(bars) && bars.length === n && bars.every((bar) => Array.isArray(bar) && bar.every((e) =>
       DURS.includes(e.dur) && Array.isArray(e.pitches) &&
-      e.pitches.every((p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2)));
+      e.pitches.every((p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2) &&
+      (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m))))));
     return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) &&
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
       (st.layers === undefined || (Array.isArray(st.layers) && st.layers.length < MAX_LAYERS && st.layers.every(okBars))));

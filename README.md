@@ -59,7 +59,7 @@ Coda keeps up to four layers (voices) per staff. When a file contains things Cod
 
 ## Not supported yet
 
-Lyrics, articulations, dynamics, slurs, grace notes, septuplets, repeats and endings, mid-score clef changes, transposing instruments, page layout
+Lyrics, articulations other than staccato/accent/tenuto/marcato/fermata, dynamics, slurs, grace notes, septuplets, repeats and endings, mid-score clef changes, transposing instruments, page layout
 controls, your own instrument samples, and MIDI export. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Running it locally

@@ -9,6 +9,7 @@ const SYS_TOP = 10;      // VexFlow already leaves 40 units above the top line
 const SYS_BOTTOM = 50;
 const LEFT_PAD = 20;
 const KEY_NAMES = ["Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#"];
+const MARK_VF = { fermata: "a@", staccato: "a.", accent: "a>", tenuto: "a-", marcato: "a^" };
 const REST_KEY = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3" };
 // rests above / below the middle when two layers share a bar
 const REST_KEY_LAYER = { treble: ["e/5", "f/4"], bass: ["g/3", "a/2"], alto: ["f/4", "g/3"], tenor: ["d/4", "e/3"] };
@@ -74,6 +75,16 @@ function makeNote(ev, clef, stem = 0) {
   const note = stem ? new VFl.StaveNote({ clef, keys, duration, stem_direction: stem })
     : new VFl.StaveNote({ clef, keys, duration, auto_stem: true });
   if (ev.dots) VFl.Dot.buildAndAttach([note], { all: true });
+  if (ev.marks) {
+    // Layers sharing a bar: every mark on the stem side, away from the other layer. Otherwise a
+    // fermata goes above and the rest on the notehead side.
+    const down = note.getStemDirection() < 0, P = VFl.ModifierPosition;
+    for (const m of ev.marks) {
+      if (rest && m !== "fermata") continue;
+      const above = stem ? stem > 0 : m === "fermata" || down;
+      note.addModifier(new VFl.Articulation(MARK_VF[m]).setPosition(above ? P.ABOVE : P.BELOW), 0);
+    }
+  }
   return note;
 }
 

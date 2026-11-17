@@ -1,12 +1,21 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { GM } from "../gm.js";
 
 const DUR = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16", "32nd": "32" };
 const LONGER = new Set(["breve", "long"]);
 const SHORTER = new Set(["64th", "128th", "256th", "512th", "1024th"]);
+// MuseScore articulation subtype -> Coda marks (DESIGN §16). Combined ones ("articAccentStaccatoAbove")
+// give two; MuseScore 2 calls an accent "sforzato". Staccatissimo and the rest give none.
+export function markOf(sub) {
+  if (/staccatissimo/i.test(sub)) return [];
+  if (/^fermata/i.test(sub)) return ["fermata"];
+  return [["staccato", /staccato/i], ["accent", /accent|sforzato/i], ["tenuto", /tenuto/i], ["marcato", /marcato/i]]
+    .filter(([, re]) => re.test(sub)).map(([m]) => m);
+}
+
 const GRACE = ["acciaccatura", "appoggiatura", "grace4", "grace16", "grace32", "grace8after", "grace16after", "grace32after"];
 
 const kids = (el, name) => (el ? [...el.children].filter((c) => c.localName === name) : []);
@@ -87,7 +96,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       (voices.length ? voices : [meas]).forEach((vEl, vi) => {
       if (vi >= MAX_LAYERS) { report.count(`Notes in voices beyond ${MAX_LAYERS} per staff skipped`, kids(vEl, "Chord").length); return; }
       const bar = [];
-      let tup = null, cur = 0; // cur: time cursor in ticks; <location> moves it either way
+      let tup = null, cur = 0, fermata = false; // cur: time cursor in ticks; <location> moves it either way
       for (const el of vEl.children) {
         switch (el.localName) {
           case "location": {
@@ -123,12 +132,22 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             break;
           }
           case "endTuplet": tup = null; break;
+          case "Fermata": fermata = true; break; // MuseScore 3+: before the chord or rest it belongs to
           case "Chord":
           case "Rest": {
             const isRest = el.localName === "Rest";
             if (GRACE.some((g) => kid(el, g))) { report.count("Grace notes skipped"); break; }
             const dt = txt(el, "durationType");
-            if (dt === "measure") { cur += barCapacity(time); break; } // whole-bar rest = empty bar
+            const marks = fermata ? ["fermata"] : [];
+            fermata = false;
+            for (const a of kids(el, "Articulation")) {
+              const got = markOf(txt(a, "subtype") || "");
+              if (got.length) marks.push(...got); else report.count("Other articulations (not imported)");
+            }
+            if (dt === "measure") { // whole-bar rest = empty bar
+              if (marks.length) report.count("Fermatas on whole-bar rests (not imported)");
+              cur += barCapacity(time); break;
+            }
             let dur = DUR[dt];
             if (!dur && LONGER.has(dt)) { dur = "w"; report.count("Notes longer than a whole note shortened"); }
             if (!dur && SHORTER.has(dt)) { dur = "32"; report.count("Notes shorter than a 32nd lengthened"); }
@@ -157,6 +176,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               if (!ev.pitches.length) break;
               ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
             }
+            for (const m of marks) if (!isRest || m === "fermata") setMark(ev, m, true);
             // a chord or rest that starts past where this voice has got to: rests in front
             const gap = Math.floor((cur - barTicks(bar)) / 60) * 60;
             if (gap > 0) {

@@ -5,6 +5,7 @@ import { schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustain
 import { GM } from "../gm.js";
 import * as M from "../model.js";
 import * as store from "../store.js";
+import { markOf } from "./mscz.js";
 
 const P = (name) => {
   const m = /^([A-G])(#{1,2}|b{1,2})?(-?\d)$/.exec(name);
@@ -14,6 +15,7 @@ const P = (name) => {
 const ev = (dur, names, o = {}) => ({
   dur, dots: o.dots || 0, tie: !!o.tie, pitches: names ? names.split(" ").map(P) : [],
   ...(o.tup ? { tup: o.tup } : {}),
+  ...(o.marks ? { marks: o.marks } : {}),
 });
 
 // Compact text form of a staff's bars, for readable expected values.
@@ -36,8 +38,8 @@ export function roundTripFixture() {
     measures: [{ key: -3, time: [4, 4] }, {}, { key: 2 }, { time: [6, 8] }, {}],
     staves: [
       { name: "Keys", clef: "treble", brace: true, program: 4, bars: [
-        [ev("q", "C4 E4 G4"), ev("8", "D5", { dots: 1 }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
-        [ev("q", "F#5"), ev("8", "G5", { tup: [3, 2] }), ev("8", "A5", { tup: [3, 2] }), ev("8", "Bb5", { tup: [3, 2] }), ev("h")],
+        [ev("q", "C4 E4 G4", { marks: ["staccato", "accent"] }), ev("8", "D5", { dots: 1 }), ev("16", "E5"), ev("h", "F#5", { tie: true })],
+        [ev("q", "F#5"), ev("8", "G5", { tup: [3, 2] }), ev("8", "A5", { tup: [3, 2] }), ev("8", "Bb5", { tup: [3, 2] }), ev("h", null, { marks: ["fermata"] })],
         [],
         [ev("q", "D5", { dots: 1 }), ev("8", "C#5"), ev("16", "B4"), ev("16", "A4"), ev("8", "G4")],
         [ev("h", "D4 F#4 A4", { dots: 1 })],
@@ -47,13 +49,13 @@ export function roundTripFixture() {
         [ev("h", "F2", { dots: 2 }), ev("8", "Ab2")],
         [ev("h", "D3", { tie: true }), ev("h", "D3")],
         [],
-        [ev("h", "D2 A2", { dots: 1 })],
+        [ev("h", "D2 A2", { dots: 1, marks: ["fermata", "tenuto"] })],
       ], layers: [[ // layer 2 (DESIGN §15): bar 1 and a tie into bar 3
         [ev("h", "G2"), ev("h", "A2")], [], [ev("w", "E2", { tie: true })], [ev("h", "E2", { dots: 1 })], [],
       ]] },
       { name: "Viola", clef: "alto", brace: false, bars: [
         [ev("w", "C4")],
-        [ev("16", "C4", { tup: [5, 4] }), ev("16", "D4", { tup: [5, 4] }), ev("16", "E4", { tup: [5, 4] }), ev("16", "F4", { tup: [5, 4] }), ev("16", "G4", { tup: [5, 4] }), ev("h", "A4"), ev("q", "B4")],
+        [ev("16", "C4", { tup: [5, 4] }), ev("16", "D4", { tup: [5, 4] }), ev("16", "E4", { tup: [5, 4] }), ev("16", "F4", { tup: [5, 4] }), ev("16", "G4", { tup: [5, 4] }), ev("h", "A4", { marks: ["marcato"] }), ev("q", "B4")],
         [ev("w", "D4")], [ev("q", "A3", { dots: 1 }), ev("q", "B3", { dots: 1 })], [],
       ] },
     ],
@@ -70,6 +72,30 @@ export async function run({ check, eq }) {
       if (!eq(a.staves[s], b.staves[s])) return `staff ${s}\n  want ${brief(a.staves[s])}\n  got  ${brief(b.staves[s])}\n  ${JSON.stringify({ ...b.staves[s], bars: undefined })}`;
     }
     return `staff count ${b.staves.length}`;
+  });
+
+  await check("marks: toggle over a selection, rests take only a fermata, validation; MusicXML whole-bar fermata counted; MuseScore subtypes (DESIGN §16)", () => {
+    const a = ev("q", "C4"), r = ev("q"), b = ev("q", "D4", { marks: ["accent"] });
+    if (M.toggleMark([a, r], "staccato") !== 1 || r.marks || !eq(a.marks, ["staccato"])) return "staccato";
+    M.toggleMark([a, b], "accent");
+    if (!eq(a.marks, ["staccato", "accent"])) return "accent added in order: " + a.marks;
+    M.toggleMark([a, b], "accent");
+    if (a.marks.includes("accent") || b.marks) return "accent removed from both";
+    M.toggleMark([r], "fermata");
+    if (!eq(r.marks, ["fermata"])) return "fermata on a rest";
+    const s = M.newScore({ bars: 1 });
+    s.staves[0].bars[0] = [{ ...ev("w", "C4"), marks: ["trill"] }];
+    if (M.isValidScore(s)) return "unknown mark accepted";
+    s.staves[0].bars[0] = [ev("h", "C4", { marks: ["staccato"] }), ev("h", "D4")];
+    const sn = schedule(s).notes;
+    if (sn[0].end - sn[0].start !== 480 || sn[1].end - sn[1].start !== 960) return "staccato plays half length";
+    const xml = `<score-partwise><part-list><score-part id="P1"/></part-list><part id="P1"><measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      <note><rest measure="yes"/><duration>4</duration><notations><fermata/></notations></note></measure></part></score-partwise>`;
+    const { report } = importMusicXML(xml, "f.xml");
+    if (!JSON.stringify(report).includes("Fermatas on whole-bar rests")) return "whole-bar fermata not counted";
+    const got = ["fermataAbove", "articAccentStaccatoBelow", "sforzato", "articStaccatissimoAbove", "articMarcatoAbove"].map((x) => markOf(x).join("+"));
+    return eq(got, ["fermata", "staccato+accent", "accent", "", "marcato"]) || got.join(",");
   });
 
   await check("instruments: setStaffProgram changes a braced pair, validation, MIDI program change (DESIGN §13.2)", () => {

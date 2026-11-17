@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark,
 } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -10,6 +10,10 @@ const DUR_OF = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16",
 const LONGER = new Set(["breve", "long", "maxima"]);
 const SHORTER = new Set(["64th", "128th", "256th", "512th", "1024th"]);
 const CLEF_OUT = { treble: ["G", 2], bass: ["F", 4], alto: ["C", 3], tenor: ["C", 4] };
+
+// Marks (DESIGN §16): MusicXML <articulations> children <-> Coda mark names.
+const ARTIC_OUT = { staccato: "<staccato/>", accent: "<accent/>", tenuto: "<tenuto/>", marcato: '<strong-accent type="up"/>' };
+const ARTIC_IN = { staccato: "staccato", accent: "accent", tenuto: "tenuto", "strong-accent": "marcato" };
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -34,6 +38,11 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop }) {
   if (tieStart) nots.push('<tied type="start"/>');
   if (!chord && tupStart) nots.push('<tuplet type="start" bracket="yes"/>');
   if (!chord && tupStop) nots.push('<tuplet type="stop"/>');
+  if (!chord && ev.marks) {
+    if (ev.marks.includes("fermata")) nots.push('<fermata type="upright"/>');
+    const arts = p ? ev.marks.filter((m) => ARTIC_OUT[m]) : [];
+    if (arts.length) nots.push(`<articulations>${arts.map((m) => ARTIC_OUT[m]).join("")}</articulations>`);
+  }
   if (nots.length) x.push(`<notations>${nots.join("")}</notations>`);
   x.push("</note>");
   return x.join("");
@@ -280,7 +289,7 @@ const DIRECTIONS = {
   pedal: "Pedal marks (not imported)", "octave-shift": "Octave lines (not imported)",
 };
 const MARKS = {
-  fermata: "Fermatas (not imported)", slur: "Slurs (not imported)", articulations: "Articulations (not imported)",
+  slur: "Slurs (not imported)", articulations: "Other articulations (not imported)",
   ornaments: "Ornaments (not imported)", technical: "Technical markings (not imported)", arpeggiate: "Arpeggios (not imported)",
   glissando: "Glissandos (not imported)", slide: "Glissandos (not imported)",
 };
@@ -294,13 +303,21 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   const layer = layerOf(voiceOf, staffNo, txt(el, "voice") || "1");
   if (layer < 0) { if (!isRest) report.count(`Notes in voices beyond ${MAX_LAYERS} per staff skipped`); return; }
   const lk = staffNo + ":" + layer;
-  // markings on kept notes that Coda doesn't hold yet: counted, not dropped silently
+  // fermatas and the articulations Coda holds are kept; other markings are counted, not dropped silently
+  const marks = [];
   for (const n of kids(el, "notations")) {
     for (const c of n.children) {
-      if (c.localName === "articulations" || c.localName === "ornaments" || c.localName === "technical") report.count(MARKS[c.localName], c.children.length);
+      if (c.localName === "fermata") marks.push("fermata");
+      else if (c.localName === "articulations") {
+        for (const a of c.children) {
+          if (ARTIC_IN[a.localName] && !isRest) marks.push(ARTIC_IN[a.localName]);
+          else report.count(MARKS.articulations);
+        }
+      } else if (c.localName === "ornaments" || c.localName === "technical") report.count(MARKS[c.localName], c.children.length);
       else if (MARKS[c.localName] && c.getAttribute("type") !== "stop") report.count(MARKS[c.localName]);
     }
   }
+  const addMarks = (ev) => { for (const m of marks) setMark(ev, m, true); };
   if (!isRest && kids(el, "lyric").length) report.count("Notes with lyrics (not imported)");
   const tieStart = kids(el, "tie").some((t) => t.getAttribute("type") === "start");
 
@@ -323,6 +340,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
       ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
     }
     if (tieStart) ev.tie = true;
+    addMarks(ev);
     return;
   }
 
@@ -330,7 +348,10 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   const ticksRaw = durEl !== null ? (+durEl * PPQ) / divisions : null;
   const type = txt(el, "type");
   if (isRest && (kid(el, "rest").getAttribute("measure") === "yes" ||
-      (!type && ticksRaw !== null && Math.round(ticksRaw) >= barCapacity(time)))) return;
+      (!type && ticksRaw !== null && Math.round(ticksRaw) >= barCapacity(time)))) {
+    if (marks.length) report.count("Fermatas on whole-bar rests (not imported)");
+    return;
+  }
 
   let dur, dots = kids(el, "dot").length;
   if (type && DUR_OF[type]) dur = DUR_OF[type];
@@ -360,6 +381,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     for (const d of splitTicks(gap)) bar.push({ dur: d.dur, dots: d.dots, tie: false, pitches: [] });
     report.count("Gaps in a voice filled with rests");
   }
+  addMarks(ev);
   bar.push(ev);
   lastEvent[lk] = ev;
 }

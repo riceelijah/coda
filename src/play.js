@@ -29,6 +29,7 @@ export function schedule(score, from = 0) {
           if (n && n.end === at) n.end = at + len;
           else { n = { start: at, end: at + len, midi: m, program: st.program ?? 0 }; notes.push(n); }
           if (ev.tie) nextOpen.set(m, n);
+          else if (ev.marks?.includes("staccato")) n.end = at + len / 2; // sounds half its length
         }
         open.clear();
         nextOpen.forEach((v, k) => open.set(k, v));

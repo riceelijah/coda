@@ -388,6 +388,13 @@ function accidental(v) {
   }
 }
 
+// Toggle a mark (fermata, staccato…) over the selection (DESIGN §16).
+function mark(m) {
+  if (!state.sel) { message("Select a note first", true); return; }
+  const s = state.sel, r = range();
+  edit((sc) => M.toggleMark(r.map((p) => sc.staves[s.staff].bars[p.bar][p.idx]), m) ? null : "Only a fermata can go on a rest");
+}
+
 function tie() {
   const s = state.sel;
   if (!s) { message("Select a note first", true); return; }
@@ -939,6 +946,7 @@ const CMD = {
   "n-octup": { run: () => transposeSel(7), on: hasSel },
   "n-octdown": { run: () => transposeSel(-7), on: hasSel },
   "n-tie": { run: () => tie(), on: hasSel },
+  ...Object.fromEntries(M.MARKS.map((m) => ["n-" + m, { run: () => mark(m), on: hasSel }])),
   "n-layer1": { run: () => setLayer(0) },
   "n-layer2": { run: () => setLayer(1) },
   "n-layer3": { run: () => setLayer(2) },
@@ -996,7 +1004,7 @@ function selectAll() {
 
 // ---------- context menu (DESIGN §14.3) ----------
 
-const CTX_NOTE = ["m-cut", "m-copy", "m-paste", "m-delete", "-", "n-up", "n-down", "n-tie", "n-tuplet", "n-untup", "-", "b-attrs", "m-instruments"];
+const CTX_NOTE = ["m-cut", "m-copy", "m-paste", "m-delete", "-", "n-up", "n-down", "n-tie", "n-tuplet", "n-untup", "-", "n-fermata", "n-staccato", "n-accent", "-", "b-attrs", "m-instruments"];
 const CTX_STAFF = ["m-paste", "-", "b-addbar", "b-delbar", "-", "b-attrs", "m-instruments"];
 
 function openCtx(x, y, ids) {
