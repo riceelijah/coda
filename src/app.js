@@ -621,7 +621,7 @@ function startPlay() {
     if (bar === null) { hl.style.display = "none"; $("b-play").disabled = false; return; }
     place(hl, cellRect(state.hit.cells.filter((c) => c.bar === bar)));
     hl.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, (text) => (text ? message(text, /couldn't/.test(text), text.endsWith("…")) : message(""))).catch((e) => message("Audio could not start: " + e.message, true));
+  }, (text) => (text ? message(text, /couldn't/.test(text), text.endsWith("…")) : message(""))).catch((e) => { stopPlay(); message("Audio could not start: " + e.message, true); });
   $("b-play").disabled = true;
 }
 

@@ -2,6 +2,7 @@
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
 import { padBars, noteCount, tupletOk, spellMidi, midi } from "../model.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
+import { GM } from "../gm.js";
 
 const DUR = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16", "32nd": "32" };
 const LONGER = new Set(["breve", "long"]);
@@ -45,9 +46,15 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   kids(sc, "Part").forEach((part) => {
     const n = Math.max(1, kids(part, "Staff").length);
     const name = txt(part, "trackName") || txt(kid(part, "Instrument"), "longName") || "";
-    // MuseScore 4 often writes program 0 for every instrument, so 0 is treated as "not set"
+    // MuseScore 4 often writes program 0 for every instrument, so 0 means "not set": then try the
+    // part name against the General MIDI names (Flute, Violin, Trumpet…).
     const prog = parseInt(kid(kid(kid(part, "Instrument"), "Channel"), "program")?.getAttribute("value"), 10);
-    const program = prog > 0 && prog <= 127 ? prog : undefined;
+    let program = prog > 0 && prog <= 127 ? prog : undefined;
+    if (program === undefined && name) {
+      const byName = GM.find((g) => g.name.toLowerCase() === name.trim().toLowerCase());
+      if (byName) program = byName.program;
+      else if (!/piano/i.test(name)) report.count("Parts with no instrument sound found (played as piano)");
+    }
     for (let k = 0; k < n; k++) decl.push({ name, brace: n === 2 && k === 0, program });
     if (n > 2) report.add(`A part with ${n} staves was split into separate staves without a brace`);
   });

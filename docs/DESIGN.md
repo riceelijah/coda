@@ -453,8 +453,9 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
   starting a new one.
 - `seconds = ticks / 480 × 60 / tempo`. Schedule everything up front with
   `osc.start(t)` / `osc.stop(t + len)`.
-- Voice: one `OscillatorNode` (`triangle`) → `GainNode` per note; gain ramps 0 → 0.15 in 10 ms,
-  holds, ramps to 0 over the last 50 ms. One master gain at 0.8.
+- Voice: the part's sampled instrument when loaded (§13.3); otherwise one `OscillatorNode`
+  (`triangle`) → `GainNode` per note, gain 0 → 0.15 in 10 ms, holds, ramps to 0 over the last
+  50 ms. Each playback gets a master gain at 0.8 into one shared compressor per `AudioContext`.
 - `frequency = 440 × 2^((midi − 69) / 12)`.
 - **Stop**: disconnect the master gain and drop references to scheduled nodes.
 - While playing, highlight the current bar (a translucent rectangle from the hit map, advanced

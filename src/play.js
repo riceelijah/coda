@@ -95,11 +95,17 @@ function getBytes(key) {
   return bytes.get(key);
 }
 
+// A recording that downloaded but won't decode must not stay cached, or it would never be retried.
+function uncache(key) {
+  const [p, root] = key.split(":").map(Number);
+  caches.open(CACHE).then((c) => c.delete(`${BASES[0]}/${GM[p].slug}-mp3/${noteName(root)}.mp3`)).catch(() => {});
+}
+
 function load(key) {
   if (buffers.has(key)) return Promise.resolve();
   if (!loading.has(key)) {
     loading.set(key, getBytes(key)
-      .then((b) => audio().decodeAudioData(b))
+      .then((b) => audio().decodeAudioData(b).catch((e) => { uncache(key); throw e; }))
       .then((buf) => { buffers.set(key, buf); })
       .finally(() => { bytes.delete(key); loading.delete(key); }));
   }
@@ -117,11 +123,14 @@ function audio() {
   return ctx;
 }
 
-// Shared output chain: a gain into a compressor, so big chords and many parts don't clip.
+// Output chain: a fresh gain (disconnected to silence it) into one compressor per context,
+// so big chords and many parts don't clip.
+const comps = new WeakMap();
 export function output(c) {
-  const g = c.createGain(), comp = c.createDynamicsCompressor();
+  if (!comps.has(c)) { const comp = c.createDynamicsCompressor(); comp.connect(c.destination); comps.set(c, comp); }
+  const g = c.createGain();
   g.gain.value = 0.8;
-  g.connect(comp).connect(c.destination);
+  g.connect(comps.get(c));
   return g;
 }
 
@@ -185,6 +194,11 @@ export async function play(score, from, onBar, onStatus = () => {}) {
   stop();
   const me = { master: null, raf: 0, lastBar: -1 };
   current = me; // set before awaiting, so Stop while sounds load works
+  try { await start(me, score, from, onBar, onStatus); }
+  catch (e) { if (current === me) stop(); throw e; }
+}
+
+async function start(me, score, from, onBar, onStatus) {
   audio();
   if (ctx.state === "suspended") await ctx.resume();
   if (current !== me) return;

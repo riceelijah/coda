@@ -1,6 +1,6 @@
 // MuseScore import checks (Phase 5). Samples were made by converting the MusicXML samples
 // with MuseScore 4 (`mscore -o samples/x.mscz samples/x.musicxml`).
-import { tpcToPitch } from "./mscz.js";
+import { tpcToPitch, importMSCX } from "./mscz.js";
 
 export async function run({ check, eq, brief, fetchBytes, importBytes }) {
   await check("MuseScore tpc spelling", () => {
@@ -23,6 +23,16 @@ export async function run({ check, eq, brief, fetchBytes, importBytes }) {
       return wa === wb || `warnings differ: "${wa}" vs "${wb}"`;
     });
   }
+
+  await check("MuseScore instruments: program from the file, else the part name (DESIGN §13.2)", async () => {
+    const b = await importBytes(await fetchBytes("samples/simple.mscz"), "simple.mscz");
+    if (b.score.staves[0].program !== 73) return "flute by name: " + b.score.staves[0].program;
+    const files = fflate.unzipSync(await fetchBytes("samples/simple.mscz"));
+    const path = Object.keys(files).find((k) => k.endsWith(".mscx"));
+    const text = new TextDecoder().decode(files[path]).replace('<program value="0"/>', '<program value="41"/>');
+    const p = importMSCX(text, "x.mscx").score.staves[0].program;
+    return p === 41 || "program " + p;
+  });
 
   await check("MuseScore archive without a score gives a message", async () => {
     const zip = fflate.zipSync({ "META-INF/container.xml": new TextEncoder().encode("<container/>"), "a.mscx": new Uint8Array(0) });
