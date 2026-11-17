@@ -42,7 +42,7 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 | Compressed MusicXML (`.mxl`) | Opens. |
 | MuseScore (`.mscz`, `.mscx`) | Opens (tested with MuseScore 4 files). |
 | MIDI (`.mid`, `.midi`) | Opens as an automatic transcription; it will usually need tidying. |
-| Finale (`.musx`, 2014 and later) | Opens notes, rests, chords, ties, tuplets, keys, time signatures, clefs and staff names. One layer per staff; expressions, lyrics and layout are left out and listed. |
+| Finale (`.musx`, 2014 and later) | Opens notes, rests, chords, ties, tuplets, keys, time signatures, clefs and staff names. One layer per staff. Expressions, articulations, lyrics and slurs are left out and counted in the report; page layout is not carried over. |
 | Finale (`.mus`, 2012 and earlier) | Can't be opened. The format is closed and undocumented, and no open reader exists. Export MusicXML from a copy of Finale or Finale NotePad instead. |
 
 Coda keeps one voice per staff. When a file contains things Coda doesn't support yet (second

@@ -50,6 +50,10 @@ const attr = (el, a) => parseInt(el.getAttribute(a), 10);
 const plain = (s) => s.replace(/\^\w+\([^)]*\)/g, "").replace(/\^\^/g, "^").trim();
 
 // clef shape (char, y offset) -> Coda clef
+// entry flags for attached markings Coda doesn't import
+const DETAILS = [["articDetail", "Notes with articulations (not imported)"], ["lyricDetail", "Notes with lyrics (not imported)"],
+  ["smartShapeDetail", "Notes with slurs or lines (not imported)"]];
+
 const CLEF = { "38,-6": "treble", "66,-4": "alto", "66,-2": "tenor", "63,-2": "bass" };
 
 export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
@@ -169,7 +173,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
   staffIds.forEach((sid, si) => {
     const spec = staffSpecs.get(sid);
     if (num(kid(kid(spec, "transposition"), "keysig"), "interval", 0) || has(kid(spec, "transposition"), "chromatic"))
-      report.add("Transposing staves are shown at written pitch");
+      report.add("Transposing staves are shown at concert pitch");
     let clefId = num(spec, "defaultClef", 0);
     const staff = { name: textOf(num(spec, "fullName", -1)), clef: null, brace: braces.has(si), bars: [] };
     measures.forEach((m, mi) => {
@@ -194,7 +198,9 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
         const skip = (label) => { report.count(label, Math.max(1, num(e, "numNotes", 0))); };
         if (has(e, "graceNote")) skip("Grace notes skipped");
         else if (has(e, "voice2") || has(e, "v2")) skip("Notes in second voices skipped");
-        else if (!has(e, "ignore")) {
+        else if (has(e, "ignore")) report.count("Hidden placeholder entries skipped");
+        else {
+          for (const [flag, label] of DETAILS) if (has(e, flag)) report.count(label);
           const dura = num(e, "dura", 0);
           if (has(e, "tupletStart") && tupletDefs.has(id)) {
             const t = tupletDefs.get(id);

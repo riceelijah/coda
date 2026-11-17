@@ -73,6 +73,21 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
     return /other layers skipped: 1/.test(warn(r)) || warn(r);
   });
 
+  await check("musx: ties, dotted values, chords and skipped markings (inline EnigmaXML)", async () => {
+    const x = `<finale xmlns="http://www.makemusic.com/2012/finale"><others>
+      <measSpec cmper="1"><beats>4</beats><divbeat>1024</divbeat></measSpec>
+      <instUsed cmper="0" inci="0"><inst>1</inst></instUsed><staffSpec cmper="1"/>
+      <frameSpec cmper="1" inci="0"><startEntry>1</startEntry><endEntry>3</endEntry></frameSpec></others>
+      <details><gfhold cmper1="1" cmper2="1"><frame1>1</frame1></gfhold></details><entries>
+      <entry entnum="1" prev="0" next="2"><dura>1536</dura><isNote/><note id="1"><harmLev>0</harmLev><harmAlt>0</harmAlt><tieStart/></note></entry>
+      <entry entnum="2" prev="1" next="3"><dura>512</dura><isNote/><articDetail/><note id="1"><harmLev>0</harmLev><harmAlt>0</harmAlt><tieEnd/></note><note id="2"><harmLev>2</harmLev><harmAlt>-1</harmAlt></note></entry>
+      <entry entnum="3" prev="2" next="0"><dura>2048</dura><ignore/></entry></entries></finale>`;
+    const r = await importBytes(new TextEncoder().encode(x), "inline.xml");
+    const got = brief(r.score.staves[0]);
+    if (got !== "C4:q.~ C4+Eb4:8") return got;
+    return /articulations \(not imported\): 1/.test(warn(r)) && /placeholder entries skipped: 1/.test(warn(r)) || warn(r);
+  });
+
   await check("musx sample: piano staves, clefs, names and brace", async () => {
     const { score } = await open("piano_inst");
     const got = score.staves.map((s) => `${s.name}|${s.clef}|${s.brace}`).join(" ");

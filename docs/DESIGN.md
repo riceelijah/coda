@@ -669,7 +669,9 @@ unless marked otherwise.
   skipped and counted.
 - Non-linear and microtonal keys: pitches keep their real spelling (microtonal alterations are
   rounded to semitones and counted); the key signature shown is the nearest standard one.
-- Transposing staves are shown at written pitch, reported. Expressions (`measExprAssign`) are counted.
+- Entries store concert pitch, so transposing staves are shown at concert pitch, reported.
+  Expressions (`measExprAssign`), `<ignore/>` entries and notes flagged `articDetail`,
+  `lyricDetail` or `smartShapeDetail` are counted.
 - With `?debug` in the page URL, opening a `.musx` also offers the decoded EnigmaXML as a download.
 
 ### 9.6 Import report
