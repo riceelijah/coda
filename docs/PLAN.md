@@ -29,7 +29,7 @@ only says what to build in what order and how to know each phase is finished.
 | 2 | Editing, playback, autosave, print | done |
 | 3 | MusicXML / MXL open + save | done |
 | 4 | MIDI import | done |
-| 5 | MuseScore `.mscz` import | not started |
+| 5 | MuseScore `.mscz` import | done (4.x verified; 3.x untested) |
 | 6 | `.musx` import | not started — **needs sample files from the user** |
 | 7 | Publish to GitHub Pages | not started — **needs the user's go-ahead** |
 
@@ -159,14 +159,14 @@ and report what was skipped.
 
 Build: `src/io/mscz.js` (DESIGN §9.7).
 
-- [ ] Make real samples with the installed MuseScore:
+- [x] Make real samples with the installed MuseScore:
       `"/Applications/MuseScore 4.app/Contents/MacOS/mscore" -o samples/piano.mscz samples/piano.musicxml`
       (and the same for `simple`). If the command fails or MuseScore is missing, ask the user
       for a `.mscz` file instead; do not hand-write one.
-- [ ] Unzip a sample, read the `.mscx`, and **correct DESIGN §9.7** to match what is really
+- [x] Unzip a sample, read the `.mscx`, and **correct DESIGN §9.7** to match what is really
       there. Change its marker to [verified].
-- [ ] Write the importer. Wire the `.mscz` and `.mscx` rows of the sniffing table.
-- [ ] Test check 6: `piano.mscz` imports to the same events as `piano.musicxml` does (same
+- [x] Write the importer. Wire the `.mscz` and `.mscx` rows of the sniffing table.
+- [x] Test check 6: `piano.mscz` imports to the same events as `piano.musicxml` does (same
       skipped-voice and grace-note counts in the report).
 
 **Done when:** `test.html` PASS; both samples open and look the same as their MusicXML
@@ -227,4 +227,10 @@ DESIGN.md before work starts.
 
 ## Open items
 
-_(Add things here as they come up: skipped checks, rough edges, questions for the user.)_
+- **MuseScore 3.x files are untested.** The importer has 3.x branches but no 3.x sample exists here.
+  A real 3.x `.mscz` would confirm them.
+- **Rest padding in exported MusicXML is greedy** (e.g. after an eighth in 3/4: half + eighth),
+  not beat-aware. Correct durations, but not how an engraver would write it.
+- **Undo history is per session**; it is not saved with the autosave.
+- **Phase 6 (`.musx`) is blocked** on sample files from the user (see Phase 6).
+- **Phase 7 (publish) is waiting** for the user's go-ahead.

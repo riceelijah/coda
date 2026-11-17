@@ -706,9 +706,16 @@ MuseScore 4 is installed on the development machine at
 (`mscore -o out.mscz in.musicxml`). Use it to make real sample files from the MusicXML samples,
 so the importer is tested against genuine output rather than hand-written guesses.
 
-Everything in this section is **[expected]** (written from knowledge of the format, not yet
-checked against a file). First task: unzip a real `.mscz`, read the `.mscx`, and correct this
-section.
+**[verified against MuseScore 4.7 output, Nov 2026]** for 4.x files; the 3.x branches
+(`<accidental>` key field, `Tuplet` ids, `<Tie>` elements) are **[expected]** — no 3.x file has
+been tested yet. Findings from the real file that differ from the first draft:
+- `Part > Staff` declarations carry **no `id` and no `defaultClef`** in 4.x. The clef comes from
+  the first `<Clef>` in the staff's first bar. Staves are matched to `Score > Staff[id]` by order.
+- Title is usually in `metaTag workTitle`, but a MusicXML-converted file may only have
+  `metaTag movementTitle`; both are checked before the `VBox` title text.
+- In 4.x, `<Tuplet>` carries the ratio inline (no id) and is closed by `<endTuplet/>`.
+- A `.mscz` also contains `score_style.mss`, `Thumbnails/`, `audiosettings.json` etc.; only the
+  root-level `.mscx` is read.
 
 - Root `<museScore version="…">` → `<Score>`. Target versions 3.x and 4.x. A `version` below 3
   → still try, and add "This file is from an old MuseScore version; some content may be missing"
