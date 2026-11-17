@@ -792,11 +792,12 @@ function onMove(e) {
 
 // ---------- Selection tool (DESIGN §14.2) ----------
 
-let drag = null;
+let drag = null, dragged = false; // dragged: swallow the click that ends a box drag
 const nearestIdx = (L) => (L.cell.notes.length
   ? L.cell.notes.reduce((b, n) => (Math.abs(n.x - L.x) < Math.abs(b.x - L.x) ? n : b)).idx : null);
 
 function onDown(e) {
+  dragged = false;
   if (state.tool !== "select" || e.button !== 0 || e.target.closest("input, button:not(#title, #composer)")) return;
   e.preventDefault();
   const L = locate(e), sh = $("sheet").getBoundingClientRect();
@@ -818,6 +819,7 @@ function onDown(e) {
 }
 
 function endDrag() {
+  if (drag?.moved) dragged = true;
   drag = null;
   $("sel-box").style.display = "none";
 }
@@ -1677,6 +1679,7 @@ function init() {
   systems.addEventListener("mousemove", onMove);
   systems.addEventListener("mouseleave", () => ($("ghost").style.display = "none"));
   $("sheet").addEventListener("pointerdown", onDown); // the whole page, so a box can start in the margin
+  $("sheet").addEventListener("click", (e) => { if (dragged) { dragged = false; e.stopPropagation(); e.preventDefault(); } }, true);
   document.addEventListener("pointermove", onDrag);
   document.addEventListener("pointerup", endDrag);
   document.addEventListener("pointercancel", endDrag);
