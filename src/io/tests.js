@@ -166,10 +166,10 @@ export async function run({ check, eq }) {
     return eq(b.measures, s.measures) || JSON.stringify(b.measures); // the reader takes only the first time and key
   });
 
-  await check("export: WAV renders the score offline (triangle voice), with a valid header (DESIGN §19)", async () => {
+  await check("export: WAV renders the score offline, with a valid header (DESIGN §19)", async () => {
     const s = M.newScore({ bars: 1, tempo: 240 });
     s.staves[0].bars[0] = [ev("q", "A4"), ev("q", "C5"), ev("h")];
-    const { buffer } = await renderAudio(s, () => {}, 8000);
+    const { buffer } = await renderAudio(s, () => {}, 8000, 0); // don't wait for samples: no network in tests
     const want = Math.ceil((1 + 2.5) * 8000);
     if (buffer.length !== want) return `length ${buffer.length}, want ${want}`;
     const d = buffer.getChannelData(0);

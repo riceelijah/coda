@@ -1146,7 +1146,8 @@ function setupCtx() {
 // ---------- menu bar (DESIGN §13.1) ----------
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-const openMenu = () => document.querySelector("#menubar .mlist:not([hidden]), #ctx:not([hidden])");
+// top-level lists only: a submenu is shown by CSS, never by the hidden attribute
+const openMenu = () => document.querySelector("#menubar .menu > .mlist:not([hidden]), #ctx:not([hidden])");
 
 function closeMenus(focusButton = false) {
   const list = openMenu();
@@ -1186,7 +1187,17 @@ function setupMenus() {
     };
     const list = mb.nextElementSibling;
     list.onkeydown = (e) => {
-      const items = [...list.querySelectorAll("button:not(:disabled)")], at = items.indexOf(document.activeElement);
+      // arrows move within the submenu while focus is in it, else among the top-level items
+      const sub = document.activeElement?.closest(".sub");
+      const inSub = document.activeElement?.closest(".submenu");
+      const items = [...(inSub || list).querySelectorAll("button:not(:disabled):not([hidden])")].filter((b) => inSub || !b.closest(".submenu"));
+      const at = items.indexOf(document.activeElement);
+      if (e.key === "ArrowRight" && document.activeElement?.matches("[aria-haspopup]")) {
+        e.preventDefault(); sub.querySelector(".submenu button:not(:disabled):not([hidden])")?.focus(); return;
+      }
+      if (e.key === "ArrowLeft" && sub && document.activeElement.closest(".submenu")) {
+        e.preventDefault(); sub.querySelector("[aria-haspopup]").focus(); return;
+      }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
@@ -1293,7 +1304,7 @@ const EXPORTS = {
   "x-wav": { ext: "wav", mime: "audio/wav", audio: true, make: async () => wavBytes((await audioBuffer()).buffer) },
   "x-audio": { audio: true, make: async () => {
     const { buffer } = await audioBuffer();
-    return recordCompressed(buffer, (f) => message(`Recording audio… ${Math.round(f * 100)}% (it takes as long as the piece)`, false, true));
+    return recordCompressed(buffer, (f) => message(`Recording audio… ${Math.round(f * 100)}% (it takes as long as the piece; Stop cancels)`, false, true));
   } },
 };
 let exporting = false, audioNote = "";
@@ -1314,8 +1325,10 @@ async function exportAs(id) {
     const name = `${fileBase()}.${ext}`;
     download(data instanceof Blob ? data : new Blob([data], { type: x.mime }), name);
     message([`Exported ${name}.`, x.note, audioNote].filter(Boolean).join(" "));
-  } catch (e) { console.error(e); message("Export failed: " + (e.message || e), true); }
-  finally { exporting = false; }
+  } catch (e) {
+    if (e.message === "Stopped") message("Export stopped");
+    else { console.error(e); message("Export failed: " + (e.message || e), true); }
+  } finally { exporting = false; }
 }
 
 async function saveFile() {

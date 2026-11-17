@@ -245,10 +245,10 @@ function scheduleNotes(c, dest, notes, t0, secPerTick) {
 }
 
 // The whole score rendered offline (DESIGN §19): {buffer, status}. Waits for every sound.
-export async function renderAudio(score, onStatus = () => {}, rate = 44100) {
+export async function renderAudio(score, onStatus = () => {}, rate = 44100, waitMs = Infinity) {
   const { notes, total } = schedule(score);
   audio(); // decoding uses the live context
-  const status = await prepare(notes, Infinity, onStatus);
+  const status = await prepare(notes, waitMs, onStatus);
   const secPerTick = 60 / (score.tempo || 100) / PPQ;
   const c = new OfflineAudioContext(2, Math.ceil((total * secPerTick + 2.5) * rate), rate);
   scheduleNotes(c, output(c), notes, 0.05, secPerTick);
@@ -281,13 +281,21 @@ export function recordCompressed(buf, onProgress = () => {}) {
   const rec = new MediaRecorder(dest.stream, { mimeType: type });
   const parts = [];
   rec.ondataavailable = (e) => { if (e.data.size) parts.push(e.data); };
+  let stopped = false;
+  recording = () => { stopped = true; try { src.stop(); } catch { /* not started */ } };
   return new Promise((resolve, reject) => {
-    rec.onstop = () => { clearInterval(tm); resolve(new Blob(parts, { type: type.split(";")[0] })); };
+    rec.onstop = () => {
+      clearInterval(tm); recording = null;
+      if (stopped) reject(new Error("Stopped")); else resolve(new Blob(parts, { type: type.split(";")[0] }));
+    };
     rec.onerror = (e) => { clearInterval(tm); reject(e.error || new Error("Recording failed")); };
     src.onended = () => setTimeout(() => rec.stop(), 200);
     const t0 = c.currentTime;
     const tm = setInterval(() => onProgress(Math.min(1, (c.currentTime - t0) / buf.duration)), 500);
-    c.resume().then(() => { rec.start(); src.start(); });
+    c.resume().then(() => {
+      if (stopped) { clearInterval(tm); recording = null; reject(new Error("Stopped")); return; }
+      rec.start(); src.start();
+    });
   });
 }
 
@@ -326,7 +334,10 @@ async function start(me, score, from, onBar, onStatus) {
   me.raf = requestAnimationFrame(tick);
 }
 
+let recording = null; // cancels the compressed-audio recording in progress
+
 export function stop() {
+  recording?.();
   if (!current) return;
   cancelAnimationFrame(current.raf);
   try { current.master?.disconnect(); } catch { /* already gone */ }

@@ -66,6 +66,10 @@ export async function run({ check, eq, brief, fetchBytes, importBytes }) {
     const b = importMSCX(exportMSCX(a), "x.mscx").score;
     // the reader names a part's sound from its name when the file says program 0, so compare programs only where set
     b.staves.forEach((st, i) => { if (a.staves[i] && a.staves[i].program === undefined) delete st.program; });
+    const g = { ...a, measures: [{ key: 0, time: [4, 4] }, {}], staves: [{ name: "", clef: "treble", brace: false,
+      bars: [[{ dur: "w", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0 }] }], []],
+      layers: [[[], []], [[{ dur: "w", dots: 0, tie: false, pitches: [{ step: 2, oct: 4, alter: 0 }] }], []]] }] };
+    if (!eq(importMSCX(exportMSCX(g), "g.mscx").score.staves[0].layers, g.staves[0].layers)) return "empty layer 2 under layer 3";
     const canon = (o) => JSON.stringify(o, (k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v));
     if (canon(a) === canon(b)) return true;
     for (let s = 0; s < a.staves.length; s++) if (canon(a.staves[s]) !== canon(b.staves[s])) return `staff ${s}\n  want ${brief(a.staves[s])}\n  got  ${brief(b.staves[s])}`;
