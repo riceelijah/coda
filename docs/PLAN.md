@@ -37,8 +37,8 @@ only says what to build in what order and how to know each phase is finished.
 
 ## Phase 0 — Repo scaffold
 
-- [ ] `git init -b main` in the project root (`docs/` and `CLAUDE.md` already exist; keep them).
-- [ ] `.gitignore` containing `.DS_Store`.
+- [x] `git init -b main` in the project root (done; the docs are already committed on `main`).
+- [x] `.gitignore` containing `.DS_Store`.
 - [ ] `LICENSE`: MIT, year 2026, copyright holder "Coda contributors".
 - [ ] `.nojekyll` (empty).
 - [ ] `vendor/vexflow.js` from `https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js`
