@@ -122,7 +122,7 @@ function makeNote(ev, clef, stem = 0) {
 
 /**
  * Draw the score into `container`. Returns the hit map:
- * { cells: [{sys, staff, bar, svg, x0, x1, yTop, yBottom, spacing, notes:[{idx,x}]}],
+ * { cells: [{sys, staff, bar, svg, x0, x1, yTop, yBottom, spacing, notes:[{idx,x,ys}]}],
  *   systems: [{svg, el, bars, height}], errors: [string] }
  */
 // opts.layer: the layer being edited (hit map and selection); opts.dim: grey the other layers.
@@ -435,7 +435,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
         x0: stave.getX(), x1: stave.getX() + stave.getWidth(),
         yTop: stave.getYForLine(0), yBottom: stave.getYForLine(4),
         spacing: stave.getSpacingBetweenLines(),
-        notes: d ? d.notes.map((n, idx) => ({ idx, x: n.getAbsoluteX() })) : [],
+        notes: d ? d.notes.map((n, idx) => ({ idx, x: n.getAbsoluteX(), ys: n.getYs?.() || [] })) : [],
       });
     });
   });

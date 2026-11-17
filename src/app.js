@@ -252,9 +252,10 @@ function setTool(t) {
   state.tool = t;
   $("systems").classList.toggle("select-tool", t === "select");
   $("ghost").style.display = "none";
+  endDrag();
   document.querySelectorAll(".pal[data-tool]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.tool === t)));
   $("status-hint").textContent = t === "select"
-    ? "Selection tool: click a note, drag across notes, Shift+click to extend · right-click for actions · V for note entry"
+    ? "Selection tool: click a note, drag a box around notes, Shift+click to extend · right-click for actions · V for note entry"
     : "Click a staff to add a note · A–G to type · Shift+A–G or Shift+click for chords · ? for help";
 }
 
@@ -796,10 +797,12 @@ const nearestIdx = (L) => (L.cell.notes.length
   ? L.cell.notes.reduce((b, n) => (Math.abs(n.x - L.x) < Math.abs(b.x - L.x) ? n : b)).idx : null);
 
 function onDown(e) {
-  if (state.tool !== "select" || e.button !== 0) return;
-  const L = locate(e);
-  if (!L) return;
+  if (state.tool !== "select" || e.button !== 0 || e.target.closest("input, button:not(#title, #composer)")) return;
   e.preventDefault();
+  const L = locate(e), sh = $("sheet").getBoundingClientRect();
+  // any drag past 4 px draws a selection box, wherever it starts
+  if (!e.shiftKey) drag = { x: e.clientX - sh.left, y: e.clientY - sh.top, staff: L?.staff, moved: false };
+  if (!L) return;
   state.caret = { staff: L.staff, bar: L.bar };
   const idx = nearestIdx(L);
   if (idx === null) { if (!e.shiftKey) { state.sel = null; state.selEnd = null; } refresh(); return; } // empty bar
@@ -809,25 +812,52 @@ function onDown(e) {
   } else {
     state.sel = { staff: L.staff, ...pos };
     state.selEnd = null;
-    drag = { staff: L.staff, x: e.clientX, y: e.clientY, moved: false };
     hear(selEvent());
   }
   refresh();
 }
 
+function endDrag() {
+  drag = null;
+  $("sel-box").style.display = "none";
+}
+
+// Events whose heads are inside the box (sheet coordinates): [{staff, bar, idx}].
+function boxHits(box, sh) {
+  const hits = [];
+  state.hit.systems.forEach((sys, si) => {
+    const r = sys.svg.getBoundingClientRect(), k = r.width / SHEET_W, vy = sys.svg.viewBox.baseVal.y;
+    const px = (x) => r.left - sh.left + x * k, py = (y) => r.top - sh.top + (y - vy) * k;
+    for (const c of state.hit.cells) {
+      if (c.sys !== si) continue;
+      for (const n of c.notes) {
+        const x = px(n.x + 5), ys = n.ys.length ? n.ys : [(c.yTop + c.yBottom) / 2];
+        if (x >= box.l && x <= box.r && ys.some((y) => py(y) >= box.t && py(y) <= box.b)) hits.push({ staff: c.staff, bar: c.bar, idx: n.idx });
+      }
+    }
+  });
+  return hits;
+}
+
 function onDrag(e) {
   if (!drag) return;
-  if (!e.buttons) { drag = null; return; } // released outside the window
-  if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
+  if (!e.buttons) { endDrag(); return; } // released outside the window
+  const sh = $("sheet").getBoundingClientRect(), x = e.clientX - sh.left, y = e.clientY - sh.top;
+  if (!drag.moved && Math.hypot(x - drag.x, y - drag.y) < 4) return;
   drag.moved = true;
-  const L = locate(e, drag.staff);
-  const idx = L && nearestIdx(L);
-  if (idx === null || idx === undefined) return;
-  const s = state.sel, end = s.bar === L.bar && s.idx === idx ? null : { bar: L.bar, idx };
-  const cur = state.selEnd;
-  if ((cur && end && cur.bar === end.bar && cur.idx === end.idx) || (!cur && !end)) return;
-  state.selEnd = end;
-  state.caret.bar = L.bar;
+  const box = { l: Math.min(x, drag.x), r: Math.max(x, drag.x), t: Math.min(y, drag.y), b: Math.max(y, drag.y) };
+  Object.assign($("sel-box").style, { display: "block", left: box.l + "px", top: box.t + "px", width: box.r - box.l + "px", height: box.b - box.t + "px" });
+  // a range stays on one staff: the one pressed on if the box holds notes there, else the top one
+  const hits = boxHits(box, sh);
+  const staff = hits.some((h) => h.staff === drag.staff) ? drag.staff : Math.min(...hits.map((h) => h.staff));
+  const on = hits.filter((h) => h.staff === staff).sort((a, b) => a.bar - b.bar || a.idx - b.idx);
+  const first = on[0], last = on[on.length - 1];
+  const sel = first ? { staff, bar: first.bar, idx: first.idx } : null;
+  const end = first && (last.bar !== first.bar || last.idx !== first.idx) ? { bar: last.bar, idx: last.idx } : null;
+  const same = (a, b) => (!a && !b) || (a && b && a.staff === b.staff && a.bar === b.bar && a.idx === b.idx);
+  if (same(sel, state.sel) && same(end && { staff, ...end }, state.selEnd && { staff, ...state.selEnd })) return;
+  state.sel = sel; state.selEnd = end;
+  if (sel) state.caret = { staff, bar: (end || sel).bar };
   refresh();
 }
 
@@ -867,7 +897,7 @@ function onKey(e) {
   else if ((k === "Delete" || k === "Backspace") && state.armed.grace && state.sel) clearGrace();
   else if (k === "Delete" || k === "Backspace") deleteSel();
   else if (k === "Escape" && state.armed.grace) graceMode(false);
-  else if (k === "Escape") { state.sel = null; state.selEnd = null; refresh(); }
+  else if (k === "Escape") { endDrag(); state.sel = null; state.selEnd = null; refresh(); }
   else if (k === " ") togglePlay();
   else if (k === "?") $("help").showModal();
   else if (k === "ContextMenu" || (e.shiftKey && k === "F10")) ctxFromKeyboard();
@@ -1646,9 +1676,10 @@ function init() {
   systems.addEventListener("click", onClick);
   systems.addEventListener("mousemove", onMove);
   systems.addEventListener("mouseleave", () => ($("ghost").style.display = "none"));
-  systems.addEventListener("pointerdown", onDown);
+  $("sheet").addEventListener("pointerdown", onDown); // the whole page, so a box can start in the margin
   document.addEventListener("pointermove", onDrag);
-  document.addEventListener("pointerup", () => (drag = null));
+  document.addEventListener("pointerup", endDrag);
+  document.addEventListener("pointercancel", endDrag);
   document.addEventListener("keydown", onKey);
   $("lyric-box").addEventListener("keydown", onLyricKey);
   $("lyric-box").addEventListener("blur", () => { if (!$("lyric-box").hidden) { commitLyric(hyphOf()); closeLyrics(); } });

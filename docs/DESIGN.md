@@ -997,9 +997,11 @@ New **Notes** menu: Select all (mod+A), Transpose up/down a step (↑/↓), up/d
 
 - `state.tool`: `"entry"` (default, current behaviour) or `"select"`. Two buttons at the top of
   the palette (arrow, pencil); **V** toggles. Typing letters enters notes in either tool.
-- Select tool, mouse: click selects the nearest event in that staff and bar; drag (> 4 px)
-  selects a range on the anchor's staff; Shift+click extends (NotePad's gestures). No ghost note.
-  Empty bars move the caret only. Ranges stay on one staff.
+- Select tool, mouse: click selects the nearest event in that staff and bar; Shift+click extends
+  (NotePad's gestures). No ghost note. Empty bars move the caret only.
+- Drag (> 4 px, starting anywhere on the page) draws a selection box (`#sel-box`); the selection
+  runs from the first to the last event whose head is inside it. Ranges stay on one staff: the
+  one pressed on if the box holds notes there, else the top one. An empty box clears it.
 - Range-wide commands: duration, dot, accidental, tie, transpose, tuplet act on every event in
   `range()` inside one `edit()`, so any failure rolls back the whole change.
 

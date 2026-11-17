@@ -105,6 +105,7 @@
     position: absolute; pointer-events: none; display: none; border-radius: 50%;
     background: rgba(37, 99, 235, .45); transform: rotate(-20deg);
   }
+  #sel-box { position: absolute; pointer-events: none; display: none; border: 1px solid rgba(37, 99, 235, .8); background: rgba(37, 99, 235, .1); }
   .hl { position: absolute; pointer-events: none; border-radius: 3px; }
   #lyric-box { position: absolute; width: 110px; font: 15px Georgia, serif; text-align: center; padding: 1px 4px;
     border: 1px solid #2563eb; border-radius: 3px; background: #fff; color: #000; z-index: 5; }
@@ -173,7 +174,7 @@
   @media print {
     @page { margin: 12mm; }
     body { display: block; background: #fff; }
-    #topbar, #palette, #status, #report, #ctx, dialog, #ghost, .hl, #lyric-box { display: none !important; }
+    #topbar, #palette, #status, #report, #ctx, dialog, #ghost, #sel-box, .hl, #lyric-box { display: none !important; }
     #desk { padding: 0; overflow: visible; }
     #sheet { box-shadow: none; padding: 0; max-width: none; }
     #title:hover, #composer:hover { background: none; }
@@ -311,6 +312,7 @@
     <div id="caret-hl" class="hl"></div>
     <div id="play-hl" class="hl"></div>
     <div id="ghost"></div>
+    <div id="sel-box"></div>
     <input id="lyric-box" type="text" hidden autocomplete="off" spellcheck="false" aria-label="Lyric for the selected note. Space or Tab: next note. Hyphen: next syllable. Enter: done.">
   </div>
 </main>
