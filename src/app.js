@@ -27,6 +27,7 @@ const state = {
   armed: { dur: "q", dots: 0, rest: false, alter: null, chord: false, tup: null },
   lastTup: [3, 2], // ratio 9 / ; re-arms (DESIGN §14.4)
   tool: "entry", // or "select" (DESIGN §14.2)
+  layer: 0, // active layer 0–3 (NotePad's layers 1–4, DESIGN §15)
   undo: [], redo: [],
   hit: null,
 };
@@ -76,7 +77,7 @@ function autosave() {
 function edit(fn, { keepRedo = false } = {}) {
   const snap = JSON.stringify(state.score);
   let reason;
-  try { reason = fn(state.score); if (!reason) M.clearBrokenTies(state.score); } catch (e) { console.error(e); reason = "Something went wrong"; }
+  try { reason = M.withLayer(state.score, state.layer, () => fn(state.score)); if (!reason) M.clearBrokenTies(state.score); } catch (e) { console.error(e); reason = "Something went wrong"; }
   if (reason) {
     state.score = JSON.parse(snap);
     message(reason, true);
@@ -123,14 +124,35 @@ function fixRefs() {
   state.caret.staff = Math.min(state.caret.staff, sc.staves.length - 1);
   state.caret.bar = Math.min(state.caret.bar, sc.measures.length - 1);
   const s = state.sel;
-  if (s && !(sc.staves[s.staff] && sc.staves[s.staff].bars[s.bar] && sc.staves[s.staff].bars[s.bar][s.idx])) state.sel = null;
+  if (s && !(sc.staves[s.staff] && lb(s.staff)[s.bar]?.[s.idx])) state.sel = null;
   const e = state.selEnd;
-  if (e && !(state.sel && sc.staves[state.sel.staff].bars[e.bar] && sc.staves[state.sel.staff].bars[e.bar][e.idx])) state.selEnd = null;
+  if (e && !(state.sel && lb(state.sel.staff)[e.bar]?.[e.idx])) state.selEnd = null;
+}
+
+let printing = false; // print without the greyed-out layers
+addEventListener("beforeprint", () => { printing = true; refresh(); });
+addEventListener("afterprint", () => { printing = false; refresh(); });
+
+// NotePad-style layers 1–4 (DESIGN §15). Switching clears the selection; nothing is created
+// until a note is entered.
+function setLayer(v) {
+  state.layer = v;
+  state.sel = null; state.selEnd = null;
+  document.querySelectorAll("#layers button").forEach((b, i) => b.setAttribute("aria-checked", String(i === v)));
+  refresh();
+  message(`Layer ${v + 1}${v ? ": notes you enter go in this layer (stems down in layers 2 and 4)" : ""}`);
+}
+
+// Bars of the active layer for staff s (empty bars when that layer doesn't exist yet). Read-only:
+// edits go through edit(), which swaps the active layer in (M.withLayer).
+function lb(s) {
+  const st = state.score.staves[s];
+  return M.layerBars(st, state.layer) || st.bars.map(() => []);
 }
 
 function selEvent() {
   const s = state.sel;
-  return s ? state.score.staves[s.staff].bars[s.bar][s.idx] : null;
+  return s ? lb(s.staff)[s.bar]?.[s.idx] || null : null;
 }
 
 // ---------- rendering + chrome ----------
@@ -142,7 +164,8 @@ function refresh() {
   $("composer").textContent = sc.composer || "";
   $("tempo").value = sc.tempo;
   document.title = (sc.title || "Untitled") + " — Coda";
-  state.hit = render(sc, $("systems"), state.sel && { ...state.sel, end: state.selEnd });
+  const layered = state.layer > 0 || sc.staves.some((st) => st.layers);
+  state.hit = render(sc, $("systems"), state.sel && { ...state.sel, end: state.selEnd }, { layer: state.layer, dim: layered && !printing });
   if (state.hit.errors.length) message(state.hit.errors.join("; "), true);
   $("b-undo").disabled = !state.undo.length;
   $("b-redo").disabled = !state.redo.length;
@@ -178,6 +201,7 @@ function updateStatus() {
   const sc = state.score, { staff, bar } = state.caret;
   const a = state.armed;
   const parts = [`Bar ${bar + 1}`, `Staff ${staff + 1}${sc.staves[staff].name ? " (" + sc.staves[staff].name + ")" : ""}`];
+  if (state.layer || sc.staves.some((st) => st.layers)) parts.push(`Layer ${state.layer + 1}`);
   const ev = selEvent();
   const n = range().length;
   if (n > 1) parts.push(`${n} notes selected`);
@@ -356,7 +380,7 @@ function toggleTuplet() {
 
 function accidental(v) {
   const s = state.sel;
-  if (s && range().some((p) => selStaff().bars[p.bar][p.idx].pitches.length)) {
+  if (s && range().some((p) => lb(s.staff)[p.bar][p.idx].pitches.length)) {
     if (eachSel((sc, st, p, e) => (e.pitches.length ? M.setAlter(sc, st, p.bar, p.idx, v) : null)) && range().length === 1) hear(selEvent());
   } else {
     state.armed.alter = state.armed.alter === v ? null : v;
@@ -370,7 +394,7 @@ function tie() {
   const r = range();
   if (r.length === 1) { edit((sc) => M.toggleTie(sc, s.staff, s.bar, s.idx)); return; }
   // a range: tie every note that can be tied to the next; if they all already are, untie them
-  const body = r.slice(0, -1), bars = selStaff().bars;
+  const body = r.slice(0, -1), bars = lb(s.staff);
   const allTied = body.every((p) => bars[p.bar][p.idx].tie || !bars[p.bar][p.idx].pitches.length);
   let n = 0;
   edit((sc) => {
@@ -402,7 +426,7 @@ function enterAtCaret(pitch) {
   const need = M.eventTicks(ev);
   const sl = state.sel;
   // after the selected note when it's in the caret bar and not the last one: insert there, no auto-advance
-  if (sl && sl.staff === state.caret.staff && sl.bar === state.caret.bar && sl.idx < state.score.staves[sl.staff].bars[sl.bar].length - 1) {
+  if (sl && sl.staff === state.caret.staff && sl.bar === state.caret.bar && sl.idx < lb(sl.staff)[sl.bar].length - 1) {
     if (edit((sc) => {
       const r = M.insertEvent(sc, sl.staff, sl.bar, sl.idx + 1, ev);
       if (r) return r;
@@ -457,7 +481,7 @@ function lastPitchBefore() {
   const ev = selEvent();
   if (ev && ev.pitches.length && state.sel.staff === s) return ev.pitches[0];
   for (let b = state.caret.bar; b >= 0; b--) {
-    const bar = sc.staves[s].bars[b];
+    const bar = lb(s)[b];
     for (let i = bar.length - 1; i >= 0; i--) if (bar[i].pitches.length) return bar[i].pitches[0];
   }
   return null;
@@ -480,22 +504,22 @@ function typeLetter(letter) {
 function range() {
   const s = state.sel;
   if (!s) return [];
-  return state.selEnd ? M.rangePositions(state.score, s.staff, s, state.selEnd) : [{ bar: s.bar, idx: s.idx }];
+  return state.selEnd ? M.rangePositions(state.score, s.staff, s, state.selEnd, state.layer) : [{ bar: s.bar, idx: s.idx }];
 }
 
 function extendSel(dir) {
   const s = state.sel;
   if (!s) { moveSel(dir); return; }
   const from = state.selEnd || { bar: s.bar, idx: s.idx };
-  const n = dir > 0 ? M.nextEventPos(state.score, s.staff, from.bar, from.idx) : M.prevEventPos(state.score, s.staff, from.bar, from.idx);
+  const n = dir > 0 ? M.nextEventPos(state.score, s.staff, from.bar, from.idx, state.layer) : M.prevEventPos(state.score, s.staff, from.bar, from.idx, state.layer);
   if (n) { state.selEnd = n; state.caret.bar = n.bar; refresh(); }
 }
 
 function copySel(cut) {
   const r = range();
   if (!r.length) return false;
-  const st = state.score.staves[state.sel.staff];
-  state.clip = JSON.parse(JSON.stringify(r.map((p) => st.bars[p.bar][p.idx])));
+  const bars = lb(state.sel.staff);
+  state.clip = JSON.parse(JSON.stringify(r.map((p) => bars[p.bar][p.idx])));
   message(`${r.length} note${r.length > 1 ? "s" : ""} copied`);
   if (cut) deleteSel();
   return true;
@@ -506,7 +530,7 @@ function paste() {
   const s = state.sel, last = range().slice(-1)[0];
   const staff = s ? s.staff : state.caret.staff;
   const bar = last ? last.bar : state.caret.bar;
-  const idx = last ? last.idx + 1 : state.score.staves[staff].bars[bar].length;
+  const idx = last ? last.idx + 1 : lb(staff)[bar].length;
   edit((sc) => {
     const placed = [];
     const r = M.pasteEvents(sc, staff, bar, idx, state.clip, placed);
@@ -525,19 +549,19 @@ function moveSel(dir) {
   const sc = state.score;
   let s = state.sel;
   if (!s) {
-    const bar = sc.staves[state.caret.staff].bars[state.caret.bar];
+    const bar = lb(state.caret.staff)[state.caret.bar];
     if (bar.length) state.sel = { staff: state.caret.staff, bar: state.caret.bar, idx: bar.length - 1 };
     refresh();
     return;
   }
-  const n = dir > 0 ? M.nextEventPos(sc, s.staff, s.bar, s.idx) : M.prevEventPos(sc, s.staff, s.bar, s.idx);
+  const n = dir > 0 ? M.nextEventPos(sc, s.staff, s.bar, s.idx, state.layer) : M.prevEventPos(sc, s.staff, s.bar, s.idx, state.layer);
   if (n) { state.sel = { staff: s.staff, bar: n.bar, idx: n.idx }; state.caret.bar = n.bar; refresh(); }
 }
 
 function deleteSel() {
   const s = state.sel, r = range();
   if (!s) return;
-  const prev = M.prevEventPos(state.score, s.staff, r[0].bar, r[0].idx);
+  const prev = M.prevEventPos(state.score, s.staff, r[0].bar, r[0].idx, state.layer);
   edit((sc) => {
     M.deleteRange(sc, s.staff, r[0], r[r.length - 1]);
     state.sel = prev ? { staff: s.staff, bar: prev.bar, idx: prev.idx } : null;
@@ -716,7 +740,7 @@ function onKey(e) {
 function transposeSel(steps) {
   const s = state.sel;
   if (!s) { message("Select a note first", true); return; }
-  const r = range().filter((p) => state.score.staves[s.staff].bars[p.bar][p.idx].pitches.length);
+  const r = range().filter((p) => lb(s.staff)[p.bar][p.idx].pitches.length);
   if (!r.length) { message("Rests have no pitch", true); return; }
   if (!edit((sc) => { for (const p of r) M.transpose(sc, s.staff, p.bar, p.idx, steps); return null; })) return;
   if (r.length > 1) return;
@@ -915,8 +939,12 @@ const CMD = {
   "n-octup": { run: () => transposeSel(7), on: hasSel },
   "n-octdown": { run: () => transposeSel(-7), on: hasSel },
   "n-tie": { run: () => tie(), on: hasSel },
+  "n-layer1": { run: () => setLayer(0) },
+  "n-layer2": { run: () => setLayer(1) },
+  "n-layer3": { run: () => setLayer(2) },
+  "n-layer4": { run: () => setLayer(3) },
   "n-tuplet": { run: () => openTuplet() },
-  "n-untup": { run: () => tupletSel(null), on: () => range().some((p) => selStaff().bars[p.bar][p.idx].tup) },
+  "n-untup": { run: () => tupletSel(null), on: () => range().some((p) => lb(state.sel.staff)[p.bar][p.idx].tup) },
   "b-addbar": { run: () => edit((sc) => { M.addMeasure(sc, state.caret.bar); state.caret.bar++; return null; }) },
   "b-delbar": { run: () => {
     const b = state.caret.bar;
@@ -955,11 +983,11 @@ function enableItems(list) {
   }
 }
 
-const selStaff = () => state.score.staves[state.sel ? state.sel.staff : state.caret.staff];
 
 function selectAll() {
   const s = state.sel ? state.sel.staff : state.caret.staff, sc = state.score;
-  const first = M.nextEventPos(sc, s, 0, -1), last = M.prevEventPos(sc, s, sc.measures.length - 1, sc.staves[s].bars[sc.measures.length - 1].length);
+  const v = state.layer, n = sc.measures.length;
+  const first = M.nextEventPos(sc, s, 0, -1, v), last = M.prevEventPos(sc, s, n - 1, lb(s)[n - 1].length, v);
   if (!first) { message("This staff is empty", true); return; }
   state.sel = { staff: s, ...first };
   state.selEnd = last && (last.bar !== first.bar || last.idx !== first.idx) ? last : null;
@@ -1243,6 +1271,7 @@ function init() {
   fillSounds($("f-sound"), 0);
   $("f-preset").onchange = (e) => ($("f-sound").value = e.target.value === "satb" ? 52 : 0);
   setupCommands();
+  document.querySelectorAll("#layers button").forEach((b, i) => (b.onclick = () => setLayer(i)));
   setupCtx();
   $("tuplet").addEventListener("close", closeTuplet);
   $("tuplet-cancel").onclick = () => $("tuplet").close("cancel");

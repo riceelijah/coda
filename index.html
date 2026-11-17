@@ -108,6 +108,10 @@
     font-size: 13px; min-height: 28px;
   }
   #status-msg.warn { color: var(--danger); }
+  .status-left { display: flex; gap: 12px; align-items: center; }
+  #layers { display: inline-flex; gap: 2px; align-items: center; }
+  #layers button { min-width: 22px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: none; color: inherit; cursor: pointer; font: inherit; }
+  #layers button[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
   #report {
     position: fixed; right: 16px; bottom: 44px; max-width: 420px; z-index: 5;
@@ -201,6 +205,11 @@
         <button role="menuitem" id="n-tie" data-short="T">Tie to next</button>
         <button role="menuitem" id="n-tuplet" data-short="9">Tuplet…</button>
         <button role="menuitem" id="n-untup">Remove tuplet</button>
+        <hr>
+        <button role="menuitem" id="n-layer1">Layer 1</button>
+        <button role="menuitem" id="n-layer2">Layer 2</button>
+        <button role="menuitem" id="n-layer3">Layer 3</button>
+        <button role="menuitem" id="n-layer4">Layer 4</button>
       </div></div>
     <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Score</button>
       <div class="mlist" role="menu" hidden>
@@ -238,7 +247,12 @@
 </main>
 
 <footer id="status">
-  <span id="status-pos"></span>
+  <span class="status-left">
+    <span id="layers" role="radiogroup" aria-label="Layer" title="Layer: up to four independent lines of notes per staff">Layer
+      <button role="radio" aria-checked="true">1</button><button role="radio" aria-checked="false">2</button><button role="radio" aria-checked="false">3</button><button role="radio" aria-checked="false">4</button>
+    </span>
+    <span id="status-pos"></span>
+  </span>
   <span><span id="status-msg" aria-live="polite"></span> <span class="hint" id="status-hint">Click a staff to add a note · A–G to type · Shift+A–G or Shift+click for chords · ? for help</span></span>
 </footer>
 
@@ -378,6 +392,7 @@
       <tr><td>Click / drag</td><td>Selection tool: select a note, or drag across notes; <kbd>Shift</kbd>+click extends</td></tr>
       <tr><td><kbd>Shift</kbd>+<kbd>A</kbd>–<kbd>G</kbd></td><td>Add that note above the selected note (build a chord)</td></tr>
       <tr><td>Shift+click</td><td>Add or remove a chord note on the clicked note</td></tr>
+      <tr><td>Layer 1–4 (lower left)</td><td>Pick which layer you enter and edit in (Notes ▸ Layer); other layers show grey</td></tr>
       <tr><td>Chord button</td><td>Clicks add notes to the selected note instead of after it</td></tr>
     </table>
     <div class="actions"><button class="btn primary">Close</button></div>

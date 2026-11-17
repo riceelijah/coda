@@ -467,7 +467,7 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
 
 ## 8. Things deliberately not in the first version
 
-Lyrics, articulations, dynamics, slurs, grace notes, entering notes in layers 2–4 (layers: §15), repeats
+Lyrics, articulations, dynamics, slurs, grace notes, repeats
 and endings, mid-score clef changes, transposing instruments, page-layout controls, user-supplied
 instrument samples, MIDI export. (Sampled General MIDI sounds: §13.3.) (Tuplet entry, inserting mid-bar and copy/paste: §11.)
 
@@ -967,5 +967,9 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
   after where its layer has reached gets rests in front (counted). Export
   writes each non-empty layer bar as voice `staff × 4 + layer + 1`, separated by `<backup>`.
 - **Phase 18a:** model, MusicXML, drawing, playback. **18b:** a Layer 1–4 control at the lower
-  left (NotePad's place for it); entry, selection and caret carry a layer. **18c:** MuseScore
+  left (NotePad's place for it) and Notes ▸ Layer 1–4. `state.layer` picks the active layer;
+  `edit()` runs each change inside `withLayer(score, v, fn)`, which swaps that layer into
+  `staff.bars` for every staff, then swaps back and drops trailing empty layers, so every edit
+  command works on any layer unchanged. Other layers draw grey (not when printing); clicks and
+  the caret use the active layer. **18c:** MuseScore
   voices and `.musx` layers.

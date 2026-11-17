@@ -42,7 +42,7 @@ only says what to build in what order and how to know each phase is finished.
 | 15 | Selection tool, mouse ranges, range-wide commands | done |
 | 16 | Right-click context menu | done |
 | 17 | General tuplets (3:2, 2:3, 4:3, 5:4, 6:4) | done |
-| 18 | Layers 1–4 per staff | 18a (model, MusicXML, draw, play) and 18c (MuseScore, .musx) done; 18b (entry in layers 2–4) next |
+| 18 | Layers 1–4 per staff | Done (18a model/MusicXML/draw/play, 18b entry, 18c MuseScore/.musx) |
 
 ---
 

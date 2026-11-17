@@ -134,8 +134,33 @@ export const MAX_LAYERS = 4;
 export function layerBars(st, v = 0) { return v === 0 ? st.bars : st.layers?.[v - 1]; }
 export function allLayers(st) { return [st.bars, ...(st.layers || [])]; }
 
+// Run fn with layer v in each staff's `bars`, so every edit function works on that layer
+// unchanged (DESIGN §15). A missing layer is created for the call and dropped again if it
+// is still empty afterwards.
+export function withLayer(score, v, fn) {
+  if (!v) return fn();
+  for (const st of score.staves) {
+    st.layers ||= [];
+    while (st.layers.length < v) st.layers.push(st.bars.map(() => []));
+  }
+  // Swap back the same staff objects, so an edit that adds, removes or replaces staves is safe.
+  const staves = score.staves.slice();
+  const swap = () => { for (const st of staves) [st.bars, st.layers[v - 1]] = [st.layers[v - 1], st.bars]; };
+  swap();
+  try { return fn(); } finally { swap(); pruneLayers(score); }
+}
+
+// Drop trailing layers that are entirely empty, and `layers` itself when none is left.
+export function pruneLayers(score) {
+  for (const st of score.staves) {
+    while (st.layers?.length && st.layers[st.layers.length - 1].every((b) => !b.length)) st.layers.pop();
+    if (st.layers && !st.layers.length) delete st.layers;
+  }
+}
+
 export function nextEventPos(score, s, b, i, v = 0) {
   const bars = layerBars(score.staves[s], v);
+  if (!bars) return null;
   if (i + 1 < bars[b].length) return { bar: b, idx: i + 1 };
   for (let nb = b + 1; nb < bars.length; nb++) if (bars[nb].length) return { bar: nb, idx: 0 };
   return null;
@@ -143,6 +168,7 @@ export function nextEventPos(score, s, b, i, v = 0) {
 
 export function prevEventPos(score, s, b, i, v = 0) {
   const bars = layerBars(score.staves[s], v);
+  if (!bars) return null;
   if (i > 0) return { bar: b, idx: i - 1 };
   for (let pb = b - 1; pb >= 0; pb--) if (bars[pb].length) return { bar: pb, idx: bars[pb].length - 1 };
   return null;
@@ -166,11 +192,11 @@ export function insertEvent(score, s, b, idx, ev) {
 }
 
 // Positions from a to z (each {bar, idx}, either order) on staff s, in score order.
-export function rangePositions(score, s, a, z) {
+export function rangePositions(score, s, a, z, v = 0) {
   const before = (p, q) => p.bar < q.bar || (p.bar === q.bar && p.idx <= q.idx);
   const [lo, hi] = before(a, z) ? [a, z] : [z, a];
   const out = [];
-  for (let p = lo; p && before(p, hi); p = nextEventPos(score, s, p.bar, p.idx)) out.push(p);
+  for (let p = lo; p && before(p, hi); p = nextEventPos(score, s, p.bar, p.idx, v)) out.push(p);
   return out;
 }
 

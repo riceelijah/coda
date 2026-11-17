@@ -51,16 +51,15 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 | Compressed MusicXML (`.mxl`) | Opens. |
 | MuseScore (`.mscz`, `.mscx`) | Opens (tested with MuseScore 4 files). |
 | MIDI (`.mid`, `.midi`) | Opens as an automatic transcription; it will usually need tidying. |
-| Finale (`.musx`, 2014 and later) | Opens notes, rests, chords, ties, tuplets, keys, time signatures, clefs and staff names. One layer per staff. Expressions, articulations, lyrics and slurs are left out and counted in the report; page layout is not carried over. |
+| Finale (`.musx`, 2014 and later) | Opens notes, rests, chords, ties, tuplets, layers 1–4, keys, time signatures, clefs and staff names. Expressions, articulations, lyrics and slurs are left out and counted in the report; page layout is not carried over. |
 | Finale (`.mus`, 2012 and earlier) | Can't be opened. The format is closed and undocumented, and no open reader exists. Export MusicXML from a copy of Finale or Finale NotePad instead. |
 
-Coda keeps one voice per staff. When a file contains things Coda doesn't support yet (second
-voices, grace notes, clef changes…), it opens the rest and lists what it left out.
+Coda keeps up to four layers (voices) per staff. When a file contains things Coda doesn't support yet
+(grace notes, clef changes…), it opens the rest and lists what it left out.
 
 ## Not supported yet
 
-Lyrics, articulations, dynamics, slurs, grace notes, septuplets, entering notes into layers 2–4
-(files with up to four voices per staff open, draw, play and save; editing is layer 1 only for now), repeats and endings, mid-score clef changes, transposing instruments, page layout
+Lyrics, articulations, dynamics, slurs, grace notes, septuplets, repeats and endings, mid-score clef changes, transposing instruments, page layout
 controls, your own instrument samples, and MIDI export. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Running it locally

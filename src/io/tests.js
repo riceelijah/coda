@@ -151,6 +151,17 @@ export async function run({ check, eq }) {
     return (brief(st) === "C4:w | D4:w" && l2 === "r:h E4:h | ") || `${brief(st)} / ${l2}`;
   });
 
+  await check("layers: withLayer edits layer 2 only, creates it on demand and prunes it when empty (DESIGN §15)", () => {
+    const s = M.newScore({ bars: 2 });
+    s.staves[0].bars[0] = [ev("w", "C5")];
+    M.withLayer(s, 1, () => { s.staves[0].bars[1] = [ev("w", "E4")]; });
+    if (JSON.stringify(s.staves[0].bars[0]) !== JSON.stringify([ev("w", "C5")])) return "layer 1 changed";
+    if (s.staves[0].layers?.[0]?.[1]?.length !== 1) return "layer 2 not written";
+    M.withLayer(s, 1, () => { s.staves[0].bars[1] = []; });
+    if (s.staves[0].layers) return "empty layer kept";
+    M.withLayer(s, 1, () => { s.staves = [M.newScore({ bars: 2 }).staves[0]]; });
+    return M.isValidScore(s) || "invalid";
+  });
   await check("layers: bar walkers cover every layer (add/delete bar, time check, counts, playback, validation)", () => {
     const s = M.newScore({ bars: 2 });
     s.staves[0].bars[0] = [ev("w", "C5")];

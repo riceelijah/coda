@@ -14,6 +14,7 @@ const REST_KEY = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3" };
 const REST_KEY_LAYER = { treble: ["e/5", "f/4"], bass: ["g/3", "a/2"], alto: ["f/4", "g/3"], tenor: ["d/4", "e/3"] };
 const ACC = { "-2": "bb", "-1": "b", 0: "n", 1: "#", 2: "##" };
 const ACCENT = "#2563eb";
+const DIM = "#9aa0a6"; // layers other than the one being edited (screen only)
 
 export function keyName(k) { return KEY_NAMES[k + 7]; }
 
@@ -81,7 +82,8 @@ function makeNote(ev, clef, stem = 0) {
  * { cells: [{sys, staff, bar, svg, x0, x1, yTop, yBottom, spacing, notes:[{idx,x}]}],
  *   systems: [{svg, el, bars, height}], errors: [string] }
  */
-export function render(score, container, sel) {
+// opts.layer: the layer being edited (hit map and selection); opts.dim: grey the other layers.
+export function render(score, container, sel, opts = {}) {
   const VFl = VF();
   container.textContent = "";
   const systems = layout(score);
@@ -111,7 +113,7 @@ export function render(score, container, sel) {
     sys.x = [];
 
     try {
-      drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar);
+      drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, opts);
     } catch (e) {
       console.error(e);
       errors.push(`Could not draw bars ${sys.bars[0] + 1}–${sys.bars[sys.bars.length - 1] + 1}`);
@@ -166,7 +168,7 @@ function inSel(sel, b, i) {
   return (b > lo[0] || (b === lo[0] && i >= lo[1])) && (b < hi[0] || (b === hi[0] && i <= hi[1]));
 }
 
-function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar) {
+function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { layer = 0, dim = false } = {}) {
   const VFl = VF();
   // 1. staves
   const staves = []; // [k][s]
@@ -227,8 +229,9 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar) {
         } else {
           notes = bar.map((ev) => makeNote(ev, st.clef, stem));
           bar.forEach((ev, i) => {
-            if (v === 0 && sel && sel.staff === s && inSel(sel, b, i))
+            if (v === layer && sel && sel.staff === s && inSel(sel, b, i))
               notes[i].setStyle({ fillStyle: ACCENT, strokeStyle: ACCENT });
+            else if (dim && v !== layer) notes[i].setStyle({ fillStyle: DIM, strokeStyle: DIM });
           });
           for (const run of tupletRuns(bar)) {
             tuplets.push(new VFl.Tuplet(run.idx.map((i) => notes[i]),
@@ -256,18 +259,17 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar) {
     beams.forEach((bm) => bm.setContext(ctx).draw());
     tuplets.forEach((t) => t.setContext(ctx).draw());
 
-    drawn.forEach(({ s, v, stave, notes, empty }) => {
-      noteRef[s][v][b] = empty ? [] : notes.map((note) => ({ note, sys: si }));
-      // one cell per staff and bar, whichever layer drew first; note hits are layer 1 only
-      // ponytail: until layer entry (Phase 18b) picks the active layer here
-      if (cells.some((c) => c.sys === si && c.staff === s && c.bar === b)) return;
-      if (v > 0) { empty = true; }
+    drawn.forEach(({ s, v, notes, empty }) => { noteRef[s][v][b] = empty ? [] : notes.map((note) => ({ note, sys: si })); });
+    // one hit cell per staff and bar; its notes are the edited layer's
+    score.staves.forEach((st, s) => {
+      const stave = staves[k][s];
+      const d = drawn.find((x) => x.s === s && x.v === layer && !x.empty);
       cells.push({
         sys: si, staff: s, bar: b, svg,
         x0: stave.getX(), x1: stave.getX() + stave.getWidth(),
         yTop: stave.getYForLine(0), yBottom: stave.getYForLine(4),
         spacing: stave.getSpacingBetweenLines(),
-        notes: empty ? [] : notes.map((n, idx) => ({ idx, x: n.getAbsoluteX() })),
+        notes: d ? d.notes.map((n, idx) => ({ idx, x: n.getAbsoluteX() })) : [],
       });
     });
   });
