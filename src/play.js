@@ -138,7 +138,7 @@ export const sustained = (p) => (p >= 16 && p <= 23) || (p >= 40 && p <= 44) || 
 
 // The sample keys ("program:root") a score's notes need.
 export function needed(score) {
-  return new Set(schedule(score).notes.filter((n) => n.program >= 0).map((n) => keyOf(n.program, n.midi)));
+  return new Set(schedule(score).notes.filter((n) => n.program >= 0 && !n.root).map((n) => keyOf(n.program, n.midi)));
 }
 
 // Bytes of one recording: the browser cache, then each base in turn. Failures are not cached.
@@ -299,7 +299,8 @@ export function audition(midis, program = 0, sound) {
 
 // Load what `notes` need: your sounds, then GM samples (giving up after `waitMs`).
 // Returns a status line about notes that won't sound as chosen, or "" when all is well.
-async function prepare(notes, waitMs, onStatus = () => {}) {
+async function prepare(all, waitMs, onStatus = () => {}) {
+  const notes = all.filter((n) => !n.root); // a slide's target sounds on its first note's voice (DESIGN §29)
   const ids = [...new Set(notes.filter((n) => n.sound).map((n) => n.sound))];
   if (ids.length) await Promise.all(ids.map(loadUser));
   // notes your sound can't play (missing, or outside its range) use the part's instrument instead

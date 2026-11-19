@@ -1278,4 +1278,5 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   `<slide>` and `<glissando>` both import, and export is `<slide line-type="solid">`, numbered per
   chord note. MuseScore `<ChordLine>` subtype 1 fall, 2 doit, 3 plop (counted), 4 scoop, and a
   `Glissando` spanner per note. `.musx` SMuFL brass symbols: U+E5D0 scoop, E5D1–E5D6 lifts and
-  doits, E5D7–E5DF falls. Slides that break the rules above are counted.
+  doits, E5D7–E5DF falls (from the SMuFL table; no `.musx` sample with them yet). Slides that break
+  the rules above are counted.

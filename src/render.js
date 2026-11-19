@@ -214,7 +214,7 @@ export function render(score, container, sel, opts = {}) {
     if (!ev.gliss) return;
     const n = nextEventPos(score, s, b, i, v), a = noteRef[s][v][b]?.[i], z = n && noteRef[s][v][n.bar]?.[n.idx];
     if (!a || !z) return;
-    const ya = a.note.getYs(), yz = z.note.getYs(), x0 = a.note.getNoteHeadEndX() + 4, x1 = z.note.getNoteHeadBeginX() - 4;
+    const ya = a.note.getYs(), yz = z.note.getYs(), x0 = a.note.getNoteHeadEndX() + 4, x1 = z.note.getNoteHeadBeginX() - (z.note.getMetrics().modLeftPx || 0) - 4; // clear of any accidental
     const line = (ctx, pts) => { ctx.beginPath(); for (const [x, y, x2, y2] of pts) { ctx.moveTo(x, y); ctx.lineTo(x2, y2); } ctx.stroke(); };
     try { tinted(ctxs[a.sys], opts.dim && v !== (opts.layer || 0), () => tinted(ctxs[z.sys], opts.dim && v !== (opts.layer || 0) && a.sys !== z.sys, () => {
       if (a.sys === z.sys) line(ctxs[a.sys], ya.map((y, k) => [x0, y, x1, yz[k] ?? y]));
