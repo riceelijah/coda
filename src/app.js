@@ -667,16 +667,17 @@ function enterAtCaret(pitch) {
   const sl = state.sel;
   // after the selected note when it's in the caret bar and not the last one: insert there, no auto-advance
   if (sl && sl.staff === state.caret.staff && sl.bar === state.caret.bar && sl.idx < lb(sl.staff)[sl.bar].length - 1) {
-    if (edit((sc) => {
+    const ok = edit((sc) => {
       const r = M.insertEvent(sc, sl.staff, sl.bar, sl.idx + 1, ev);
       if (r) return r;
       state.sel = { staff: sl.staff, bar: sl.bar, idx: sl.idx + 1 };
       state.selEnd = null;
       return null;
-    })) hear(selEvent());
-    return;
+    });
+    if (ok) hear(selEvent());
+    return ok;
   }
-  edit((sc) => {
+  const ok = edit((sc) => {
     const s = state.caret.staff;
     let b = state.caret.bar;
     const room = (bb) => M.barLen(sc, bb) - M.barTicks(sc.staves[s].bars[bb]);
@@ -691,7 +692,9 @@ function enterAtCaret(pitch) {
     state.sel = { staff: s, bar: b, idx: sc.staves[s].bars[b].length - 1 };
     state.selEnd = null;
     return null;
-  }) && hear(selEvent());
+  });
+  if (ok) hear(selEvent());
+  return ok;
 }
 
 // Sound the pitches of an event (DESIGN §11.2).
@@ -705,19 +708,22 @@ function hear(ev) {
 // Step entry: each key enters a note of the armed duration at the caret; keys pressed while others
 // are held join that chord. Real-time recording is out of scope.
 const held = new Set();
-let midiOn = false, midiAccess = null;
+let midiOn = false, midiAccess = null, chordAt = null; // chordAt: the note the chord's first key entered
 function onMidi([st, m, vel]) {
   const type = st & 0xf0;
   if (type === 0x80 || (type === 0x90 && !vel)) { held.delete(m); return; }
   if (type !== 0x90 || document.querySelector("dialog[open]") || !$("lyric-box").hidden) return;
-  const chord = held.size > 0 && state.sel;
+  const first = !held.size;
   held.add(m);
-  const s = chord ? state.sel.staff : state.caret.staff, b = chord ? state.sel.bar : state.caret.bar;
+  if (first) chordAt = null;
+  else if (!chordAt) return; // the chord's first key entered nothing
+  const s = first ? state.caret.staff : chordAt.staff, b = first ? state.caret.bar : chordAt.bar;
   const p = M.pitchFromMidi(state.score, s, b, m);
   if (!p) { message(`No drum on that key (${m})`, true); return; }
-  if (!chord) { enterAtCaret(p); return; }
-  if (selEvent()?.pitches.some((q) => M.soundingMidi(state.score.staves[s], q) === M.soundingMidi(state.score.staves[s], p))) return;
-  if (edit((sc) => M.toggleChordPitch(sc, s, b, state.sel.idx, p))) hear(selEvent());
+  if (first) { if (enterAtCaret(p)) chordAt = { ...state.sel }; return; }
+  const ev = lb(s)[b]?.[chordAt.idx], st0 = state.score.staves[s];
+  if (!ev || ev.pitches.some((q) => M.soundingMidi(st0, q) === M.soundingMidi(st0, p))) return;
+  if (edit((sc) => M.toggleChordPitch(sc, s, b, chordAt.idx, p))) { state.sel = { ...chordAt }; state.selEnd = null; hear(selEvent()); }
 }
 function listenMidi(access) {
   midiAccess = access;
@@ -731,7 +737,7 @@ function listenMidi(access) {
 function showMidi() { $("m-midi").setAttribute("aria-checked", midiOn); $("m-midi").textContent = (midiOn ? "✓ " : "") + "MIDI keyboard"; }
 async function toggleMidi(quiet = false) {
   if (midiOn) {
-    midiOn = false; showMidi();
+    midiOn = false; showMidi(); held.clear();
     try { localStorage.removeItem(PREFIX + "midi"); } catch { /* blocked */ }
     midiAccess.onstatechange = null;
     midiAccess.inputs.forEach((i) => { i.onmidimessage = null; });

@@ -674,7 +674,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
           if (bar.some((e) => e.beam)) for (const g of beamGroups(bar, time)) { const bm = new VFl.Beam(g.map((i) => notes[i]), !stem); bm.grey = grey; beams.push(bm); }
           for (const run of tupletRuns(bar)) {
             tuplets.push(new VFl.Tuplet(run.idx.map((i) => notes[i]),
-              { num_notes: run.tup[0], notes_occupied: run.tup[1], location: (stem || notes[run.idx[0]].getStemDirection()) < 0 ? -1 : 1 }));
+              { num_notes: run.tup[0], notes_occupied: run.tup[1], location: (stem || (bar.some((e) => e.beam) ? notes[run.idx[0]].getStemDirection() : 1)) < 0 ? -1 : 1 }));
             tuplets[tuplets.length - 1].grey = grey;
           }
           if (bar.some((e) => e.beam)) { /* beamed above */ } else if (bar.some((e) => e.pitches.length && ["8", "16", "32", "64"].includes(e.dur))) {

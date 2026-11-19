@@ -1594,18 +1594,24 @@ it from the new first bar). `layout()` starts a new system at the bar; a system 
 stretched when it fills under 60%. On screen a small label marks the break; print starts a page break
 on a new page (`break-before: page`). The browser pane can't preview print pages, so page breaks were
 checked by label and print CSS only. MusicXML `<print new-system|new-page>`, MuseScore `LayoutBreak`
-(section breaks become line breaks and are counted). Breaks are read only from Coda's own MusicXML:
+(section breaks become line breaks and are counted). Deleting a bar with a break moves the break to the
+bar after it. Breaks are read only from Coda's own MusicXML:
 another program's line starts are its layout, not the composer's.
 
 **Beams.** `ev.beam` is "break" (start a new beam here) or "join" (beam to the previous note).
 `beamGroups(bar, time, auto)` copies VexFlow's `generateBeams`, quirks included (a rest splits a
 group; a group holding a quarter or longer is dropped), then applies the overrides, so the page and
 the files agree. A test checks it against VexFlow on samples and 400 random bars. MusicXML writes
-`<beam>` on every bar (a reader that sees any takes them literally); MuseScore `BeamMode` only where
-overridden. Imported begin/continue/end become overrides only where they differ from automatic.
+`<beam>` on every bar (a reader that sees any takes them literally) and `<supports element="beam"
+type="yes"/>`, so a score with no beams at all reads back unbeamed; MuseScore `BeamMode` only where
+overridden. Imported begin/continue/end become overrides only where they differ from automatic. A beam
+Coda can't join (over a rest or a quarter or longer) and unknown MuseScore beam modes are drawn
+automatically and counted. Hand-set beams are made before tuplets, so a beamed tuplet has no bracket.
 
 **Cue notes.** `ev.cue` draws the notes small (VexFlow's grace note class) and silent: playback, MIDI
-and audio skip them. MusicXML `<cue/>` and `size="cue"`, MuseScore `<small>` with `<play>0</play>`.
+and audio skip them. MusicXML `<cue/>` and `size="cue"`, MuseScore `<small>` with `<play>0</play>`; a small
+MuseScore note that plays stays a normal note and is counted. Dynamics and hairpin starts on cue notes
+belong to the cued part and don't change this part's playback.
 ponytail: cue rests stay full size; VexFlow has no small rest.
 
 **Multi-bar rests.** A view preference of this browser (stored with the Play options, not in the
