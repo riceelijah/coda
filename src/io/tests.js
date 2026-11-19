@@ -807,6 +807,10 @@ export async function run({ check, eq }) {
     // a change on a deleted bar moves on; deleting bar 1 makes bar 2's tempo the score's
     M.deleteMeasure(s, 2);
     if (t(s) !== "120,0,0,60") return "delete " + t(s);
+    const u = M.newScore({ bars: 3, tempo: 120 }); M.setTempo(u, 1, 60); M.setTempo(u, 2, 120); M.deleteMeasure(u, 1);
+    if (t(u) !== "120,0,0") return "redundant after delete " + t(u);
+    const rep = [importMusicXML(exportMusicXML(s), "t.musicxml").report, importMSCX(exportMSCX(s), "t.mscx").report];
+    if (/tempo|metronome/i.test(JSON.stringify(rep))) return "tempo reported " + JSON.stringify(rep);
     M.setTempo(s, 1, 90); M.deleteMeasure(s, 0);
     if (t(s) !== "90,0,60") return "delete bar 1 " + t(s);
     // another program's metronome in dotted quarters, mid-bar

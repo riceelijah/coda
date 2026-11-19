@@ -626,7 +626,8 @@ export function deleteMeasure(score, idx) {
   score.measures.splice(idx, 1);
   // a tempo change on the deleted bar moves to the bar after it, like a clef change
   const nx = score.measures[idx];
-  if (tm && nx && !nx.tempo && tm !== (idx ? tempoAt(score, idx - 1) : score.tempo)) nx.tempo = tm;
+  if (tm && nx && !nx.tempo) nx.tempo = tm;
+  if (nx?.tempo && idx && nx.tempo === tempoAt(score, idx - 1)) delete nx.tempo; // no longer a change
   for (const st of score.staves) for (const bars of allLayers(st)) bars.splice(idx, 1);
   // a clef change on the deleted bar moves to the bar after it, so that bar keeps its clef
   for (const st of score.staves) if (st.clefs) {

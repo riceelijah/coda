@@ -995,7 +995,7 @@ function closeSetup() {
   if (d.returnValue !== "ok") return;
   const title = $("f-title").value.trim() || "Untitled";
   const composer = $("f-composer").value.trim();
-  const tempo = Math.max(20, Math.min(400, +$("f-tempo").value || 100));
+  const tempo = M.clampBpm(+$("f-tempo").value);
   if (d.dataset.mode === "new") {
     const t = M.parseTime($("f-time").value);
     if (!t) { message(`"${$("f-time").value}" isn't a time signature (try 7/8, 5/4, C or C|)`, true); return; }
@@ -1795,7 +1795,7 @@ function init() {
   }
   $("report-close").onclick = () => ($("report").style.display = "none");
   $("tempo").onchange = (e) => {
-    const v = Math.max(20, Math.min(400, Math.round(+e.target.value) || 100));
+    const v = M.clampBpm(+e.target.value);
     edit((sc) => M.setTempo(sc, 0, v));
   };
   const systems = $("systems");

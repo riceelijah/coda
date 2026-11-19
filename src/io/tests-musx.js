@@ -156,7 +156,7 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
     const staff = (n, extra) => `<staffSpec cmper="${n}">${extra}</staffSpec><frameSpec cmper="${n}" inci="0"><startEntry>${n * 2 - 1}</startEntry><endEntry>${n * 2 - 1 + (n === 1 ? 1 : 0)}</endEntry></frameSpec>` +
       `<instUsed cmper="0" inci="${n - 1}"><inst>${n}</inst></instUsed>`;
     const x = `<finale xmlns="http://www.makemusic.com/2012/finale"><options><timeSignatureOptions><timeSigDoAbrvCommon/></timeSignatureOptions></options><others>
-      <measSpec cmper="1"><beats>4</beats><divbeat>1024</divbeat></measSpec>
+      <measSpec cmper="1"><beats>4</beats><divbeat>1024</divbeat></measSpec><measSpec cmper="2"><beats>4</beats><divbeat>1024</divbeat></measSpec>
       ${staff(1, "<fullName>1</fullName>")}
       ${staff(2, "<transposition><keysig><interval>1</interval><adjust>2</adjust></keysig></transposition>")}
       ${staff(3, "<transposition><chromatic><diatonic>5</diatonic><alteration>0</alteration></chromatic></transposition>")}
@@ -164,6 +164,7 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
       <articDef cmper="1"><charMain>58544</charMain></articDef><articDef cmper="2"><charMain>58561</charMain></articDef>
       <articDef cmper="3"><charMain>46</charMain></articDef><articDef cmper="4"><charMain>40</charMain><fontMain>9</fontMain></articDef>
       <textExprDef cmper="1"><value>60</value><auxdata1>1536</auxdata1><useAuxData/><playType>time</playType></textExprDef>
+      <textExprDef cmper="3"><value>120</value><auxdata1>1024</auxdata1><useAuxData/><playType>time</playType></textExprDef><measExprAssign cmper="2" inci="0"><textExprID>3</textExprID></measExprAssign>
       <measExprAssign cmper="1" inci="0"><textExprID>1</textExprID></measExprAssign><measExprAssign cmper="1" inci="1"><textExprID>2</textExprID><horzEduOff>512</horzEduOff></measExprAssign>
       </others><details>
       ${[1, 2, 3].map((n) => `<gfhold cmper1="${n}" cmper2="1"><frame1>${n}</frame1></gfhold>`).join("")}
@@ -177,9 +178,9 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
       <texts><blockText number="1">Flute</blockText></texts></finale>`;
     const r = await importBytes(new TextEncoder().encode(x), "inline.xml");
     const sc = r.score, w = warn(r);
-    if (sc.tempo !== 90 || sc.measures[0].sym !== "common" || sc.staves[0].program !== 73) return `tempo ${sc.tempo} sym ${sc.measures[0].sym} program ${sc.staves[0].program}`;
+    if (sc.tempo !== 90 || sc.measures[1]?.tempo !== 120 || sc.measures[0].sym !== "common" || sc.staves[0].program !== 73) return `tempo ${sc.tempo},${sc.measures[1]?.tempo} sym ${sc.measures[0].sym} program ${sc.staves[0].program}`;
     const got = sc.staves.map((st) => `${st.transpose || "-"} ${brief(st)} ${st.bars[0].map((e) => (e.marks || []).join("+")).join(",")}`).join(" / ");
-    if (got !== "- C4:h r:h staccato+accent,fermata / -2,-1 D4:w staccato / -9,-5 A4:w ") return got;
+    if (got !== "- C4:h r:h |  staccato+accent,fermata / -2,-1 D4:w |  staccato / -9,-5 A4:w |  ") return got; // bar 2: empty, for its tempo
     return (/Articulations on rests \(not imported\): 1/.test(w) && /Other articulations \(not imported\): 1/.test(w) &&
       /Chromatic transpositions/.test(w) && /Text expressions \(not imported\): 1/.test(w)) || w;
   });

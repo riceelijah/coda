@@ -199,13 +199,14 @@ export function importMIDI(bytes, fileName = "") {
   padBars(score);
   // tempo changes (DESIGN §29): one per bar, at its start
   tempos.sort((a, b) => a[0] - b[0]);
-  const seen = new Set();
+  const seen = new Set([0]); // bar 1 has the first tempo
   for (const [t, bpm] of tempos) {
     const b = Math.floor(t / L);
+    if (b < score.measures.length && clampBpm(bpm) === tempoAt(score, b)) continue; // the same again, e.g. in another track
     if (b >= score.measures.length || seen.has(b)) { report.count("Tempo changes skipped (one per bar is kept)"); continue; }
     seen.add(b);
     if (t % L) report.count("Tempo changes inside a bar moved to the bar's start");
-    if (b === 0) score.tempo = clampBpm(bpm); else setTempo(score, b, clampBpm(bpm));
+    setTempo(score, b, clampBpm(bpm));
   }
   report.notes = noteCount(score);
   return { score, report: report.done() };

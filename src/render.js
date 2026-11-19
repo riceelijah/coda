@@ -348,11 +348,14 @@ function repeatMarks(VFl, score, b, s, stave) {
     const vUp = Math.min(...ms.slice(a, z + 1).map((_, k) => upOf(a + k)));
     stave.setVoltaType(begins && ends ? T.BEGIN_END : begins ? T.BEGIN : ends ? T.END : T.MID, begins ? voltaLabel(m.volta) : "", vUp);
   }
-  for (const key of ["segno", "coda", "toCoda", "fine"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]], up);
+  // signs at the bar's start go above an ending's number, the tempo beside them
+  const lift = m.volta ? 25 : 0;
+  for (const key of ["segno", "coda"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]], up - lift);
+  for (const key of ["toCoda", "fine"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]], up);
   if (m.jump) stave.setRepetitionType(VFl.Repetition.type[REP_VF[m.jump]], up);
   // tempo changes (DESIGN §29); bar 1's tempo is shown only when the score has changes
   const bpm = b ? m.tempo : ms.some((x) => x.tempo) && score.tempo;
-  if (bpm) stave.setTempo({ duration: "q", bpm }, up - (m.volta ? 15 : 0));
+  if (bpm) stave.setTempo({ duration: "q", bpm }, up - (m.volta ? 38 : 0)).getModifiers().at(-1).setShiftX(m.segno || m.coda ? 35 : 10);
 }
 
 // Is (b, i) selected? sel may carry `end` for a range (DESIGN §11.7).

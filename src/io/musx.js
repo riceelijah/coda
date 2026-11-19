@@ -555,9 +555,10 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
   const tempi = [], tempoMarks = new Set(), mIndex = new Map(measures.map((m, i) => [m.cmper, i]));
   for (const a of assigns) {
     const d = tempoDef(a), mi = mIndex.get(a.getAttribute("cmper"));
-    if (!d || mi === undefined) continue;
+    const bpm = d && (num(d, "value", 0) * num(d, "auxdata1", 1024)) / 1024;
+    if (!(bpm > 0) || mi === undefined) continue; // not a tempo: counted with the text expressions
     tempoMarks.add(a);
-    readTempo(tempi, mi, num(a, "horzEduOff", 0), (num(d, "value", 0) * num(d, "auxdata1", 1024)) / 1024, report);
+    readTempo(tempi, mi, num(a, "horzEduOff", 0), bpm, report);
   }
   // the event at file time t (ticks) in a layer's bar: one starting within ~4 EDU, else the one covering t
   const bar = (si, L, mi) => (L === 1 ? score.staves[si]?.bars[mi] : score.staves[si]?.layers?.[L - 2]?.[mi]) || [];
