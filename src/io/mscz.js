@@ -29,8 +29,11 @@ const txt = (el, name) => { const k = kid(el, name); return k ? k.textContent.tr
 // What the importer reads, or can pass over because it is layout, ids or playback detail; anything
 // else is counted (CLAUDE.md: never drop silently). Names give the labels for common losses.
 const LAYOUT = ["eid", "linkedTo", "linkedMain", "visible", "offset", "color", "placement", "track", "Beam", "BeamMode", "StemDirection", "Stem", "Hook", "NoteDot", "noStem", "stemDirection", "mirror", "dotPosition", "headType", "fixed", "fixedLine", "line", "Events", "veloType", "velocity", "tuning", "Accidental", "duration", "autoplace", "minDistance", "userOff", "pos"];
-const VOICE_READ = new Set([...LAYOUT, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "InstrumentChange", "StaffState"]);
+// Measure-level: repeats are read above; the rest is layout. LayoutBreak passes silently: MuseScore writes one per system.
+const MEASURE_ONLY = ["voice", "startRepeat", "endRepeat", "irregular", "LayoutBreak", "multiMeasureRest", "breakMultiMeasureRest", "vspacer", "vspacerUp", "vspacerDown", "vspacerFixed", "noOffset", "measureNumberMode", "stretch", "MeasureNumber", "MMRest"];
+const VOICE_READ = new Set([...LAYOUT, ...MEASURE_ONLY, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "InstrumentChange", "StaffState"]);
 const VOICE_NAMES = { Harmony: "Chord symbols (not imported)", Breath: "Breath marks and caesuras (not imported)", FiguredBass: "Figured bass (not imported)", Tremolo: "Tremolos (not imported)", TremoloTwoChord: "Tremolos (not imported)", FretDiagram: "Fret diagrams (not imported)", Image: "Images (not imported)" };
+const MEASURE_READ = new Set([...LAYOUT, ...MEASURE_ONLY]);
 const CHORD_READ = new Set([...LAYOUT, ...GRACE, "durationType", "dots", "Note", "Articulation", "ChordLine", "Lyrics", "Spanner", "Tuplet"]);
 const CHORD_NAMES = { Ornament: "Ornaments (trills, mordents, turns) (not imported)", Arpeggio: "Arpeggios (not imported)", TremoloSingleChord: "Tremolos (not imported)", Tremolo: "Tremolos (not imported)", small: "Cue notes (shown and played as normal notes)", staffMove: "Cross-staff notes (shown on their own staff)" };
 const NOTE_READ = new Set([...LAYOUT, "pitch", "tpc", "tpc2", "Spanner", "Tie", "play", "small"]);
@@ -153,6 +156,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       }
       for (const L of staff.layers || []) L.push([]);
       // MuseScore 2 files have no <voice> wrapper. Voices become layers 1–4 (DESIGN §15).
+      if (voices.length) countUnread(report, meas, MEASURE_READ); // with no <voice> wrapper (MuseScore 2) the voice loop counts them
       (voices.length ? voices : [meas]).forEach((vEl, vi) => {
       if (vi >= MAX_LAYERS) { report.count(`Notes in voices beyond ${MAX_LAYERS} per staff skipped`, kids(vEl, "Chord").length); return; }
       const bar = [];
@@ -300,7 +304,11 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
                 if (!ev.pitches.some((q) => q.step === p.step && q.oct === p.oct && q.drum === p.drum)) ev.pitches.push(p);
                 const tieSp = kids(n, "Spanner").find((s) => s.getAttribute("type") === "Tie" && kid(s, "next"));
                 if (tieSp || kid(n, "Tie")) ev.tie = true;
-                if (kids(n, "Spanner").some((sp) => sp.getAttribute("type") === "Glissando" && kid(sp, "next"))) ev.gliss = true;
+                for (const sp of kids(n, "Spanner")) {
+                  const t = sp.getAttribute("type");
+                  if (t === "Glissando" && kid(sp, "next")) ev.gliss = true;
+                  else if (t !== "Tie" && t !== "Glissando" && kid(sp, "next")) report.count(`Lines (${t}) not imported`);
+                }
               }
               if (!ev.pitches.length) break;
               ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
