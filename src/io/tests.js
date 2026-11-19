@@ -849,15 +849,15 @@ export async function run({ check, eq }) {
   await check("importers count markings they don't read instead of dropping them (CLAUDE.md)", () => {
     const xml = `<score-partwise version="4.0"><part-list><score-part id="P1"><part-name>A</part-name></score-part></part-list>
       <part id="P1"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
-      <harmony><root><root-step>C</root-step></root><kind>major</kind></harmony><print new-system="yes"/>
+      <figured-bass><figure><figure-number>6</figure-number></figure></figured-bass><print new-system="yes"/>
       <note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration><type>whole</type><notations><ornaments><schleifer/></ornaments></notations></note></measure></part></score-partwise>`;
     const a = importMusicXML(xml, "u.xml").report.warnings.join("; ");
-    if (!/Chord symbols/.test(a) || !/Ornaments/.test(a) || /print/.test(a)) return "MusicXML: " + a;
+    if (!/Figured bass/.test(a) || !/Ornaments/.test(a) || /print/.test(a)) return "MusicXML: " + a;
     const s = M.newScore({ bars: 1 });
     s.staves[0].bars[0] = [{ dur: "w", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0 }] }];
-    const ms = exportMSCX(s).replace("<Chord>", "<Harmony><root>14</root></Harmony><Chord><Ornament><subtype>ornamentPrecompSlide</subtype></Ornament>");
+    const ms = exportMSCX(s).replace("<Chord>", "<FiguredBass><text>6</text></FiguredBass><Chord><Ornament><subtype>ornamentPrecompSlide</subtype></Ornament>");
     const b = importMSCX(ms, "u.mscx").report.warnings.join("; ");
-    return (/Chord symbols/.test(b) && /ornaments/.test(b)) || "MuseScore: " + b;
+    return (/Figured bass/.test(b) && /ornaments/.test(b)) || "MuseScore: " + b;
   });
 
   await check("short bars: a pickup holds its length, plays short, numbers from 0, round trips MusicXML and MuseScore (DESIGN §33)", () => {
@@ -1070,8 +1070,47 @@ export async function run({ check, eq }) {
       const w = r.report.warnings.filter((x) => !/instrument sound/.test(x));
       if (w.length) return n + " " + w;
     }
-    // a file's octave shift: notes in the file sound; Coda keeps them written. 22ma is counted.
+    // an octave line in layer 1 moves layer 2's notes under it too, across the barline (review fix)
+    const two = M.newScore({ preset: "treble", bars: 2 });
+    two.staves[0].bars = [[ev("q", "C5"), ev("q", "D5"), ev("q", "E5"), ev("q", "F5")], [ev("q", "G5"), ev("q", "A5"), ev("h", "B5")]];
+    two.staves[0].layers = [[[ev("h", "G4"), ev("h", "A4")], [ev("w", "B4")]]];
+    M.toggleSpan([two.staves[0].bars[0][2], two.staves[0].bars[0][3], two.staves[0].bars[1][0]], "ott", "8va");
+    const all = (sc) => M.allLayers(sc.staves[0]).map((bars) => bars.map((bar) => bar.map((x) => x.pitches.map((p) => "CDEFGAB"[p.step] + p.oct).join("+")).join(" ")).join(" | ")).join(" / ");
+    const tx = exportMusicXML(two);
+    if ((tx.match(/<octave>5<\/octave>/g) || []).length !== 6 || (tx.match(/<step>A<\/step><octave>5/g) || []).length !== 2) return "layer 2 not sounding in the file";
+    const back = importMusicXML(tx, "two.musicxml").score;
+    if (all(back) !== all(two)) return "two layers: " + all(back) + " vs " + all(two);
     const N = (x, o) => `<note><pitch><step>${x}</step><octave>${o}</octave></pitch><duration>1</duration><type>quarter</type></note>`;
+    // review fixes: a third slur around a second-level one; the pedal lifts at a repeat; an extender stops at a rest;
+    // crossing MuseScore slurs keep their ends; a MusicXML pedal ends in its own layer
+    const t3 = M.newScore({ preset: "treble", bars: 2 }), L3 = t3.staves[0].bars;
+    L3[0] = [ev("q", "C5"), ev("q", "D5"), ev("q", "E5"), ev("q", "F5")]; L3[1] = [ev("q", "G5"), ev("q", "A5"), ev("q", "B5"), ev("q", "C6")];
+    const f3 = L3.flat();
+    M.toggleSlur(f3, f3.slice(0, 8)); M.toggleSlur(f3, f3.slice(1, 7));
+    if (M.toggleSlur(f3, f3.slice(2, 4)) !== "Two slurs at most over a note") return "third slur inside a slur2 allowed";
+    const rp = M.newScore({ preset: "treble", bars: 3 });
+    rp.staves[0].bars = [[ev("w", "C5")], [ev("w", "D5")], [ev("w", "E5")]];
+    rp.measures[1].repEnd = 2;
+    M.toggleSpan([rp.staves[0].bars[1][0], rp.staves[0].bars[2][0]], "ped");
+    const sr = schedule(rp);
+    if (JSON.stringify(sr.pedals[0]) !== "[[1920,3840],[5760,9600]]" || sr.notes[1].ring) return "repeat pedal " + JSON.stringify(sr.pedals[0]) + " " + sr.notes[1].ring;
+    const mr = M.newScore({ preset: "treble", bars: 1 });
+    mr.staves[0].bars[0] = [ev("q", "C5", { lyrics: ["la"] }), ev("q", "D5"), ev("q", null), ev("q", "E5")];
+    mr.staves[0].bars[0][0].lyrics[0].ext = true;
+    if (M.melismas(mr).get(mr.staves[0].bars[0][0])[0].last !== mr.staves[0].bars[0][1]) return "extender over a rest";
+    const cr = JSON.parse(JSON.stringify(t3)), C = cr.staves[0].bars;
+    for (const e of C.flat()) for (const k of ["slur", "slurEnd", "slur2", "slur2End"]) delete e[k];
+    C[0][0].slur = true; C[1][0].slurEnd = true; C[0][3].slur2 = true; C[1][3].slur2End = true;
+    const cb = importMSCX(exportMSCX(cr), "x.mscx").score.staves[0].bars;
+    if (!cb[1][0].slurEnd || !cb[1][3].slur2End) return "crossing slurs swapped";
+    const pv = `<score-partwise><part-list><score-part id="P1"><part-name>V</part-name></score-part></part-list><part id="P1">
+      <measure number="1"><attributes><divisions>1</divisions><time><beats>2</beats><beat-type>4</beat-type></time></attributes>
+      <direction><direction-type><pedal type="start"/></direction-type></direction>${N("C", 5).replace("<duration>", "<voice>1</voice><duration>")}${N("D", 5).replace("<duration>", "<voice>1</voice><duration>")}
+      <backup><duration>2</duration></backup><note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><voice>2</voice><type>half</type></note></measure>
+      <measure number="2"><direction><direction-type><pedal type="stop"/></direction-type></direction><note><rest/><duration>2</duration><voice>1</voice><type>half</type></note></measure></part></score-partwise>`;
+    const pr = importMusicXML(pv, "pv.musicxml");
+    if (!pr.score.staves[0].bars[0][1].pedEnd || pr.report.warnings.length) return "pedal across layers " + JSON.stringify(pr.score.staves[0].bars[0]) + pr.report.warnings;
+    // a file's octave shift: notes in the file sound; Coda keeps them written. 22ma is counted.
     const D = (t) => `<direction><direction-type>${t}</direction-type></direction>`;
     const raw = `<score-partwise><part-list><score-part id="P1"><part-name>V</part-name></score-part></part-list><part id="P1"><measure number="1">
       <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
@@ -1079,6 +1118,36 @@ export async function run({ check, eq }) {
     const r = importMusicXML(raw, "r.musicxml"), got = sig(r.score);
     if (got !== "ott8vb ottEnd ped+pedEnd ped+pedEnd C4:q D4:q E4:q F6:q") return got;
     return /Octave lines Coda can't show.*: 1/.test(r.report.warnings.join()) || r.report.warnings.join();
+  });
+
+  await check("chord symbols: parse, show, transpose with the part, MusicXML and MuseScore, import counts (DESIGN §38)", () => {
+    const pc = (t) => JSON.stringify(M.parseChord(t));
+    if (pc("Bbm7/F") !== '{"root":{"step":6,"alter":-1},"kind":"m7","bass":{"step":3,"alter":0}}' || pc("c") !== '{"root":{"step":0,"alter":0},"kind":""}') return pc("Bbm7/F");
+    if (M.parseChord("H7") || M.parseChord("") || M.parseChord("Cthirteenflat9") || M.chordText(M.parseChord("F#m7b5/C#")) !== "F♯m7b5/C♯") return "parse edges";
+    const s = M.newScore({ preset: "treble", bars: 1 });
+    s.staves[0].bars[0] = [ev("h", "C5"), ev("q", "E5"), ev("q", null)];
+    const [a, b, r] = s.staves[0].bars[0];
+    a.harm = M.parseChord("C7"); b.harm = M.parseChord("Ebmaj7/Bb"); r.harm = M.parseChord("G7(b9)");
+    if (!M.isValidScore(s) || M.isValidScore({ ...s, staves: [{ ...s.staves[0], bars: [[{ ...ev("w", "C4"), harm: { root: { step: 9, alter: 0 }, kind: "" } }]] }] })) return "validation";
+    const sig = (sc) => sc.staves[0].bars.flat().map((x) => (x.harm ? M.chordText(x.harm) : "-")).join(" ");
+    for (const [n, f] of [["MusicXML", (z) => importMusicXML(exportMusicXML(z), "c.musicxml")], ["MuseScore", (z) => importMSCX(exportMSCX(z), "c.mscx")]]) {
+      const o = f(s), w = o.report.warnings.filter((x) => !/instrument sound/.test(x));
+      if (sig(o.score) !== sig(s) || w.length) return n + " " + sig(o.score) + " " + w;
+    }
+    // a B♭ trumpet part: the symbols are written a tone up, like the notes
+    const t = JSON.parse(JSON.stringify(s));
+    if (M.setStaffTranspose(t, 0, [-2, -1]) || sig(t) !== "D7 Fmaj7/C A7(b9)") return "transposed " + sig(t);
+    if (sig(importMSCX(exportMSCX(t), "t.mscx").score) !== sig(t)) return "MuseScore transposed " + sig(importMSCX(exportMSCX(t), "t.mscx").score);
+    // MusicXML: N.C., degrees, a symbol halfway through a note, two on one note
+    const H = (root, kind, more = "") => `<harmony><root><root-step>${root}</root-step></root><kind>${kind}</kind>${more}</harmony>`;
+    const N = (x, d, ty) => `<note><pitch><step>${x}</step><octave>5</octave></pitch><duration>${d}</duration><type>${ty}</type></note>`;
+    const xml = `<score-partwise><part-list><score-part id="P1"><part-name>V</part-name></score-part></part-list><part id="P1"><measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      ${H("D", "minor-seventh", "<degree><degree-value>9</degree-value><degree-alter>0</degree-alter><degree-type>add</degree-type></degree>")}${H("C", "none")}${N("C", 2, "half")}
+      ${H("G", "dominant", "<offset>0.5</offset>")}${N("D", 1, "quarter")}${N("E", 1, "quarter")}${H("A", "major")}${H("F", "major")}</measure></part></score-partwise>`;
+    const o = importMusicXML(xml, "h.musicxml"), w = o.report.warnings.join("; ");
+    if (sig(o.score) !== "Dm7 - G7") return sig(o.score) + " " + w;
+    return ["Added or altered notes", "N.C.", "moved to the next note", "already has one", "after the last note"].every((k) => w.includes(k)) || w;
   });
 
   // Later phases: MIDI, MuseScore, musx.

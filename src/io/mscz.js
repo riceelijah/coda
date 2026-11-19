@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides, melismas, ONE_NOTE, OTT_SHIFT } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides, melismas, ONE_NOTE, OTT_SHIFT, MAX_KIND } from "../model.js";
 import { FINGER, ORNAMENTS, parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
@@ -35,8 +35,8 @@ const txt = (el, name) => { const k = kid(el, name); return k ? k.textContent.tr
 const LAYOUT = ["eid", "linkedTo", "linkedMain", "visible", "offset", "color", "placement", "track", "Beam", "BeamMode", "StemDirection", "Stem", "Hook", "NoteDot", "noStem", "stemDirection", "mirror", "dotPosition", "headType", "fixed", "fixedLine", "line", "Events", "veloType", "velocity", "veloOffset", "endSpanner", "tuning", "Accidental", "duration", "autoplace", "minDistance", "userOff", "pos"];
 // Measure-level: repeats are read above; the rest is layout. LayoutBreak passes silently: MuseScore writes one per system.
 const MEASURE_ONLY = ["voice", "startRepeat", "endRepeat", "irregular", "LayoutBreak", "multiMeasureRest", "breakMultiMeasureRest", "vspacer", "vspacerUp", "vspacerDown", "vspacerFixed", "noOffset", "measureNumberMode", "stretch", "MeasureNumber", "MMRest"];
-const VOICE_READ = new Set([...LAYOUT, ...MEASURE_ONLY, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "StaffState", "Breath"]);
-const VOICE_NAMES = { Harmony: "Chord symbols (not imported)", Breath: "Breath marks and caesuras (not imported)", FiguredBass: "Figured bass (not imported)", Tremolo: "Tremolos (not imported)", TremoloTwoChord: "Tremolos (not imported)", FretDiagram: "Fret diagrams (not imported)", InstrumentChange: "Instrument changes (not imported)", tick: "Positions in MuseScore 2 voices (notes may be misplaced)", Image: "Images (not imported)" };
+const VOICE_READ = new Set([...LAYOUT, ...MEASURE_ONLY, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "Harmony", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "StaffState", "Breath"]);
+const VOICE_NAMES = { Breath: "Breath marks and caesuras (not imported)", FiguredBass: "Figured bass (not imported)", Tremolo: "Tremolos (not imported)", TremoloTwoChord: "Tremolos (not imported)", FretDiagram: "Fret diagrams (not imported)", InstrumentChange: "Instrument changes (not imported)", tick: "Positions in MuseScore 2 voices (notes may be misplaced)", Image: "Images (not imported)" };
 const MEASURE_READ = new Set([...LAYOUT, ...MEASURE_ONLY]);
 const CHORD_READ = new Set([...LAYOUT, ...GRACE, "durationType", "dots", "Note", "Articulation", "ChordLine", "Lyrics", "Spanner", "Tuplet", "Ornament", "Arpeggio", "TremoloSingleChord", "Tremolo"]);
 const CHORD_NAMES = { Ornament: "Ornaments (trills, mordents, turns) (not imported)", Arpeggio: "Arpeggios (not imported)", TremoloSingleChord: "Tremolos (not imported)", Tremolo: "Tremolos (not imported)", small: "Cue notes (shown and played as normal notes)", staffMove: "Cross-staff notes (shown on their own staff)" };
@@ -131,6 +131,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     const tuplets = {}; // MuseScore 3: id -> ratio
     const pendDyn = []; // per voice: dynamic waiting for its chord or rest (DESIGN §22)
     const pendText = []; // per voice: text waiting for its chord or rest (DESIGN §30)
+    const pendHarm = []; // per voice: chord symbol waiting for its chord or rest (DESIGN §38)
     const pendLine = [], openLine = [], slurOpen = []; // per voice: {ott, ped} waiting for a note; open (DESIGN §37)
     const pendHp = [], lastEv = []; // per voice: hairpin waiting for its first note; last event (DESIGN §23)
     // a <Note>'s written pitch: pitch and tpc are concert; Coda keeps the written note (tpc2)
@@ -226,7 +227,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               const kind = type === "Ottava" ? "ott" : "ped", last = bar.length ? bar[bar.length - 1] : lastEv[vi];
               if (kid(el, "next")) {
                 const sub = txt(kid(el, "Ottava"), "subtype") || "0", o = OTT_MS_IN[sub];
-                if (kind === "ott" && !o) report.count("Octave lines Coda can't show (not imported)");
+                if (kind === "ott" && !o) report.count("Octave lines Coda can't show (not imported; their notes stay where written)");
                 else (pendLine[vi] ||= {})[kind] = kind === "ott" ? o : true;
               } else if (kid(el, "prev") && last && openLine[vi]?.[kind]) { last[kind + "End"] = true; openLine[vi][kind] = false; }
             } else if (type === "Volta") { // the first staff's: an ending over the next `measures` bars
@@ -250,6 +251,20 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             const j = (to === "start" ? "dc" : /segno/.test(to || "") ? "ds" : null);
             if (j) mark(mi, "jump", j + (/fine/.test(until) ? "Fine" : /coda/.test(until) ? "Coda" : ""));
             else report.count("Jumps to a named place (not imported)");
+            break;
+          }
+          case "Harmony": { // a chord symbol over the next chord or rest (DESIGN §38): MuseScore 4 in <harmonyInfo>, 3 directly
+            const infos = kids(el, "harmonyInfo"), info = infos[0] || el;
+            const root = parseInt(txt(info, "root"), 10), bass = parseInt(txt(info, "bass") ?? txt(info, "base"), 10), name = txt(info, "name") || "";
+            const note = (tpc) => { const p = tpcToPitch(tpc, 60); return Math.abs(p.alter) <= 2 ? { step: p.step, alter: p.alter } : null; };
+            if (infos.length > 1) report.count("Chord symbols over two chords (the first is kept)");
+            if (+(txt(el, "harmonyType") || 0)) report.count("Roman numerals and Nashville numbers (not imported)");
+            else if (!Number.isFinite(root) || !note(root)) report.count(/^n\.?c\.?$/i.test(name) ? "No-chord symbols (N.C.) (not imported)" : "Chord symbols without a root note (not imported)");
+            else {
+              if (pendHarm[vi]) report.count("Chord symbols over a bar or note that already has one (not imported)");
+              if (name.length > MAX_KIND) report.count(`Chord symbols cut to ${MAX_KIND} characters after the root`);
+              pendHarm[vi] = { root: note(root), kind: cleanText(name, MAX_KIND), ...(Number.isFinite(bass) && note(bass) ? { bass: note(bass) } : {}) };
+            }
             break;
           }
           case "StaffText": case "SystemText": case "Expression": case "PlayTechAnnotation": { // text above the next note (DESIGN §30)
@@ -360,24 +375,33 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               pendText[vi] = null;
             }
             if (pendHp[vi]) { ev.hp = pendHp[vi]; pendHp[vi] = null; }
+            if (pendHarm[vi]) { ev.harm = pendHarm[vi]; pendHarm[vi] = null; }
             for (const k in pendLine[vi] || {}) { ev[k] = pendLine[vi][k]; (openLine[vi] ||= {})[k] = true; }
             pendLine[vi] = null;
             let graceSlurs = pendG.slurs; // a grace note's slur ends here too; that end isn't this note's
             pendG.slurs = 0;
-            // slurs: two at a time, the inner one (slur2) ending first (DESIGN §37); ends before starts
-            const sps = kids(el, "Spanner"), slurs = (slurOpen[vi] ||= [false, false]);
+            // slurs: two at a time (DESIGN §37). An end pairs with the open slur its <prev> location points
+            // back to; failing that, the inner (later) one. Ends before starts. A third is counted.
+            const sps = kids(el, "Spanner"), slurs = (slurOpen[vi] ||= [null, null, 0]), here = (dm, dt) => `${mi + dm}:${cur + dt}`;
+            const back = (sp) => {
+              const l = kid(kid(sp, "prev"), "location"), [n, dd] = (txt(l, "fractions") || "0/1").split("/").map(Number);
+              return here(parseInt(txt(l, "measures"), 10) || 0, dd ? Math.round((n / dd) * 1920) : 0);
+            };
             for (const sp of sps) {
               if (sp.getAttribute("type") !== "Slur" || !kid(sp, "prev") || kid(sp, "next")) continue;
               if (graceSlurs > 0) { graceSlurs--; continue; }
-              if (slurs[2]) { slurs[2]--; continue; } // a third slur's end
-              if (slurs[1]) { ev.slur2End = true; slurs[1] = false; } else if (slurs[0]) { ev.slurEnd = true; slurs[0] = false; }
+              let lv = slurs.slice(0, 2).findIndex((o) => o === back(sp));
+              if (lv < 0 && slurs[2]) { slurs[2]--; continue; } // a third slur's end
+              if (lv < 0) lv = slurs[1] ? 1 : slurs[0] ? 0 : -1;
+              if (lv === 1) ev.slur2End = true; else if (lv === 0) ev.slurEnd = true;
+              if (lv >= 0) slurs[lv] = null;
             }
             for (const sp of sps) {
               if (sp.getAttribute("type") === "Slur") {
                 if (!kid(sp, "next")) continue;
-                if (!slurs[0] && !ev.slur) { ev.slur = true; slurs[0] = true; }
-                else if (!slurs[1] && !ev.slur2) { ev.slur2 = true; slurs[1] = true; }
-                else { report.count("Third slurs inside two others (not imported)"); slurs[2] = (slurs[2] || 0) + 1; }
+                if (!slurs[0] && !ev.slur) { ev.slur = true; slurs[0] = here(0, 0); }
+                else if (!slurs[1] && !ev.slur2) { ev.slur2 = true; slurs[1] = here(0, 0); }
+                else { report.count("Third slurs inside two others (not imported)"); slurs[2]++; }
               } else if (kid(sp, "next")) report.count(`Lines (${sp.getAttribute("type")}) not imported`);
             }
             lyricIn(el, ev, report);
@@ -423,6 +447,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     });
     if (pendDyn.some(Boolean)) report.count("Dynamics after the last note (not imported)");
     if (pendText.some(Boolean)) report.count("Text after the last note (not imported)");
+    if (pendHarm.some(Boolean)) report.count("Chord symbols after the last note (not imported)");
     if (pendHp.some(Boolean)) report.count("Hairpins with no notes (not imported)");
     for (const p of pendLine) for (const k in p || {}) report.count(k === "ott" ? "Octave lines with no notes (not imported)" : "Pedal marks with no notes (not imported)");
     if (!staff.clef) staff.clef = "treble";
@@ -627,6 +652,8 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map(), mel = new 
     }
     if (e.marks?.includes("fermata")) x.push("<Fermata><subtype>fermataAbove</subtype></Fermata>");
     if (e.text) x.push(`<StaffText><text>${esc(e.text)}</text></StaffText>`); // DESIGN §30
+    // DESIGN §38, written like the notes; a 4.20 file has no <harmonyInfo> (later versions do, and are read too)
+    if (e.harm) x.push(`<Harmony><root>${tpcOf(e.harm.root)}</root>${e.harm.kind ? `<name>${esc(e.harm.kind)}</name>` : ""}${e.harm.bass ? `<base>${tpcOf(e.harm.bass)}</base>` : ""}</Harmony>`);
     if (e.dyn) x.push(`<Dynamic><subtype>${e.dyn}</subtype><velocity>${DYN_VEL[e.dyn] || ACCENT_VEL[e.dyn]}</velocity></Dynamic>`);
     const sp = spans[b + ":" + i] || {};
     if (sp.hpNext) x.push(`<Spanner type="HairPin"><HairPin><subtype>${e.hp === ">" ? 1 : 0}</subtype></HairPin><next>${sp.hpNext}</next></Spanner>`);

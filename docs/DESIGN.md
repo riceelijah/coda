@@ -1505,3 +1505,18 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   second level, `slur2` / `slur2End`, drawn clear of the other. A third over the same notes is
   refused. MusicXML: slur numbers voice and voice + 8; any two open at once are read, a third is
   counted. MuseScore: the inner (later) one is taken to end first.
+
+## 38. Chord symbols, transposing the score, respelling, concert pitch (Phase 42)
+
+- Chord symbols: Notes ▸ Chord symbol… (and the text palette) on the selected note or rest, typed
+  as C, Am7, Bb7, F#m7b5, C/E. `ev.harm = {root: {step, alter}, kind, bass?}`; `kind` is the suffix
+  as shown (12 characters at most). Drawn in a row above the staff on each line, accidentals from
+  the music font; text above a note goes over them, octave lines over both. Written like the notes:
+  a B♭ trumpet's symbols are a tone above concert, and they move with the part's transposition and
+  with paste between parts (`shiftEvent`), not with ↑/↓. Not played.
+- One per note or rest: a symbol inside a note (or over an empty bar) moves to the next note and is
+  counted; a second one waiting for the same note is counted.
+- MusicXML `<harmony>`: root, kind (its `text` is the suffix, else a name from `KIND_SUFFIX`), bass;
+  degrees, roman numerals, frames, inversions, N.C. and unknown kinds counted. MuseScore `<Harmony>`
+  root and bass as tpc, `<name>` the suffix; written in the 4.20 layout (`<root>`, `<name>`,
+  `<base>`), and read in that and the later `<harmonyInfo>` one (both checked in MuseScore 4).

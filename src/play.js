@@ -72,7 +72,7 @@ export function schedule(score, from = 0) {
         const midi = (p) => (perc ? p.drum - tr : midiOf(p) + 12 * oct);
         // grace notes (DESIGN §26) take a 32nd each, at most half the note, from the start of the beat
         const g = ev.grace ? Math.min(60, Math.floor(len / 2 / ev.grace.length)) : 0;
-        (ev.grace || []).forEach((p, k) => notes.push({ start: at + k * g, end: at + (k + 1) * g, midi: midi(p) + tr, lin0, ...base }));
+        (ev.grace || []).forEach((p, k) => notes.push({ start: at + k * g, end: at + (k + 1) * g, midi: midi(p) + tr, ...base }));
         const on = at + g * (ev.grace?.length || 0);
         const from = slide && slide.end === at && !g && !perc ? slide.from : null, made = [];
         ev.pitches.forEach((p, k) => {
@@ -80,7 +80,7 @@ export function schedule(score, from = 0) {
           let n = open.get(m);
           if (n && n.end === at && !g) n.end = at + len;
           else {
-            n = { start: on, end: at + len, midi: m, lin0, ...base };
+            n = { start: on, end: at + len, midi: m, ...base };
             notes.push(n);
             const r = from?.[k]?.root || from?.[k];
             // a slide: the first note's voice glides here and keeps sounding; this one is for MIDI only
@@ -103,27 +103,28 @@ export function schedule(score, from = 0) {
       }
     });
   }));
-  // the pedal lets every note struck under it ring to the pedal's end (lin0: written minus unrolled
-  // ticks). ring is for audio; MIDI writes the pedal itself.
-  for (const n of notes) {
-    const r = lines[n.staff].ped.find((q) => n.start + n.lin0 >= q.a && n.start + n.lin0 < q.z);
-    if (r && r.z - n.lin0 > n.end) n.ring = r.z - n.lin0;
-    delete n.lin0;
-  }
   const pedals = lines.map(({ ped }) => { // unrolled: [down, up] per staff
     const out = [];
     for (const r of ped) {
-      let last = null; // one pedal's pieces join up; two pedals side by side stay apart (a change)
+      // one pedal's pieces join where the music goes straight on; a repeat lifts it; two pedals
+      // side by side stay apart (a change)
+      let last = null, wz = null;
       for (const { bar, tick } of barStart) {
         const a = Math.max(r.a, lin[bar]), z = Math.min(r.z, lin[bar] + barLen(score, bar));
         if (a >= z) continue;
         const u = [tick + a - lin[bar], tick + z - lin[bar]];
-        if (last && last[1] === u[0]) last[1] = u[1]; else out.push((last = u));
+        if (last && last[1] === u[0] && wz === a) last[1] = u[1]; else out.push((last = u));
+        wz = z;
       }
     }
     return out.sort((p, q) => p[0] - q[0]);
   });
-  return { notes, barStart, total, timeOf, held, pedals };
+  // the pedal lets every note struck under it ring until it lifts: ring is for audio, MIDI writes the pedal
+  for (const n of notes) {
+    const q = pedals[n.staff].find(([a, z]) => n.start >= a && n.start < z);
+    if (q && q[1] > n.end) n.ring = q[1];
+  }
+  return { notes: notes.filter((n) => n.midi >= 0 && n.midi <= 127), barStart, total, timeOf, held, pedals }; // octave lines can take a note off the keyboard
 }
 
 // How marks sound (DESIGN §34). `fresh`: this event's newly struck notes, low to high (not tied

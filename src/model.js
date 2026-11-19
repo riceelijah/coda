@@ -355,10 +355,7 @@ export function setStaffTranspose(score, s, t) {
     if ([...ev.pitches, ...(ev.grace || [])].some((p) => midi(p) + dc < 0 || midi(p) + dc > 127)) return "Some notes would be written too high or too low";
   for (const i of group) {
     const st = score.staves[i], ot = st.transpose || [0, 0], dc = ot[0] - (nt?.[0] || 0), dd = ot[1] - (nt?.[1] || 0);
-    if (dc || dd) for (const bars of allLayers(st)) for (const bar of bars) for (const ev of bar) {
-      ev.pitches = sortPitches(ev.pitches.map((p) => shiftPitch(p, dc, dd)));
-      if (ev.grace) ev.grace = ev.grace.map((p) => shiftPitch(p, dc, dd));
-    }
+    if (dc || dd) for (const bars of allLayers(st)) for (const bar of bars) for (const ev of bar) shiftEvent(ev, dc, dd);
     if (nt) st.transpose = nt; else delete st.transpose;
   }
   return null;
@@ -499,6 +496,35 @@ export function setFingers(ev, s) {
   ev.pitches.forEach((p, k) => { if (f[k] && f[k] !== "-") p.finger = f[k]; else delete p.finger; });
   return null;
 }
+// ---------- chord symbols (DESIGN §38) ----------
+// ev.harm = {root: {step, alter}, kind: "m7", bass?: {step, alter}}, over a note or rest, written
+// like the notes (a B♭ trumpet's symbols are a tone above the piano's). kind is the suffix as shown.
+export const MAX_KIND = 12;
+const ACC = { "": 0, "#": 1, "♯": 1, b: -1, "♭": -1, "##": 2, x: 2, "𝄪": 2, bb: -2, "𝄫": -2 };
+// "Bbm7/F" -> {root: {step: 6, alter: -1}, kind: "m7", bass: {step: 3, alter: 0}}, or null
+export function parseChord(s) {
+  const m = /^([A-Ga-g])(##|bb|#|b|♯|♭|𝄪|𝄫)?(.*?)(?:\/([A-Ga-g])(##|bb|#|b|♯|♭|𝄪|𝄫)?)?$/u.exec(cleanText(s, 40));
+  if (!m || m[3].length > MAX_KIND || /[<>]/.test(m[3])) return null;
+  const note = (l, a) => ({ step: STEP_NAMES.indexOf(l.toUpperCase()), alter: ACC[a || ""] });
+  return { root: note(m[1], m[2]), kind: m[3].trim(), ...(m[4] ? { bass: note(m[4], m[5]) } : {}) };
+}
+const ACC_SHOWN = ["𝄫", "♭", "", "♯", "𝄪"];
+export const chordText = (h) => {
+  const n = (p) => STEP_NAMES[p.step] + ACC_SHOWN[p.alter + 2];
+  return n(h.root) + h.kind + (h.bass ? "/" + n(h.bass) : "");
+};
+const okChordNote = (p) => p && Number.isInteger(p.step) && p.step >= 0 && p.step <= 6 && Number.isInteger(p.alter) && Math.abs(p.alter) <= 2;
+export const okChord = (h) => !!h && okChordNote(h.root) && typeof h.kind === "string" && h.kind.length <= MAX_KIND && (h.bass === undefined || okChordNote(h.bass));
+// A note's pitches, grace notes and chord symbol moved by c semitones and d steps (a transposition).
+export function shiftEvent(ev, c, d) {
+  ev.pitches = sortPitches(ev.pitches.map((p) => shiftPitch(p, c, d)));
+  if (ev.grace) ev.grace = ev.grace.map((p) => shiftPitch(p, c, d));
+  if (ev.harm) {
+    const mv = (p) => { const q = shiftPitch({ ...p, oct: 4 }, c, d); return { step: q.step, alter: q.alter }; };
+    ev.harm = { ...ev.harm, root: mv(ev.harm.root), ...(ev.harm.bass ? { bass: mv(ev.harm.bass) } : {}) };
+  }
+}
+
 export function setText(ev, s) {
   const t = cleanText(s, MAX_TEXT);
   if (NAV_WORDS.test(t)) return `Use Score ▸ Repeats and endings for "${t}"`;
@@ -556,6 +582,27 @@ export function staffLines(score, s) {
 }
 // Octaves a note at tick t on staff s sounds above its written pitch.
 export const ottAt = (lines, t) => lines.ott.find((r) => t >= r.a && t < r.z)?.oct || 0;
+// Every note (and grace note) under an octave line, in any layer, moved by sign × the line's
+// octaves: -1 turns a file's sounding notes into written ones.
+export function shiftUnderLines(score, sign) {
+  score.staves.forEach((st, s) => {
+    const lines = staffLines(score, s);
+    if (!lines.ott.length || isPerc(st)) return;
+    const move = (o) => (p) => ({ ...p, oct: p.oct + sign * o });
+    allLayers(st).forEach((bars) => {
+      let t = 0;
+      bars.forEach((bar, b) => {
+        let at = t;
+        for (const ev of bar) {
+          const o = ottAt(lines, at);
+          if (o) { ev.pitches = ev.pitches.map(move(o)); if (ev.grace) ev.grace = ev.grace.map(move(o)); }
+          at += eventTicks(ev);
+        }
+        t += barLen(score, b);
+      });
+    });
+  });
+}
 // A slur over the events (in layer order, `layer` all of the layer's events). One that overlaps a
 // slur already there, inside it or around it, goes on the second level (slur2); a third is refused.
 export function toggleSlur(layer, events) {
@@ -571,7 +618,16 @@ export function toggleSlur(layer, events) {
     if (ev === z) break;
   }
   if (!over) return toggleSpan(events, "slur");
-  if (events.some((e, k) => (k < events.length - 1 && e.slur2) || (k && e.slur2End))) return "Two slurs at most over a note";
+  // a second-level slur already over these notes (inside, around or crossing): no room for a third
+  let open2 = false, busy = false;
+  for (const ev of layer) {
+    if (ev.slur2End && ev !== z) { if (events.includes(ev) && ev !== a) busy = true; open2 = false; }
+    if (ev === a && open2) busy = true;
+    if (ev.slur2 && events.includes(ev) && ev !== z) busy = true;
+    if (ev.slur2) open2 = true;
+    if (ev === z) { if (open2 && !ev.slur2) busy = true; break; }
+  }
+  if (busy) return "Two slurs at most over a note";
   return toggleSpan(events, "slur2");
 }
 // Over events in order (2 or more): set the span, or remove it when exactly that one is there.
@@ -647,7 +703,8 @@ export function melismas(score) {
     bars.forEach((bar, b) => {
       let at = t;
       for (const ev of bar) {
-        if (ev.pitches.length) for (let v = 0; v < MAX_VERSES; v++) {
+        if (!ev.pitches.length) open.length = 0; // a rest ends every extender
+        else for (let v = 0; v < MAX_VERSES; v++) {
           if (ev.lyrics?.[v]) {
             open[v] = ev.lyrics[v].ext ? { at, ev } : null;
             if (open[v]) (m.get(ev) || m.set(ev, []).get(ev))[v] = { last: ev, ticks: 0 };
@@ -1114,7 +1171,7 @@ export function isValidScore(sc) {
       DURS.includes(e.dur) && Array.isArray(e.pitches) && e.pitches.every(okPitch) &&
       (e.grace === undefined || (Array.isArray(e.grace) && e.grace.length > 0 && e.grace.length <= MAX_GRACE && e.pitches.length > 0 && e.grace.every(okPitch))) &&
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m)))) &&
-      (e.dyn === undefined || DYNS.includes(e.dyn)) && (e.text === undefined || okText(e.text, MAX_TEXT)) &&
+      (e.dyn === undefined || DYNS.includes(e.dyn)) && (e.text === undefined || okText(e.text, MAX_TEXT)) && (e.harm === undefined || okChord(e.harm)) &&
       (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&
       (e.gliss === undefined || (e.gliss === true && e.pitches.length > 0)) &&
       (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true) &&

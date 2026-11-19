@@ -256,19 +256,32 @@ export function render(score, container, sel, opts = {}) {
     })); } catch (e) { console.error(e); }
   }))));
 
-  // Text above notes (DESIGN §30): drawn after layout so it takes no room between notes; it starts
+  // Text and chord symbols above notes (DESIGN §30, §38): drawn after layout so it takes no room between notes; it starts
   // at the note and sits above the staff, or above the note when that's higher.
+  // chord symbols in one row per staff and line, clear of the notes and of slurs over them
+  const chordRow = {}, floor = {}; // floor["sys:staff"]: lowest thing drawn below the staff; floor["top:sys:staff"]: the chord row's top
   score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
     const ref = noteRef[s][v][b]?.[i];
-    if (!ev.text || !ref) return;
+    if (!ev.harm || !ref) return;
+    const bb = ref.note.getBoundingBox(), k = ref.sys + ":" + s;
+    chordRow[k] = Math.min(chordRow[k] ?? Infinity, ref.note.checkStave().getYForLine(0) - 22, bb ? bb.y - 26 : Infinity);
+  }))));
+  for (const k in chordRow) floor["top:" + k] = chordRow[k] - 16; // octave lines go over them
+  score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
+    const ref = noteRef[s][v][b]?.[i];
+    if ((!ev.text && !ev.harm) || !ref) return;
     const ctx = ctxs[ref.sys], note = ref.note, bb = note.getBoundingBox();
-    const y = Math.min(note.checkStave().getYForLine(0) - 10, bb ? bb.y - 8 : Infinity) - (ev.marks?.some((m) => !BRASS.has(m)) ? 18 : 0); // over a fermata or accent (brass effects sit beside the note)
+    let y = Math.min(note.checkStave().getYForLine(0) - 10, bb ? bb.y - 8 : Infinity) - (ev.marks?.some((m) => !BRASS.has(m)) ? 18 : 0); // over a fermata or accent (brass effects sit beside the note)
+    const put = (t, font) => { // kept inside the system's right edge
+      ctx.save(); ctx.setFont(...font);
+      const w = ctx.measureText(t).width;
+      ctx.fillText(t, Math.max(0, Math.min(note.getAbsoluteX() - 4, SHEET_W - 10 - w)), y);
+      ctx.restore();
+    };
     try {
       tintedAll([ctx], opts.dim && v !== (opts.layer || 0), () => {
-        ctx.save(); ctx.setFont("Georgia", 13, "normal", "italic");
-        const w = ctx.measureText(ev.text).width; // kept inside the system's right edge
-        ctx.fillText(ev.text, Math.max(0, Math.min(note.getAbsoluteX() - 4, SHEET_W - 10 - w)), y);
-        ctx.restore();
+        if (ev.harm) { y = chordRow[ref.sys + ":" + s]; drawChord(ctx, ev.harm, note.getAbsoluteX() - 4, y); y -= 20; } // chord symbols (DESIGN §38), text above them
+        if (ev.text) put(ev.text, ["Georgia", 13, "normal", "italic"]);
       });
     } catch (e) { console.error(e); }
   }))));
@@ -277,7 +290,7 @@ export function render(score, container, sel, opts = {}) {
   // Lyrics: a line per verse for each staff and system, below its notes and dynamics (DESIGN §24).
   // lyricY["sys:staff"] = verse 1's baseline, for the app's lyric box.
   // floor["sys:staff"] = lowest thing drawn so far below the staff; hairpins go under it.
-  const floor = {}, lyricY = {}, mel = melismas(score), refOf = new Map();
+  const lyricY = {}, mel = melismas(score), refOf = new Map();
   score.staves.forEach((st, s) => {
     const rows = {}, nv = verses(st); // sys -> [{ev, note}] in order
     allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
@@ -347,6 +360,24 @@ export function render(score, container, sel, opts = {}) {
   return { cells, systems, errors, lyricY };
 }
 
+// A chord symbol: letters in the text font, accidentals from the music font (text fonts draw ♭ wide).
+const CHORD_ACC = { "-2": "accidentalDoubleFlat", "-1": "accidentalFlat", 1: "accidentalSharp", 2: "accidentalDoubleSharp" };
+function drawChord(ctx, h, x, y) {
+  const G = VF().Glyph, toks = [];
+  const note = (p, pre = "") => { toks.push({ t: pre + "CDEFGAB"[p.step] }); if (p.alter) toks.push({ g: CHORD_ACC[p.alter] }); };
+  note(h.root);
+  if (h.kind) toks.push({ t: h.kind });
+  if (h.bass) note(h.bass, "/");
+  ctx.save(); ctx.setFont("Georgia", 16);
+  const w = (k) => (k.t ? ctx.measureText(k.t).width : G.getWidth(k.g, 26) + 3);
+  x = Math.max(0, Math.min(x, SHEET_W - 10 - toks.reduce((a, k) => a + w(k), 0)));
+  for (const k of toks) {
+    if (k.t) ctx.fillText(k.t, x, y); else G.renderGlyph(ctx, x + 1.5, y - 6, 26, k.g);
+    x += w(k);
+  }
+  ctx.restore();
+}
+
 function tintedAll(ctxs, on, draw) {
   if (!on) return draw();
   ctxs.forEach((c) => { c.save(); c.setFillStyle(DIM); c.setStrokeStyle(DIM); });
@@ -414,7 +445,7 @@ function drawLine(ctxs, kind, { type, refs }, s, floor) {
     const x2 = lastSeg ? seg.notes[seg.notes.length - 1].getAbsoluteX() + 16 : seg.notes[seg.notes.length - 1].checkStave().getTieEndX();
     // ponytail: below the notes, not under lyrics elsewhere on the line; a pedal under lyrics in the same bars overlaps them
     const y = below ? Math.max(stave.getYForLine(4) + 30, ...boxes.map((bb) => bb.y + bb.h + 16))
-      : Math.min(stave.getYForLine(0) - 16, ...boxes.map((bb) => bb.y - 10));
+      : Math.min(stave.getYForLine(0) - 16, floor["top:" + seg.sys + ":" + s] ?? Infinity, ...boxes.map((bb) => bb.y - 10));
     ctx.save();
     ctx.setFont("Georgia", kind === "ped" ? 14 : 13, kind === "ped" ? "bold italic" : "italic");
     const text = k === 0 ? label : kind === "ped" ? "" : `(${label})`;
