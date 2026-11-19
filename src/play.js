@@ -291,7 +291,9 @@ function userFor(sound, m) {
 function note(c, dest, m, program, start, len, sound, vel = 80, fx = null) {
   if (program < 0) { // the sampled kit, or the built-in synth when it isn't loaded (offline)
     const b = buffers.get(keyOf(-1, m));
-    if (b) sampledVoice(c, dest, b, m, m, start, b.duration, false, vel / 80); else drumHit(c, dest, m, start, vel / 80);
+    // ponytail: the kit's only retuned hit is 35, drum 36's recording a semitone down (all 47 checked;
+    // 8 others are 5–6 cents off, left alone). Read originalPitch from the file if the kit changes.
+    if (b) sampledVoice(c, dest, b, m, m === 35 ? 36 : m, start, b.duration, false, vel / 80); else drumHit(c, dest, m, start, vel / 80);
     return;
   }
   const u = userFor(sound, m), level = vel / 80;

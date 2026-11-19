@@ -1411,7 +1411,8 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   and Export refuse.
 - **UI:** the toolbar's Tracks button ("Tracks: all", or "Tracks: 1 of 3" highlighted) and Score ▸
   Tracks to play and export… open a dialog: a checkbox per part, "Only this", "All on". Each change
-  is an edit (undoable, saved with the score). Changes while playing apply at the next Play.
+  is an edit (undoable, kept in the browser's copy of the score; files don't hold it, so a saved
+  MusicXML file reopens with every track on). Changes while playing apply at the next Play.
   ponytail: no per-track volume or live mute; a gain bus per track in play.js is the upgrade, and
   where a DAW view's volume and pan would go.
 

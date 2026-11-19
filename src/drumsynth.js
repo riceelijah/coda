@@ -1,4 +1,4 @@
-// Synthesized General MIDI drums (DESIGN §27): no samples, so they work offline and in audio export.
+// Synthesized General MIDI drums (DESIGN §27): the stand-in until the recorded kit loads (offline, or a host down).
 // Each drum is a pitched tone and/or filtered noise with its own decay. Families share settings.
 
 // tone: [type, start Hz, end Hz, decay s, level]; noise: [filter, Hz, Q, decay s, level]; am: Hz (rattle)
