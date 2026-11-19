@@ -15,6 +15,7 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 - **Type** letters to add notes quickly. Coda picks the octave closest to the previous note and moves to the next bar when one fills up.
 - The **Selection tool** (arrow, top of the left palette, or `V`) selects instead of adding notes: click a note, drag a box around notes, Shift+click to extend. Duration, dot, accidentals, tie, transpose and tuplets then apply to all the selected notes. Right-click a note or bar for a menu of actions.
 - The **Notes** menu adds dynamics, slurs (`S`), crescendo and diminuendo hairpins, articulations, lyrics (`L`, then type: Space moves to the next note, `-` splits a word, ↑/↓ switch between up to 5 verses) and grace notes (the grace button, then click a note or type A–G). Dynamics and hairpins change how loud the part plays.
+- **Drums:** choose *Drums* in New, or add a *Drum staff* in Score ▸ Parts and instruments. Click a line or space (or type A–G) for the drum that goes there: bass drum, snare, toms, hi-hats and cymbals, with x noteheads for cymbals. ↑/↓ move to the next drum; Notes ▸ Drum sound… picks any of the 47 General MIDI drums. Drums play from a kit built into Coda (synthesized, so it works offline).
 - **Score ▸ Key and time** changes the key or time signature from the current bar on; **Score ▸ Clef from this bar** changes a staff's clef. **View** zooms the score.
 - **Score ▸ Parts and instruments** adds, removes, renames and reorders parts (treble, bass, alto or tenor staff, or a grand staff), and picks a sound for each part from the 128 General MIDI instruments (New also asks for one). Sounds download the first time a part uses them and are then kept in your browser; without a connection, parts play a plain tone. Each part can also be set to a transposing instrument (B♭ clarinet or trumpet, F horn, E♭ alto sax and others): the notes are then written for that instrument and still sound the same.
 - **Play** plays from the current bar.
@@ -54,9 +55,9 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 |---|---|
 | MusicXML (`.musicxml`, `.xml`) | Opens and saves. This is Coda's own file format. |
 | Compressed MusicXML (`.mxl`) | Opens. |
-| MuseScore (`.mscz`, `.mscx`) | Opens (tested with MuseScore 4 files). |
-| MIDI (`.mid`, `.midi`) | Opens as an automatic transcription; it will usually need tidying. |
-| Finale (`.musx`, 2014 and later) | Opens notes, rests, chords, ties, tuplets, layers 1–4 and second voices, keys, time signatures (with C and ¢), clefs, staff names, staccato/accent/tenuto/marcato/fermata, transposing instruments, the opening tempo, an instrument sound when the staff name matches one, dynamics, slurs, hairpins, lyrics (up to 5 verses), clef changes and grace notes. Text and tempo marks, other lines and repeats are left out and counted in the report; page layout is not carried over. |
+| MuseScore (`.mscz`, `.mscx`) | Opens (tested with MuseScore 4 files), drum parts included. |
+| MIDI (`.mid`, `.midi`) | Opens as an automatic transcription; it will usually need tidying. Channel 10 becomes a drum staff. |
+| Finale (`.musx`, 2014 and later) | Opens notes, rests, chords, ties, tuplets, layers 1–4 and second voices, keys, time signatures (with C and ¢), clefs, staff names, staccato/accent/tenuto/marcato/fermata, transposing instruments, the opening tempo, an instrument sound when the staff name matches one, dynamics, slurs, hairpins, lyrics (up to 5 verses), clef changes and grace notes. Drum staves open as drum parts, but Finale's drum maps aren't read yet, so each drum is chosen from its place on the staff. Text and tempo marks, other lines and repeats are left out and counted in the report; page layout is not carried over. |
 | Finale (`.mus`, 2012 and earlier) | Can't be opened. The format is closed and undocumented, and no open reader exists. Export MusicXML from a copy of Finale or Finale NotePad instead. |
 
 Coda keeps up to four layers (voices) per staff. When a file contains things Coda doesn't support yet

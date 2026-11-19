@@ -1,15 +1,16 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc,
 } from "../model.js";
+import { DRUMS, drumName, drumNear, isDrum } from "../drums.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
 const TYPE_OF = { w: "whole", h: "half", q: "quarter", 8: "eighth", 16: "16th", 32: "32nd" };
 const DUR_OF = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16", "32nd": "32" };
 const LONGER = new Set(["breve", "long", "maxima"]);
 const SHORTER = new Set(["64th", "128th", "256th", "512th", "1024th"]);
-const CLEF_OUT = { treble: ["G", 2], bass: ["F", 4], alto: ["C", 3], tenor: ["C", 4] };
+const CLEF_OUT = { treble: ["G", 2], bass: ["F", 4], alto: ["C", 3], tenor: ["C", 4], percussion: ["percussion", 0] };
 
 // Marks (DESIGN §16): MusicXML <articulations> children <-> Coda mark names.
 const ARTIC_OUT = { staccato: "<staccato/>", accent: "<accent/>", tenuto: "<tenuto/>", marcato: '<strong-accent type="up"/>' };
@@ -20,19 +21,29 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 // ---------- export ----------
 
 // Slur and wedge numbers: one per voice, so slurs in two hands or layers that overlap stay apart.
-function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl }) {
+// a pitch, or for a drum (DESIGN §27) its staff position as <unpitched>
+const pitchXml = (p) => (p.drum
+  ? `<unpitched><display-step>${"CDEFGAB"[p.step]}</display-step><display-octave>${p.oct}</display-octave></unpitched>`
+  : `<pitch><step>${"CDEFGAB"[p.step]}</step>${p.alter ? `<alter>${p.alter}</alter>` : ""}<octave>${p.oct}</octave></pitch>`);
+const HEAD_OUT = { x: "x", cx: "circle-x", d: "diamond", t: "triangle" };
+const drumInst = (pid, n) => `<instrument id="${pid}-I${n}"/>`;
+const headXml = (p) => (p.drum && HEAD_OUT[DRUMS.get(p.drum)?.head] ? `<notehead>${HEAD_OUT[DRUMS.get(p.drum).head]}</notehead>` : "");
+
+function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl, pid }) {
   const x = ["<note>"];
   if (chord) x.push("<chord/>");
   if (p) {
-    x.push(`<pitch><step>${"CDEFGAB"[p.step]}</step>${p.alter ? `<alter>${p.alter}</alter>` : ""}<octave>${p.oct}</octave></pitch>`);
+    x.push(pitchXml(p));
   } else x.push("<rest/>");
   x.push(`<duration>${eventTicks(ev)}</duration>`);
   const tieStart = p && ev.tie;
   if (tieStop) x.push('<tie type="stop"/>');
   if (tieStart) x.push('<tie type="start"/>');
+  if (p?.drum) x.push(drumInst(pid, p.drum));
   x.push(`<voice>${voice}</voice>`, `<type>${TYPE_OF[ev.dur]}</type>`);
   for (let i = 0; i < (ev.dots || 0); i++) x.push("<dot/>");
   if (ev.tup) x.push(`<time-modification><actual-notes>${ev.tup[0]}</actual-notes><normal-notes>${ev.tup[1]}</normal-notes></time-modification>`);
+  if (p) x.push(headXml(p));
   if (staffNo) x.push(`<staff>${staffNo}</staff>`);
   const nots = [];
   if (tieStop) nots.push('<tied type="stop"/>');
@@ -53,10 +64,10 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl
 }
 
 // Grace notes (DESIGN §26): one is a slashed eighth, more are sixteenths, before their note.
-function graceXml(grace, staffNo, voice) {
+function graceXml(grace, staffNo, voice, pid) {
   const one = grace.length === 1;
-  return grace.map((p) => `<note><grace${one ? ' slash="yes"' : ""}/><pitch><step>${"CDEFGAB"[p.step]}</step>${p.alter ? `<alter>${p.alter}</alter>` : ""}<octave>${p.oct}</octave></pitch>` +
-    `<voice>${voice}</voice><type>${one ? "eighth" : "16th"}</type>${staffNo ? `<staff>${staffNo}</staff>` : ""}</note>`).join("");
+  return grace.map((p) => `<note><grace${one ? ' slash="yes"' : ""}/>${pitchXml(p)}${p.drum ? drumInst(pid, p.drum) : ""}` +
+    `<voice>${voice}</voice><type>${one ? "eighth" : "16th"}</type>${headXml(p)}${staffNo ? `<staff>${staffNo}</staff>` : ""}</note>`).join("");
 }
 
 function restXml(ticks, staffNo, voice, whole) {
@@ -79,7 +90,7 @@ export function completeTuplet(bar, cap) {
 }
 
 // Notes for one staff in one bar. Returns {xml, ticks written}.
-function barXml(score, s, b, staffNo, voice, v, syl) {
+function barXml(score, s, b, staffNo, voice, v, syl, pid) {
   const cap = barCapacity(attrsAt(score, b).time);
   const bars = layerBars(score.staves[s], v);
   const bar = completeTuplet(bars[b], cap);
@@ -93,11 +104,11 @@ function barXml(score, s, b, staffNo, voice, v, syl) {
   bar.forEach((ev, i) => {
     const before = i > 0 ? bar[i - 1] : prev;
     const tied = (p) => !!(before && before.tie && before.pitches.some((q) => q.step === p.step && q.oct === p.oct));
-    const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev) };
+    const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev), pid };
     const dir = (body) => `<direction placement="below"><direction-type>${body}</direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`;
     if (ev.dyn) out.push(dir(`<dynamics><${ev.dyn}/></dynamics>`));
     if (ev.hp) out.push(dir(`<wedge type="${ev.hp === "<" ? "crescendo" : "diminuendo"}" number="${voice}"/>`));
-    if (ev.grace) out.push(graceXml(ev.grace, staffNo, voice));
+    if (ev.grace) out.push(graceXml(ev.grace, staffNo, voice, pid));
     if (!ev.pitches.length) out.push(noteXml(ev, null, flags));
     else ev.pitches.forEach((p, k) => out.push(noteXml(ev, p, { ...flags, chord: k > 0, tieStop: tied(p) })));
     if (ev.hpEnd) out.push(dir(`<wedge type="stop" number="${voice}"/>`)); // after the note it ends on
@@ -122,6 +133,14 @@ export function exportMusicXML(score) {
   ];
   groups.forEach((g, i) => {
     const prog = score.staves[g[0]].program, id = `P${i + 1}`;
+    if (isPerc(score.staves[g[0]])) { // every drum the part uses, on channel 10 (DESIGN §27)
+      const used = [...new Set(allLayers(score.staves[g[0]]).flat(2).flatMap((e) => [...e.pitches, ...(e.grace || [])]).map((p) => p.drum))].sort((a, b) => a - b);
+      x.push(`<score-part id="${id}"><part-name>${esc(score.staves[g[0]].name || "")}</part-name>` +
+        used.map((n) => `<score-instrument id="${id}-I${n}"><instrument-name>${esc(drumName(n))}</instrument-name></score-instrument>`).join("") +
+        used.map((n) => `<midi-instrument id="${id}-I${n}"><midi-channel>10</midi-channel><midi-unpitched>${n + 1}</midi-unpitched></midi-instrument>`).join("") +
+        "</score-part>");
+      return;
+    }
     // instrument only when set, so scores without one round-trip unchanged (DESIGN §13.2)
     const inst = Number.isInteger(prog)
       ? `<score-instrument id="${id}-I1"><instrument-name>${esc(score.staves[g[0]].name || "")}</instrument-name></score-instrument>` +
@@ -138,14 +157,14 @@ export function exportMusicXML(score) {
       const attrs = [];
       if (b === 0) attrs.push(`<divisions>${PPQ}</divisions>`);
       // the written key; <transpose> says how it sounds (DESIGN §21)
-      if (b === 0 || m.key !== undefined) attrs.push(`<key><fifths>${keyAt(score, g[0], b)}</fifths></key>`);
+      if (b === 0 || m.key !== undefined) attrs.push(isPerc(score.staves[g[0]]) ? `<key print-object="no"><fifths>${a.key}</fifths></key>` : `<key><fifths>${keyAt(score, g[0], b)}</fifths></key>`);
       if (b === 0 || m.time) attrs.push(`<time${a.sym ? ` symbol="${a.sym}"` : ""}><beats>${a.time[0]}</beats><beat-type>${a.time[1]}</beat-type></time>`);
       if (b === 0 && g.length > 1) attrs.push(`<staves>${g.length}</staves>`);
       g.forEach((s, k) => {
         const clef = b === 0 ? score.staves[s].clef : score.staves[s].clefs?.[b];
         if (!clef) return;
         const [sign, line] = CLEF_OUT[clef];
-        attrs.push(`<clef${g.length > 1 ? ` number="${k + 1}"` : ""}><sign>${sign}</sign><line>${line}</line></clef>`);
+        attrs.push(`<clef${g.length > 1 ? ` number="${k + 1}"` : ""}><sign>${sign}</sign>${line ? `<line>${line}</line>` : ""}</clef>`);
       });
       if (b === 0) {
         const t = score.staves[g[0]].transpose;
@@ -161,7 +180,7 @@ export function exportMusicXML(score) {
       // every layer bar with notes, as voice staff×4 + layer + 1, separated by <backup> (DESIGN §15)
       const chunks = [];
       g.forEach((s, k) => allLayers(score.staves[s]).forEach((bars, v) => {
-        if (v === 0 || bars[b].length) chunks.push(barXml(score, s, b, g.length > 1 ? k + 1 : 0, k * MAX_LAYERS + v + 1, v, syl));
+        if (v === 0 || bars[b].length) chunks.push(barXml(score, s, b, g.length > 1 ? k + 1 : 0, k * MAX_LAYERS + v + 1, v, syl, `P${gi + 1}`));
       }));
       chunks.forEach((r, i) => {
         x.push(r.xml);
@@ -182,10 +201,13 @@ const kids = (el, name) => (el ? [...el.children].filter((c) => c.localName === 
 const kid = (el, name) => kids(el, name)[0] || null;
 const txt = (el, name) => { const k = kid(el, name); return k ? k.textContent.trim() : null; };
 
+const clefAtImport = (st, mi) => { let c = st.clef; for (const k in st.clefs) if (+k <= mi) c = st.clefs[k]; return c; };
+
 function clefFrom(el, report) {
   const sign = txt(el, "sign"), line = +txt(el, "line");
   const oct = txt(el, "clef-octave-change");
   if (oct && +oct !== 0) report.count("Octave clefs shown as plain clefs");
+  if (sign === "percussion") return "percussion";
   if (sign === "G") return "treble";
   if (sign === "F") return "bass";
   if (sign === "C" && line === 4) return "tenor";
@@ -201,21 +223,25 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   if (root.localName === "score-timewise") throw new Error("This is a 'timewise' MusicXML file, which Coda can't read yet. Most programs can re-export it as standard (partwise) MusicXML.");
   if (root.localName !== "score-partwise") throw new Error("This XML file isn't a MusicXML score.");
 
-  const names = {}, programs = {};
+  const names = {}, programs = {}, drumMaps = {}; // drumMaps: part -> {instrument id: GM drum} (DESIGN §27)
   for (const sp of root.querySelectorAll("part-list > score-part")) {
     const id = sp.getAttribute("id");
     names[id] = txt(sp, "part-name") || "";
     const mis = kids(sp, "midi-instrument");
+    const un = mis.filter((m) => kid(m, "midi-unpitched"));
+    if (un.length) {
+      drumMaps[id] = Object.fromEntries(un.map((m) => [m.getAttribute("id"), parseInt(txt(m, "midi-unpitched"), 10) - 1]));
+      continue;
+    }
     if (mis.length > 1) report.count("Extra instruments in a part (first one used)", mis.length - 1);
     const pr = mis.length ? parseInt(txt(mis[0], "midi-program"), 10) : NaN; // 1-based in MusicXML
     if (Number.isInteger(pr)) {
       if (pr >= 1 && pr <= 128) programs[id] = pr - 1; else report.count("Instrument numbers out of range (ignored)");
     }
-    if (mis.some((m) => txt(m, "midi-channel") === "10" || kid(m, "midi-unpitched"))) report.count("Percussion parts (played as pitched notes)");
   }
 
   const score = { title: "", composer: "", tempo: 0, measures: [], staves: [] };
-  const firstPartAttrs = []; // per bar: {key, time}
+  const partAttrs = []; // per part, per bar: {key, time}; the key comes from the first part that isn't drums
   kids(root, "part").forEach((part, pi) => {
     const measures = kids(part, "measure");
     let nStaves = 1;
@@ -227,6 +253,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     }));
     if (nStaves > 2) report.add(`A part with ${nStaves} staves was split into separate staves without a brace`);
     let divisions = 1, key = 0, time = [4, 4], sym, tr = null;
+    const attrs = [], drums = drumMaps[part.getAttribute("id")] || null;
     const pend = {}; // staff -> dynamic waiting for its note
     const pendHp = {}, lastAny = {}; // staff -> hairpin waiting for its note; last event read
     const openHp = {}, openSlur = {}; // staff -> {ev: where the open hairpin starts, prev: one still open before it}; staff:layer -> open slur number
@@ -288,6 +315,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
             if (!st) continue;
             const clef = clefFrom(c, report);
             if (st.clef === null) { st.clef = clef; continue; }
+            if ((clef === "percussion") !== (clefAtImport(st, mi) === "percussion")) { report.count("Changes to or from the percussion clef mid-part (not imported)"); continue; }
             let at = mi;
             if (pos.t >= barCapacity(time)) at = mi + 1;
             else if (pos.t > 0) report.count("Clef changes inside a bar moved to its start");
@@ -332,22 +360,24 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
         } else if (tag === "note") {
           const start = pos.t;
-          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace, openHp, openSlur });
+          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums });
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
       for (const k in pendGrace) report.count("Grace notes with no note after them in the bar (not imported)", pendGrace[k].notes.length);
       // the file's key is written; the score keeps concert pitch
-      if (pi === 0) firstPartAttrs.push({ key: tr ? wrapKey(key + fifthsOf(tr[0], tr[1])) : key, time: [...time], sym });
+      attrs.push({ key: tr ? wrapKey(key + fifthsOf(tr[0], tr[1])) : key, time: [...time], sym });
     });
     for (const k in pend) if (pend[k]) report.count("Dynamics after the last note (not imported)");
     for (const k in pendHp) if (pendHp[k]) report.count("Hairpins with no notes (not imported)");
     staves.forEach((st) => { if (!st.clef) st.clef = "treble"; });
+    finishDrums(staves, report);
+    partAttrs.push({ attrs, perc: staves.every(isPerc) });
     score.staves.push(...staves);
   });
   if (!score.staves.length) throw new Error("This MusicXML file has no parts.");
 
-  score.measures.push(...measuresFrom(firstPartAttrs));
+  score.measures.push(...measuresFrom((partAttrs.find((a) => !a.perc) || partAttrs[0]).attrs));
   const broken = clearBrokenSpans(score);
   if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
 
@@ -378,7 +408,23 @@ const MARKS = {
   glissando: "Glissandos (not imported)", slide: "Glissandos (not imported)",
 };
 
-function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace, openHp, openSlur }) {
+// A staff with the percussion clef or drum notes becomes a drum staff (DESIGN §27); notes with no
+// drum take the kit drum nearest their position, and a pitched staff's drum notes become drums too.
+function finishDrums(staves, report) {
+  staves.forEach((st, k) => {
+    const all = allLayers(st).flat(2).flatMap((e) => [e.pitches, e.grace || []]);
+    if (st.clef !== "percussion" && !all.flat().some((p) => p.drum !== undefined)) return;
+    let guessed = 0;
+    for (const ps of all) ps.forEach((p, i) => { if (!p.drum) { ps[i] = drumNear(p); guessed++; } });
+    if (guessed) report.count("Drum notes with no instrument (sound from their position)", guessed);
+    st.clef = "percussion";
+    delete st.program; delete st.transpose; delete st.clefs;
+    st.brace = false;
+    if (k > 0) staves[k - 1].brace = false;
+  });
+}
+
+function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums }) {
   const isRest = !!kid(el, "rest");
   const grace = kid(el, "grace");
   if (grace && isRest) { report.count("Grace rests (not imported)"); return; }
@@ -423,7 +469,11 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     if (!Number.isInteger(alter)) { report.count("Microtonal alterations rounded"); alter = Math.round(alter); }
     if (step < 0 || !Number.isFinite(oct)) return;
     pitch = { step, oct, alter: Math.max(-2, Math.min(2, alter)) };
-    if (p.localName === "unpitched") report.count("Percussion notes shown at their staff position");
+    if (p.localName === "unpitched") { // a drum (DESIGN §27): its instrument's MIDI note; finishDrums fills in the rest
+      const n = drums?.[kid(el, "instrument")?.getAttribute("id")];
+      pitch = { step, oct, alter: 0, drum: isDrum(n) ? n : 0 }; // 0: not known yet
+      if (Number.isInteger(n) && !isDrum(n)) report.count("Drums outside the General MIDI kit (sound from their position)");
+    }
   }
 
   if (grace) { // held until the note it comes before; before the chord branch so it can't join the last note
@@ -438,7 +488,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
 
   if (kid(el, "chord") && lastEvent[lk]) {
     const ev = lastEvent[lk];
-    if (pitch && !ev.pitches.some((q) => q.step === pitch.step && q.oct === pitch.oct)) {
+    if (pitch && !ev.pitches.some((q) => q.step === pitch.step && q.oct === pitch.oct && q.drum === pitch.drum)) {
       ev.pitches.push(pitch);
       ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
     }

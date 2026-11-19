@@ -46,7 +46,7 @@ melody = [name("Melody"), sysex] + notes(0, [(67, 0, 1), (69, 1, 2), (71, 2, 3),
 bass = [name("Bass")] + notes(1, [(43, 0, 4), (50, 0, 4), (48, 4, 6), (50, 6, 8)], Q)
 (HERE / "scale.mid").write_bytes(smf(1, Q, [track(meta), track(melody), track(bass)]))
 
-# format 0: one track, a melody on channel 1 and drums on channel 10 (skipped on import)
+# format 0: one track, a melody on channel 1 and drums on channel 10 (a drum staff on import)
 f0 = notes(0, [(60, 0, 1), (64, 1, 2)], Q) + notes(9, [(36, 0, 1), (38, 1, 2)], Q)
 (HERE / "format0.mid").write_bytes(smf(0, Q, [track(f0)]))
 print("wrote scale.mid, format0.mid")

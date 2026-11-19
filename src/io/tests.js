@@ -6,7 +6,7 @@ import { renderAudio, wavBytes, schedule, noteName, rootFor, needed, fetchSample
 import { GM, gmByName } from "../gm.js";
 import * as M from "../model.js";
 import * as store from "../store.js";
-import { markOf } from "./mscz.js";
+import { markOf, importMSCX, exportMSCX } from "./mscz.js";
 import * as usnd from "../usersounds.js";
 
 const P = (name) => {
@@ -71,6 +71,22 @@ export function roundTripFixture() {
 }
 
 export async function run({ check, eq }) {
+  await check("drums round-trip: MusicXML, MuseScore and MIDI keep every drum; MuseScore's export imports (DESIGN §27)", async () => {
+    const { score: ms, report } = await importBytes(await fetchBytes("samples/drums.musicxml"), "drums.musicxml");
+    const drums = (sc) => JSON.stringify(sc.staves.find(M.isPerc).bars.map((b) => b.filter((e) => e.pitches.length).map((e) => [e.dur, e.pitches])));
+    const want = '[[["8",[{"step":3,"oct":4,"alter":0,"drum":36},{"step":4,"oct":5,"alter":0,"drum":42}]],["8",[{"step":4,"oct":5,"alter":0,"drum":42}]],' +
+      '["8",[{"step":0,"oct":5,"alter":0,"drum":38},{"step":4,"oct":5,"alter":0,"drum":42}]],["8",[{"step":4,"oct":5,"alter":0,"drum":46}]],' +
+      '["q",[{"step":3,"oct":4,"alter":0,"drum":36},{"step":5,"oct":5,"alter":0,"drum":49}]],["q",[{"step":0,"oct":5,"alter":0,"drum":37},{"step":3,"oct":5,"alter":0,"drum":51}]]],' +
+      '[["q",[{"step":4,"oct":4,"alter":0,"drum":41}]],["q",[{"step":1,"oct":5,"alter":0,"drum":47},{"step":3,"oct":5,"alter":0,"drum":53}]],' +
+      '["q",[{"step":2,"oct":5,"alter":0,"drum":50},{"step":0,"oct":6,"alter":0,"drum":55}]],["q",[{"step":1,"oct":4,"alter":0,"drum":44},{"step":6,"oct":5,"alter":0,"drum":57}]]]]';
+    if (drums(ms) !== want) return "MuseScore's file: " + drums(ms);
+    if (report.warnings.length || ms.measures[0].key !== -3) return report.warnings.join("; ") || "key " + ms.measures[0].key;
+    const viaXml = importMusicXML(exportMusicXML(ms), "x.musicxml").score;
+    const viaMs = importMSCX(exportMSCX(ms), "x.mscx").score;
+    const viaMidi = importMIDI(exportMIDI(ms), "x.mid").score;
+    for (const [k, sc] of [["MusicXML", viaXml], ["MuseScore", viaMs], ["MIDI", viaMidi]]) if (drums(sc) !== want || !M.isValidScore(sc)) return k + ": " + drums(sc);
+    return true;
+  });
   await check("drum staves: entry snaps to the kit, arrows step drums, no accidentals or clef changes (DESIGN §27)", () => {
     const sc = M.newScore({ preset: "drums", bars: 2, key: -3 }), st = sc.staves[0];
     const snare = M.fitPitch(st, { step: 0, oct: 5, alter: 1 }); // C♯5: the snare, with no sharp

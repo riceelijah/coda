@@ -11,11 +11,11 @@ export async function run({ check, eq, brief, fetchBytes, importBytes }) {
     return report.format === "MIDI" || report.format;
   });
 
-  await check("sample: format0.mid (channels, percussion skipped)", async () => {
-    const { score, report } = await importBytes(await fetchBytes("samples/format0.mid"), "format0.mid");
-    if (score.staves.length !== 1 || brief(score.staves[0]) !== "C4:q E4:q") return brief(score.staves[0]);
-    const w = report.warnings.join("; ");
-    return w.includes("Percussion notes skipped (channel 10): 2") || w;
+  await check("sample: format0.mid (channels; channel 10 becomes a drum staff, DESIGN §27)", async () => {
+    const { score } = await importBytes(await fetchBytes("samples/format0.mid"), "format0.mid");
+    if (score.staves.length !== 2 || brief(score.staves[0]) !== "C4:q E4:q") return score.staves.map(brief).join(" / ");
+    const d = score.staves[1], drums = d.bars[0].filter((e) => e.pitches.length).map((e) => e.pitches.map((p) => p.drum).join("+"));
+    return (d.clef === "percussion" && drums.join() === "36,38") || `${d.clef} ${drums}`;
   });
 
   await check("damaged MIDI gives a message", async () => {

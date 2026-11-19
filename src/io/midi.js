@@ -1,6 +1,7 @@
 // Standard MIDI File import. See docs/DESIGN.md §9.4.
 // MIDI holds performance data, not notation, so the result is a transcription.
-import { barCapacity, splitTicks, spellMidi, padBars, noteCount, PPQ } from "../model.js";
+import { barCapacity, splitTicks, spellMidi, padBars, noteCount, PPQ, isPerc } from "../model.js";
+import { isDrum, drumPitch } from "../drums.js";
 import { Report } from "./util.js";
 import { schedule } from "../play.js";
 
@@ -119,14 +120,14 @@ export function importMIDI(bytes, fileName = "") {
         if (!programs.has(src)) programs.set(src, e.program); else extraPrograms++;
         continue;
       }
-      if (e.ch === 9) { if (e.on) report.count("Percussion notes skipped (channel 10)"); continue; }
+      if (e.ch === 9 && e.on && !isDrum(e.note)) { report.count("Drums outside the General MIDI kit skipped"); continue; }
       const k = e.ch * 128 + e.note;
       if (e.on) { if (!open.has(k)) open.set(k, []); open.get(k).push(e.tick); continue; }
       const starts = open.get(k);
       if (!starts || !starts.length) continue;
       const start = starts.shift();
-      const src = format === 0 ? `c${e.ch}` : `t${ti}`;
-      if (!sources.has(src)) sources.set(src, { name: format === 0 ? `Channel ${e.ch + 1}` : names[ti], notes: [] });
+      const src = e.ch === 9 ? "drums" : format === 0 ? `c${e.ch}` : `t${ti}`; // every channel-10 note: one drum staff
+      if (!sources.has(src)) sources.set(src, { name: e.ch === 9 ? "Drums" : format === 0 ? `Channel ${e.ch + 1}` : names[ti], notes: [] });
       sources.get(src).notes.push({ start: q(start), end: q(e.tick), midi: e.note });
     }
     let hanging = 0;
@@ -140,7 +141,8 @@ export function importMIDI(bytes, fileName = "") {
   let n = 0;
   for (const [key0, src] of sources) {
     n++;
-    const notes = src.notes.map((x) => ({ ...x, end: Math.max(x.end, x.start + GRID) }));
+    const perc = key0 === "drums";
+    const notes = src.notes.map((x) => ({ ...x, end: perc ? x.start + PPQ : Math.max(x.end, x.start + GRID) })); // a drum hit lasts to the next one, a beat at most
     if (!notes.length) continue;
     notes.sort((a, b) => a.start - b.start || a.midi - b.midi);
     // one line of chords: group by start; a group's end is its shortest note, clipped to the next group
@@ -156,11 +158,12 @@ export function importMIDI(bytes, fileName = "") {
       if (next && g.end > next.start) { g.end = next.start; cut++; }
       else if (g.max > g.end) cut++;
     });
-    if (cut) report.count("Overlapping notes shortened to fit one voice", cut);
+    if (cut && !perc) report.count("Overlapping notes shortened to fit one voice", cut);
 
-    const staff = { name: src.name || `Track ${n}`, clef: "treble", brace: false, bars: [],
-      ...(programs.has(key0) ? { program: programs.get(key0) } : {}) };
-    const pitchesOf = (g) => [...g.midis].sort((a, b) => a - b).map((m) => spellMidi(m, key));
+    const staff = { name: src.name || `Track ${n}`, clef: perc ? "percussion" : "treble", brace: false, bars: [],
+      ...(programs.has(key0) && !perc ? { program: programs.get(key0) } : {}) };
+    const pitchesOf = (g) => (perc ? [...g.midis].map(drumPitch).sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step) || a.drum - b.drum)
+      : [...g.midis].sort((a, b) => a - b).map((m) => spellMidi(m, key)));
     const emit = (a, b, pitches) => {
       // split [a,b) at barlines, then into note values; tie all note pieces together
       const pieces = [];
@@ -172,8 +175,9 @@ export function importMIDI(bytes, fileName = "") {
       }
       pieces.forEach((p, i) => {
         while (staff.bars.length <= p.bar) staff.bars.push([]);
-        staff.bars[p.bar].push({ dur: p.d.dur, dots: p.d.dots, tie: !!pitches && i < pieces.length - 1,
-          pitches: pitches ? pitches.map((x) => ({ ...x })) : [] });
+        const on = pitches && (i === 0 || !perc); // a drum hit isn't tied over: the rest of it is rests
+        staff.bars[p.bar].push({ dur: p.d.dur, dots: p.d.dots, tie: !!on && !perc && i < pieces.length - 1,
+          pitches: on ? pitches.map((x) => ({ ...x })) : [] });
       });
     };
     let cursor = 0;
@@ -184,7 +188,7 @@ export function importMIDI(bytes, fileName = "") {
       cursor = g.end;
       g.midis.forEach((m) => { sum += m; cnt++; });
     }
-    if (cnt && sum / cnt < 60) staff.clef = "bass";
+    if (cnt && sum / cnt < 60 && !perc) staff.clef = "bass";
     score.staves.push(staff);
   }
   if (extraPrograms) report.count("Instrument changes mid-track (first one used)", extraPrograms);
@@ -223,8 +227,8 @@ export function exportMIDI(score) {
   }
   const tracks = [track(cond)];
   score.staves.forEach((st, s) => {
-    const ch = s % 15 < 9 ? s % 15 : s % 15 + 1; // skip channel 10 (percussion)
-    const evs = [{ tick: 0, bytes: meta(0x03, text(st.name || `Staff ${s + 1}`)) }, { tick: 0, bytes: [0xc0 | ch, st.program ?? 0] }];
+    const perc = isPerc(st), ch = perc ? 9 : s % 15 < 9 ? s % 15 : s % 15 + 1; // drums on channel 10 (DESIGN §27); others skip it
+    const evs = [{ tick: 0, bytes: meta(0x03, text(st.name || `Staff ${s + 1}`)) }, ...(perc ? [] : [{ tick: 0, bytes: [0xc0 | ch, st.program ?? 0] }])];
     const ons = [];
     for (const n of notes) if (n.staff === s) {
       ons.push({ tick: n.start, on: 1, bytes: [0x90 | ch, n.midi, n.vel ?? 80] }, { tick: n.end, on: 0, bytes: [0x80 | ch, n.midi, 0] });

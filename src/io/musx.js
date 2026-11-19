@@ -7,6 +7,7 @@ import { padBars, noteCount, tupletOk, durFromTicks, nearestDur, measuresFrom, s
   eventTicks, clearBrokenSpans, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, DYNS } from "../model.js";
 import { DYN_IN } from "./musicxml.js";
 import { gmByName } from "../gm.js";
+import { drumNear } from "../drums.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
 // Symmetric XOR keystream used for score.dat. Ported from the CC0 routine in
@@ -332,7 +333,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     const upper = si > 0 && braces.has(si - 1) ? score.staves[si - 1] : null; // lower staff of a braced pair
     if (upper) { if (upper.program !== undefined) staff.program = upper.program; }
     else if (gm) staff.program = gm.program;
-    else if (staff.name && !/piano/i.test(staff.name)) report.count("Parts with no instrument sound found (played as piano)"); // an unnamed staff has nothing to go on
+    else if (staff.name && !/piano/i.test(staff.name) && str(spec, "notationStyle") !== "percussion") report.count("Parts with no instrument sound found (played as piano)"); // an unnamed staff has nothing to go on
     const layerBar = (l, mi) => {
       if (l === 1) return staff.bars[mi];
       staff.layers ||= [];
@@ -502,7 +503,16 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     });
     staff.clef = clefFor(clefId);
     delete staff.lastClef;
-    if (!staff.clef) { staff.clef = "treble"; report.count("Unsupported clefs shown as treble"); }
+    // a Finale drum staff (DESIGN §27): its percussion map isn't read yet, so drums come from staff position
+    const perc = str(spec, "notationStyle") === "percussion";
+    if (perc) {
+      let n = 0;
+      for (const e of allLayers(staff).flat(2)) for (const ps of [e.pitches, e.grace || []]) ps.forEach((p, i) => { ps[i] = drumNear(p); n++; });
+      if (n) report.count("Finale drum maps aren't read yet: drums chosen by staff position", n);
+      Object.assign(staff, { clef: "percussion", brace: false });
+      delete staff.program; delete staff.clefs;
+      if (si > 0 && score.staves[si - 1]?.brace) score.staves[si - 1].brace = false;
+    } else if (!staff.clef) { staff.clef = "treble"; report.count("Unsupported clefs shown as treble"); }
 
     // a tie needs the same pitch next in its layer; ties into another voice are dropped
     for (const bars of allLayers(staff)) {
@@ -514,7 +524,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
       });
     }
     // notes are stored at concert pitch; Coda keeps them written
-    const t = trs[si];
+    const t = !perc && trs[si];
     if (t) {
       const all = allLayers(staff).flat(2);
       const ok = (p) => midi(p) - t[0] >= 0 && midi(p) - t[0] <= 127;

@@ -1,6 +1,7 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc } from "../model.js";
+import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { gmByName } from "../gm.js";
@@ -39,7 +40,7 @@ export function tpcToPitch(tpc, midiNum) {
   return { step, oct, alter };
 }
 
-const CLEF = { G: "treble", F: "bass", C3: "alto", C4: "tenor" };
+const CLEF = { G: "treble", F: "bass", C3: "alto", C4: "tenor", PERC: "percussion", PERC2: "percussion" };
 
 export function importMSCX(text, fileName = "", format = "MuseScore (uncompressed)") {
   const report = new Report(format);
@@ -60,7 +61,11 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     // part name against the General MIDI names (Flute, Violin, Trumpet…).
     const prog = parseInt(kid(kid(kid(part, "Instrument"), "Channel"), "program")?.getAttribute("value"), 10);
     let program = prog > 0 && prog <= 127 ? prog : undefined;
-    if (program === undefined && name) {
+    // a drum part (DESIGN §27): <Drum pitch> -> its <line> (half-spaces down from the top line)
+    const drums = txt(kid(part, "Instrument"), "useDrumset") === "1"
+      ? new Map(kids(kid(part, "Instrument"), "Drum").map((d) => [+d.getAttribute("pitch"), parseInt(txt(d, "line"), 10)])) : null;
+    if (drums) program = undefined;
+    else if (program === undefined && name) {
       const byName = gmByName(name);
       if (byName) program = byName.program;
       else if (!/piano/i.test(name)) report.count("Parts with no instrument sound found (played as piano)");
@@ -73,7 +78,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       if (Math.abs(tc) <= 36 && Math.abs(td) <= 21) transpose = [tc, td];
       else report.count("Transpositions out of range (ignored)");
     }
-    for (let k = 0; k < n; k++) decl.push({ name, brace: n === 2 && k === 0, program, transpose });
+    for (let k = 0; k < n; k++) decl.push(drums ? { name, brace: false, drums } : { name, brace: n === 2 && k === 0, program, transpose });
     if (n > 2) report.add(`A part with ${n} staves was split into separate staves without a brace`);
   });
 
@@ -105,6 +110,12 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     // a <Note>'s written pitch: pitch and tpc are concert; Coda keeps the written note (tpc2)
     const notePitch = (n) => {
       const pm = parseInt(txt(n, "pitch"), 10);
+      if (d.drums && Number.isFinite(pm)) { // the position from the file's drum set, else the kit's
+        const line = d.drums.get(pm), at = Number.isInteger(line) ? fromDiatonic(38 - line) : null;
+        if (isDrum(pm)) return at ? { ...at, alter: 0, drum: pm } : drumPitch(pm);
+        report.count("Drums outside the General MIDI kit (sound from their position)");
+        return drumNear(at || { step: 6, oct: 4 });
+      }
       const tpc = parseInt(txt(n, "tpc"), 10), tpc2 = parseInt(txt(n, "tpc2"), 10);
       if (!Number.isFinite(pm)) return null;
       const wm = pm - tc;
@@ -138,6 +149,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (!CLEF[t]) report.count(clef ? "Octave clefs shown as plain clefs" : `Unsupported clefs (${t}) shown as treble`);
             // clef changes (DESIGN §25): MuseScore writes one at a barline at the end of the bar before
             if (staff.clef === null) { staff.clef = clef || "treble"; break; }
+            if ((clef === "percussion") !== (staff.clef === "percussion")) { report.count("Changes to or from the percussion clef mid-part (not imported)"); break; }
             let at = mi;
             if (cur >= barCapacity(time)) at = mi + 1;
             else if (cur > 0) report.count("Clef changes inside a bar moved to its start");
@@ -224,7 +236,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               for (const n of kids(el, "Note")) {
                 const p = notePitch(n);
                 if (!p) continue;
-                if (!ev.pitches.some((q) => q.step === p.step && q.oct === p.oct)) ev.pitches.push(p);
+                if (!ev.pitches.some((q) => q.step === p.step && q.oct === p.oct && q.drum === p.drum)) ev.pitches.push(p);
                 const tieSp = kids(n, "Spanner").find((s) => s.getAttribute("type") === "Tie" && kid(s, "next"));
                 if (tieSp || kid(n, "Tie")) ev.tie = true;
               }
@@ -273,16 +285,25 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
         staff.layers[vi - 1][mi] = bar;
       }
       });
-      if (si === 0) firstAttrs.push({ key, time: [...time], sym });
+      (firstAttrs[si] ||= []).push({ key, time: [...time], sym });
     });
     if (pendDyn.some(Boolean)) report.count("Dynamics after the last note (not imported)");
     if (pendHp.some(Boolean)) report.count("Hairpins with no notes (not imported)");
     if (!staff.clef) staff.clef = "treble";
+    if (d.drums || staff.clef === "percussion") { // DESIGN §27
+      if (!d.drums) { // a percussion clef without a drum set: drums by position
+        let n = 0;
+        for (const e of allLayers(staff).flat(2)) for (const ps of [e.pitches, e.grace || []]) ps.forEach((p, i) => { ps[i] = drumNear(p); n++; });
+        if (n) report.count("Drum notes with no instrument (sound from their position)", n);
+      }
+      staff.clef = "percussion"; delete staff.clefs; delete staff.program; delete staff.transpose; staff.brace = false;
+      if (si > 0 && score.staves[si - 1]?.brace) score.staves[si - 1].brace = false;
+    }
     score.staves.push(staff);
   });
   if (!score.staves.length) throw new Error("This MuseScore file has no staves.");
 
-  score.measures.push(...measuresFrom(firstAttrs));
+  score.measures.push(...measuresFrom(firstAttrs[score.staves.findIndex((st) => st.clef !== "percussion")] || firstAttrs[0])); // the key from the first staff that isn't drums
   const broken = clearBrokenSpans(score);
   if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
   score.tempo = Math.max(20, Math.min(400, score.tempo || 100));
@@ -299,7 +320,11 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const TYPE_NAME = { w: "whole", h: "half", q: "quarter", 8: "eighth", 16: "16th", 32: "32nd" };
-const CLEF_OUT = { treble: "G", bass: "F", alto: "C3", tenor: "C4" };
+const CLEF_OUT = { treble: "G", bass: "F", alto: "C3", tenor: "C4", percussion: "PERC" };
+// the kit as a MuseScore drum set (DESIGN §27): line = half-spaces down from the top line
+const HEAD_MS = { x: "cross", cx: "xcircle", d: "diamond", t: "triangle-up" };
+const drumset = () => [...DRUMS.values()].map((d) => `<Drum pitch="${d.n}"><head>${HEAD_MS[d.head] || "normal"}</head><line>${38 - (d.oct * 7 + d.step)}</line>` +
+  `<voice>0</voice><name>${esc(d.name)}</name><stem>1</stem></Drum>`).join("");
 const ARTIC_OUT = { staccato: "articStaccatoAbove", accent: "articAccentAbove", tenuto: "articTenutoAbove", marcato: "articMarcatoAbove" };
 const gcd = (a, b) => (b ? gcd(b, a % b) : a);
 const frac = (ticks) => { const g = gcd(Math.abs(ticks), 1920) || 1; return `${ticks / g}/${1920 / g}`; };
@@ -330,11 +355,11 @@ export function exportMSCX(score) {
   for (const g of partGroups(score)) {
     const st = score.staves[g[0]];
     x.push("<Part>");
-    g.forEach((s, k) => x.push(`<Staff id="${++id}"><StaffType group="pitched"><name>stdNormal</name></StaffType>` +
+    g.forEach((s, k) => x.push(`<Staff id="${++id}">${isPerc(score.staves[s]) ? '<StaffType group="percussion"><name>perc5Line</name><keysig>0</keysig></StaffType>' : '<StaffType group="pitched"><name>stdNormal</name></StaffType>'}` +
       (g.length > 1 && k === 0 ? '<bracket type="1" span="2" col="0"/><barLineSpan>1</barLineSpan>' : "") + "</Staff>"));
     x.push(`<trackName>${esc(st.name || "")}</trackName><Instrument><longName>${esc(st.name || "")}</longName>` +
       `<trackName>${esc(st.name || "")}</trackName>${g.map((s, k) => `<clef staff="${k + 1}">${CLEF_OUT[score.staves[s].clef]}</clef>`).join("")}${st.transpose ? `<transposeDiatonic>${st.transpose[1]}</transposeDiatonic><transposeChromatic>${st.transpose[0]}</transposeChromatic>` : ""}` +
-      `<Channel><program value="${st.program ?? 0}"/></Channel></Instrument></Part>`);
+      (isPerc(st) ? `<useDrumset>1</useDrumset>${drumset()}<Channel><program value="0"/></Channel>` : `<Channel><program value="${st.program ?? 0}"/></Channel>`) + "</Instrument></Part>");
   }
   score.staves.forEach((st, s) => {
     x.push(`<Staff id="${s + 1}">`);
@@ -431,7 +456,7 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
       const t = ties[b + ":" + i] || { next: {}, prev: {} };
       const arts = (e.marks || []).filter((m) => ARTIC_OUT[m]).map((m) => `<Articulation><subtype>${ARTIC_OUT[m]}</subtype></Articulation>`).join("");
       const [tc, td] = st.transpose || [0, 0]; // pitch and tpc concert, tpc2 written
-      const pitchXml = (p) => `<pitch>${midi(p) + tc}</pitch><tpc>${tpcOf(tc || td ? shiftPitch(p, tc, td) : p)}</tpc>${tc || td ? `<tpc2>${tpcOf(p)}</tpc2>` : ""}`;
+      const pitchXml = (p) => p.drum ? `<pitch>${p.drum}</pitch><tpc>${tpcOf(spellMidi(p.drum, 0))}</tpc>${HEAD_MS[DRUMS.get(p.drum).head] ? `<head>${HEAD_MS[DRUMS.get(p.drum).head]}</head>` : ""}` : `<pitch>${midi(p) + tc}</pitch><tpc>${tpcOf(tc || td ? shiftPitch(p, tc, td) : p)}</tpc>${tc || td ? `<tpc2>${tpcOf(p)}</tpc2>` : ""}`;
       const notes = e.pitches.map((p) => {
         const mm = midi(p);
         const sp = (t.next[mm] ? `<Spanner type="Tie"><Tie/><next>${t.next[mm]}</next></Spanner>` : "") +
