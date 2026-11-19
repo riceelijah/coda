@@ -792,6 +792,33 @@ export async function run({ check, eq }) {
     return !!M.moveDrumNote(t, 0, 0, 0, 1) || "moved a pitched note";
   });
 
+  await check("tempo changes: model, timing, and MIDI, MusicXML and MuseScore round trips (DESIGN §29)", () => {
+    const s = M.newScore({ bars: 4, tempo: 120 });
+    s.staves[0].bars = s.staves[0].bars.map(() => [ev("w", "C5")]);
+    if (M.setTempo(s, 2, 60) || M.setTempo(s, 3, 60) || s.measures[3].tempo) return "same tempo stored as a change";
+    if (M.tempoAt(s, 1) !== 120 || M.tempoAt(s, 3) !== 60 || !M.isValidScore(s)) return "tempoAt";
+    if (!M.setTempo(s, 1, 500) || M.isValidScore({ ...s, measures: [{ ...s.measures[0], tempo: 90 }, ...s.measures.slice(1)] })) return "bad tempo allowed";
+    const { timeOf, total } = schedule(s); // two bars at 120 (2 s each), two at 60 (4 s each)
+    if (timeOf(1920) !== 2 || timeOf(2 * 1920) !== 4 || timeOf(total) !== 12) return "timeOf " + [timeOf(1920), timeOf(3840), timeOf(total)];
+    const t = (sc) => [sc.tempo, ...sc.measures.map((m) => m.tempo || 0)].join();
+    const want = t(s);
+    const mid = importMIDI(exportMIDI(s), "t.mid").score, xml = importMusicXML(exportMusicXML(s), "t.musicxml").score, ms = importMSCX(exportMSCX(s), "t.mscx").score;
+    for (const [n, sc] of [["MIDI", mid], ["MusicXML", xml], ["MuseScore", ms]]) if (t(sc) !== want) return n + " " + t(sc);
+    // a change on a deleted bar moves on; deleting bar 1 makes bar 2's tempo the score's
+    M.deleteMeasure(s, 2);
+    if (t(s) !== "120,0,0,60") return "delete " + t(s);
+    M.setTempo(s, 1, 90); M.deleteMeasure(s, 0);
+    if (t(s) !== "90,0,60") return "delete bar 1 " + t(s);
+    // another program's metronome in dotted quarters, mid-bar
+    const x = importMusicXML(`<score-partwise><part-list><score-part id="P1"><part-name>A</part-name></score-part></part-list><part id="P1">
+      <measure number="1"><attributes><divisions>1</divisions><time><beats>6</beats><beat-type>8</beat-type></time></attributes>
+      <note><rest/><duration>3</duration></note></measure>
+      <measure number="2"><note><rest/><duration>1</duration></note><direction><direction-type><metronome><beat-unit>quarter</beat-unit><beat-unit-dot/><per-minute>80</per-minute></metronome></direction-type></direction>
+      <note><rest/><duration>2</duration></note></measure></part></score-partwise>`, "m.xml");
+    if (t(x.score) !== "120,0,0" || !JSON.stringify(x.report).includes("moved to the bar")) return "metronome " + t(x.score) + JSON.stringify(x.report);
+    return true;
+  });
+
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;

@@ -3,7 +3,7 @@
 import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport } from "../model.js";
 import { parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
-import { completeTuplet, DYN_IN } from "./musicxml.js";
+import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { gmByName } from "../gm.js";
 
@@ -101,6 +101,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   const firstAttrs = [];
   const rep = []; // per bar: repeats and navigation, from the first staff (DESIGN §28)
   const mark = (b, k, v) => { (rep[b] ||= {})[k] = v; };
+  const tempi = []; // per bar: tempo from its start (DESIGN §29)
   kids(sc, "Staff").forEach((stEl, si) => {
     const d = decl[si] || { name: "", brace: false };
     const staff = { name: d.name, clef: null, brace: d.brace, bars: [], ...(d.program !== undefined ? { program: d.program } : {}),
@@ -181,7 +182,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             break;
           }
           case "Tempo":
-            if (!score.tempo) score.tempo = Math.round(parseFloat(txt(el, "tempo")) * 60) || 0;
+            readTempo(tempi, mi, cur, parseFloat(txt(el, "tempo")) * 60, report); // beats per second
             break;
           case "Tuplet": {
             const ratio = [+txt(el, "actualNotes"), +txt(el, "normalNotes")];
@@ -330,8 +331,8 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   score.measures.push(...measuresFrom(firstAttrs[score.staves.findIndex((st) => st.clef !== "percussion")] || firstAttrs[0])); // the key from the first staff that isn't drums
   const broken = clearBrokenSpans(score);
   if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
-  score.tempo = Math.max(20, Math.min(400, score.tempo || 100));
   padBars(score);
+  applyTempi(score, tempi, report);
   rep.forEach((r, b) => { if (b < score.measures.length) Object.assign(score.measures[b], r); else report.count("Repeat marks after the last bar (not imported)"); });
   const lostClefs = finishClefs(score);
   if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
@@ -406,7 +407,8 @@ export function exportMSCX(score) {
           if (b === 0 || m.key !== undefined) x.push(`<KeySig><concertKey>${a.key}</concertKey>${st.transpose ? `<actualKey>${keyAt(score, s, b)}</actualKey>` : ""}</KeySig>`);
           if (b === 0 || m.time) x.push(`<TimeSig>${a.sym ? `<subtype>${a.sym === "common" ? 1 : 2}</subtype>` : ""}<sigN>${a.time[0]}</sigN><sigD>${a.time[1]}</sigD></TimeSig>`);
           if (s === 0) x.push(...navStart(score.measures, b));
-          if (b === 0 && s === 0) x.push(`<Tempo><tempo>${score.tempo / 60}</tempo><followText>1</followText><text><sym>metNoteQuarterUp</sym> = ${score.tempo}</text></Tempo>`);
+          const bpm = b === 0 ? score.tempo : m.tempo; // tempo changes (DESIGN §29)
+          if (bpm && s === 0) x.push(`<Tempo><tempo>${bpm / 60}</tempo><followText>1</followText><text><sym>metNoteQuarterUp</sym> = ${bpm}</text></Tempo>`);
         }
         const bar = layers[v][b];
         if (v === 0 && !bar.length) x.push(`<Rest><durationType>measure</durationType><duration>${frac(cap)}</duration></Rest>`);

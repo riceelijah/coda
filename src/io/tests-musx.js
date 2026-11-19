@@ -181,7 +181,7 @@ export async function run({ check, brief, fetchBytes, importBytes }) {
     const got = sc.staves.map((st) => `${st.transpose || "-"} ${brief(st)} ${st.bars[0].map((e) => (e.marks || []).join("+")).join(",")}`).join(" / ");
     if (got !== "- C4:h r:h staccato+accent,fermata / -2,-1 D4:w staccato / -9,-5 A4:w ") return got;
     return (/Articulations on rests \(not imported\): 1/.test(w) && /Other articulations \(not imported\): 1/.test(w) &&
-      /Chromatic transpositions/.test(w) && /Expressions .* skipped: 1/.test(w)) || w;
+      /Chromatic transpositions/.test(w) && /Text expressions \(not imported\): 1/.test(w)) || w;
   });
 
   await check("musx: hairpins, clef changes, SMuFL dynamics, lyrics on rests, graces before rests (inline EnigmaXML)", async () => {

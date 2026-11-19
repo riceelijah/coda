@@ -5,7 +5,7 @@
 // (key/pitch rules ported from its KeySignature::calcPitch).
 import { padBars, noteCount, tupletOk, durFromTicks, nearestDur, measuresFrom, setMark, splitTicks, barTicks, barCapacity, allLayers, shiftPitch, midi, MAX_LAYERS,
   eventTicks, clearBrokenSpans, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, DYNS, toDrumStaff, drumReport, isPerc } from "../model.js";
-import { DYN_IN } from "./musicxml.js";
+import { DYN_IN, readTempo, applyTempi } from "./musicxml.js";
 import { gmByName } from "../gm.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -548,18 +548,18 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     score.staves.push(staff);
   });
 
-  // tempo: a tempo mark at the very start of bar 1
+  // tempo marks (DESIGN §29): expressions that set the playback tempo, value × auxdata1/1024 quarters a minute
   const exprDefs = byCmper(others("textExprDef"));
   const assigns = others("measExprAssign");
-  const t0 = assigns.find((a) => a.getAttribute("cmper") === measures[0].cmper && !num(a, "horzEduOff", 0) &&
-    str(exprDefs.get(String(num(a, "textExprID", -1))), "playType") === "time" && has(exprDefs.get(String(num(a, "textExprID", -1))), "useAuxData"));
-  if (t0) {
-    const d = exprDefs.get(String(num(t0, "textExprID", -1)));
-    const bpm = Math.round((num(d, "value", 0) * num(d, "auxdata1", 1024)) / 1024);
-    if (bpm > 0) score.tempo = Math.max(20, Math.min(400, bpm));
+  const tempoDef = (a) => { const d = exprDefs.get(String(num(a, "textExprID", -1))); return str(d, "playType") === "time" && has(d, "useAuxData") ? d : null; };
+  const tempi = [], tempoMarks = new Set(), mIndex = new Map(measures.map((m, i) => [m.cmper, i]));
+  for (const a of assigns) {
+    const d = tempoDef(a), mi = mIndex.get(a.getAttribute("cmper"));
+    if (!d || mi === undefined) continue;
+    tempoMarks.add(a);
+    readTempo(tempi, mi, num(a, "horzEduOff", 0), (num(d, "value", 0) * num(d, "auxdata1", 1024)) / 1024, report);
   }
   // the event at file time t (ticks) in a layer's bar: one starting within ~4 EDU, else the one covering t
-  const mIndex = new Map(measures.map((m, i) => [m.cmper, i]));
   const bar = (si, L, mi) => (L === 1 ? score.staves[si]?.bars[mi] : score.staves[si]?.layers?.[L - 2]?.[mi]) || [];
   const eventAt = (evs, t) => evs.find((ev) => Math.abs(startOf.get(ev) - t) <= 2) ||
     evs.find((ev) => startOf.get(ev) <= t && t < startOf.get(ev) + eventTicks(ev)) || null;
@@ -586,7 +586,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
   const dynCache = new Map();
   let expr = 0;
   for (const a of assigns) {
-    if (a === t0) continue;
+    if (tempoMarks.has(a)) continue;
     const defId = String(num(a, "textExprID", -1));
     if (!dynCache.has(defId)) dynCache.set(defId, dynOf(exprDefs.get(defId)));
     const d = dynCache.get(defId), mi = mIndex.get(a.getAttribute("cmper"));
@@ -610,7 +610,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     else if (ev.dyn) report.count("Two dynamics on one note (the first kept)");
     else ev.dyn = d.dyn;
   }
-  if (expr) report.count("Expressions (tempo and text marks) skipped", expr);
+  if (expr) report.count("Text expressions (not imported)", expr);
 
   // slurs and hairpins (DESIGN §23) from smart shapes; the rest are counted
   const SLURS = /^(slur|dashSlur|dashContourSlur)(Up|Down|Auto)$|^$/;
@@ -653,6 +653,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     }
   }
   padBars(score);
+  applyTempi(score, tempi, report);
   const broken = clearBrokenSpans(score);
   if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
   const lateClefs = finishClefs(score);

@@ -1004,7 +1004,7 @@ function closeSetup() {
       ...t, bars: +$("f-bars").value || 16, program: +$("f-sound").value,
     }), { save: false });
   } else {
-    edit((sc) => { sc.title = title; sc.composer = composer; sc.tempo = tempo; return null; });
+    edit((sc) => { sc.title = title; sc.composer = composer; return M.setTempo(sc, 0, tempo); });
   }
 }
 
@@ -1313,6 +1313,15 @@ function barMark(k, val) {
   const b = repBar(), m = state.score.measures[b], on = val === true ? !m[k] : m[k] !== val;
   if (edit((sc) => M.setBarMark(sc, b, k, on && val))) message(`${on ? "" : "Removed: "}${k === "jump" ? M.JUMPS[val] : document.getElementById("r-" + k).textContent} at bar ${b + 1}`);
 }
+// tempo changes (DESIGN §29): empty, or the tempo before, removes the change
+async function tempoFrom() {
+  const b = repBar(), sc = state.score;
+  const v = await ask(`Tempo from bar ${b + 1}`, "Quarter notes a minute (20–400)" + (b ? "; empty for no change" : ""), M.tempoAt(sc, b));
+  if (v === null) return;
+  const bpm = v.trim() === "" && b ? M.tempoAt(sc, b - 1) : +v;
+  if (!M.okBpm(bpm)) { message("A tempo is a whole number from 20 to 400", true); return; }
+  if (edit((s) => M.setTempo(s, b, bpm))) message(`Tempo ${bpm} from bar ${b + 1}`);
+}
 async function repeatTimes() {
   const b = repBar(), v = await ask(`End repeat at bar ${b + 1}`, `Times the section plays (2–${M.MAX_REPEAT})`, state.score.measures[b].repEnd || 3);
   if (v === null) return;
@@ -1389,6 +1398,7 @@ const CMD = {
   ...Object.fromEntries(M.BAR_FLAGS.map((k) => ["r-" + k, { run: () => barMark(k, true) }])),
   "r-repEnd": { run: () => barMark("repEnd", 2) },
   "r-times": { run: () => repeatTimes() },
+  "b-tempo": { run: () => tempoFrom() },
   ...Object.fromEntries(Object.keys(M.JUMPS).map((j) => ["r-" + j, { run: () => barMark("jump", j) }])),
   "r-volta1": { run: () => ending([1]) },
   "r-volta2": { run: () => ending([2]) },
@@ -1786,7 +1796,7 @@ function init() {
   $("report-close").onclick = () => ($("report").style.display = "none");
   $("tempo").onchange = (e) => {
     const v = Math.max(20, Math.min(400, Math.round(+e.target.value) || 100));
-    edit((sc) => { sc.tempo = v; return null; });
+    edit((sc) => M.setTempo(sc, 0, v));
   };
   const systems = $("systems");
   systems.addEventListener("click", onClick);

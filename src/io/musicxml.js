@@ -3,7 +3,7 @@ import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
   tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport,
 } from "../model.js";
-import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT } from "../model.js";
+import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -176,8 +176,9 @@ export function exportMusicXML(score) {
         }
       }
       if (attrs.length) x.push(`<attributes>${attrs.join("")}</attributes>`);
-      if (b === 0 && gi === 0) {
-        x.push(`<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${score.tempo}</per-minute></metronome></direction-type><sound tempo="${score.tempo}"/></direction>`);
+      const bpm = b === 0 ? score.tempo : score.measures[b].tempo; // tempo changes (DESIGN §29)
+      if (bpm && gi === 0) {
+        x.push(`<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${bpm}</per-minute></metronome></direction-type><sound tempo="${bpm}"/></direction>`);
       }
       if (gi === 0) x.push(...navXml(score.measures[b], true));
       // every layer bar with notes, as voice staff×4 + layer + 1, separated by <backup> (DESIGN §15)
@@ -285,6 +286,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   const score = { title: "", composer: "", tempo: 0, measures: [], staves: [] };
   const partAttrs = []; // per part, per bar: {key, time}; the key comes from the first part that isn't drums
   const rep = []; // per bar: repeat and navigation marks (DESIGN §28)
+  const tempi = []; // per bar: the tempo from its start, in quarters per minute (DESIGN §29)
   let ending = null; // numbers of the ending open in the first part
   kids(root, "part").forEach((part, pi) => {
     const measures = kids(part, "measure");
@@ -421,9 +423,14 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
             }
           }
           const snd = tag === "sound" ? el : kid(el, "sound");
-          if (!score.tempo && snd && snd.getAttribute("tempo")) score.tempo = Math.round(+snd.getAttribute("tempo")) || 0;
-          const pm = el.querySelector && el.querySelector("metronome > per-minute");
-          if (!score.tempo && pm) score.tempo = Math.round(parseFloat(pm.textContent)) || 0;
+          let bpm = parseFloat(snd?.getAttribute("tempo")); // <sound tempo> is in quarters already
+          const mt = !(bpm > 0) && tag === "direction" && el.querySelector("metronome");
+          if (mt) { // a metronome mark in its own beat unit
+            const pm = parseFloat(txt(mt, "per-minute")), u = BEAT_Q[txt(mt, "beat-unit")];
+            if (pm > 0 && u) bpm = pm * u * (kid(mt, "beat-unit-dot") ? 1.5 : 1);
+            else report.count("Metronome marks Coda can't read (not imported)");
+          }
+          readTempo(tempi, mi, pos.t, bpm, report);
         } else if (tag === "backup" || tag === "forward") {
           const d = Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
           pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
@@ -454,15 +461,33 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     fileName.replace(/\.[^.]+$/, "") || "Untitled").trim();
   const comp = [...root.querySelectorAll("identification > creator")].find((c) => c.getAttribute("type") === "composer");
   score.composer = comp ? comp.textContent.trim() : "";
-  if (!score.tempo) score.tempo = 100;
-  score.tempo = Math.max(20, Math.min(400, score.tempo));
   padBars(score);
+  applyTempi(score, tempi, report);
   rep.forEach((r, b) => { if (b < score.measures.length) Object.assign(score.measures[b], r); else report.count("Repeat marks after the last bar (not imported)"); });
   const lostClefs = finishClefs(score);
   if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
   report.notes = noteCount(score);
   return { score, report: report.done() };
 }
+
+// A tempo read at tick `at` of bar b into tempi[] (quarters per minute): one per bar, at its start.
+export function readTempo(tempi, b, at, bpm, report) {
+  if (!(bpm > 0)) return;
+  if (tempi[b] === undefined) { tempi[b] = bpm; if (at) report.count("Tempo changes inside a bar moved to the bar's start"); }
+  else if (Math.round(bpm) !== Math.round(tempi[b])) report.count("Tempo changes skipped (one per bar is kept)");
+}
+// tempi[] into the score (after padBars). No tempo at bar 1: the first one found.
+export function applyTempi(score, tempi, report) {
+  score.tempo = clampBpm(tempi.find((t) => t) || 100);
+  tempi.forEach((t, b) => {
+    if (b >= score.measures.length) report.count("Tempo changes after the last bar (not imported)");
+    else if (b) setTempo(score, b, clampBpm(t));
+    if (Math.round(t) !== clampBpm(t)) report.count("Tempos outside 20–400 set to the nearest");
+  });
+}
+
+// a metronome beat unit in quarter notes
+const BEAT_Q = { whole: 4, half: 2, quarter: 1, eighth: 0.5, "16th": 0.25, "32nd": 0.125 };
 
 // MusicXML dynamics -> Coda's set; rarer ones go to the nearest (DESIGN §22)
 export const DYN_IN = { ppp: "ppp", pp: "pp", p: "p", mp: "mp", mf: "mf", f: "f", ff: "ff", fff: "fff", fp: "fp", sf: "sf", sfz: "sfz", fz: "fz",

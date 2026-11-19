@@ -350,6 +350,9 @@ function repeatMarks(VFl, score, b, s, stave) {
   }
   for (const key of ["segno", "coda", "toCoda", "fine"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]], up);
   if (m.jump) stave.setRepetitionType(VFl.Repetition.type[REP_VF[m.jump]], up);
+  // tempo changes (DESIGN §29); bar 1's tempo is shown only when the score has changes
+  const bpm = b ? m.tempo : ms.some((x) => x.tempo) && score.tempo;
+  if (bpm) stave.setTempo({ duration: "q", bpm }, up - (m.volta ? 15 : 0));
 }
 
 // Is (b, i) selected? sel may carry `end` for a range (DESIGN §11.7).
