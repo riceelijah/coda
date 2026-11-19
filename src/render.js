@@ -13,6 +13,9 @@ const RIGHT_PAD = 4;     // keeps the closing barline inside the drawing, which 
 const KEY_NAMES = ["Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#"];
 const BRASS = new Set(["scoop", "fall", "doit"]); // VexFlow jazz ornaments of the same names
 const MARK_VF = { fermata: "a@", staccato: "a.", accent: "a>", tenuto: "a-", marcato: "a^" };
+// DESIGN §34. VexFlow's "mordent" has no stroke, so it draws Coda's invMordent, and the other way round.
+const ORN_VF = { trill: "tr", mordent: "mordent_inverted", invMordent: "mordent", turn: "turn" };
+const AFTER_VF = { breath: "breathMarkComma", caesura: "caesura" }; // SMuFL glyphs, drawn after the note
 const REST_KEY = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3", percussion: "b/4" };
 // rests above / below the middle when two layers share a bar
 const REST_KEY_LAYER = { treble: ["e/5", "f/4"], bass: ["g/3", "a/2"], alto: ["f/4", "g/3"], tenor: ["d/4", "e/3"], percussion: ["e/5", "f/4"] };
@@ -115,6 +118,10 @@ function makeNote(ev, clef, stem = 0) {
     for (const m of ev.marks) {
       if (rest && m !== "fermata") continue;
       if (BRASS.has(m)) { keys.forEach((_, k) => note.addModifier(new VFl.Ornament(m), k)); continue; } // beside each notehead (DESIGN §31)
+      if (ORN_VF[m]) { note.addModifier(new VFl.Ornament(ORN_VF[m]), 0); continue; }
+      if (m === "tremolo") { note.addModifier(new VFl.Tremolo(3), 0); continue; }
+      if (m === "arpeggio") { if (keys.length > 1) note.addModifier(new VFl.Stroke(VFl.Stroke.Type.ARPEGGIO_DIRECTIONLESS), 0); continue; }
+      if (AFTER_VF[m]) { note.addModifier(new VFl.Articulation(AFTER_VF[m]).setPosition(P.ABOVE).setXShift(18), 0); continue; }
       const above = stem ? stem > 0 : m === "fermata" || down;
       note.addModifier(new VFl.Articulation(MARK_VF[m]).setPosition(above ? P.ABOVE : P.BELOW), 0);
     }

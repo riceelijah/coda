@@ -136,7 +136,7 @@ export async function run({ check, eq }) {
     M.toggleMark([r], "fermata");
     if (!eq(r.marks, ["fermata"])) return "fermata on a rest";
     const s = M.newScore({ bars: 1 });
-    s.staves[0].bars[0] = [{ ...ev("w", "C4"), marks: ["trill"] }];
+    s.staves[0].bars[0] = [{ ...ev("w", "C4"), marks: ["wobble"] }];
     if (M.isValidScore(s)) return "unknown mark accepted";
     s.staves[0].bars[0] = [ev("h", "C4", { marks: ["staccato"] }), ev("h", "D4")];
     const sn = schedule(s).notes;
@@ -850,14 +850,14 @@ export async function run({ check, eq }) {
     const xml = `<score-partwise version="4.0"><part-list><score-part id="P1"><part-name>A</part-name></score-part></part-list>
       <part id="P1"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
       <harmony><root><root-step>C</root-step></root><kind>major</kind></harmony><print new-system="yes"/>
-      <note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration><type>whole</type><notations><ornaments><trill-mark/></ornaments></notations></note></measure></part></score-partwise>`;
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration><type>whole</type><notations><ornaments><schleifer/></ornaments></notations></note></measure></part></score-partwise>`;
     const a = importMusicXML(xml, "u.xml").report.warnings.join("; ");
     if (!/Chord symbols/.test(a) || !/Ornaments/.test(a) || /print/.test(a)) return "MusicXML: " + a;
     const s = M.newScore({ bars: 1 });
     s.staves[0].bars[0] = [{ dur: "w", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0 }] }];
-    const ms = exportMSCX(s).replace("<Chord>", "<Harmony><root>14</root></Harmony><Chord><Ornament><subtype>ornamentTrill</subtype></Ornament>");
+    const ms = exportMSCX(s).replace("<Chord>", "<Harmony><root>14</root></Harmony><Chord><Ornament><subtype>ornamentPrecompSlide</subtype></Ornament>");
     const b = importMSCX(ms, "u.mscx").report.warnings.join("; ");
-    return (/Chord symbols/.test(b) && /Ornaments/.test(b)) || "MuseScore: " + b;
+    return (/Chord symbols/.test(b) && /ornaments/.test(b)) || "MuseScore: " + b;
   });
 
   await check("short bars: a pickup holds its length, plays short, numbers from 0, round trips MusicXML and MuseScore (DESIGN §33)", () => {
@@ -883,6 +883,26 @@ export async function run({ check, eq }) {
     if (M.barLen(s, 2) !== 1440 || !M.isValidScore(s)) return "clamp";
     const old = M.newScore({ bars: 1 }); s.measures[1].len = 30;
     return (M.isValidScore(old) && !M.isValidScore(s)) || "validation";
+  });
+
+  await check("ornaments, tremolo, arpeggio, breath marks: one ornament a note, MusicXML and MuseScore round trips, drawn (DESIGN §34)", () => {
+    const s = M.newScore({ bars: 1 });
+    const n = (st, more) => ({ dur: "q", dots: 0, tie: false, pitches: [{ step: st, oct: 4, alter: 0 }, ...(more ? [{ step: st + 2, oct: 4, alter: 0 }] : [])] });
+    s.staves[0].bars[0] = [n(0), n(1), n(2, true), n(3)];
+    const [a, b, c, d] = s.staves[0].bars[0];
+    M.setMark(a, "trill", true); M.setMark(a, "turn", true);
+    if (a.marks.join() !== "turn") return "one ornament: " + a.marks;
+    M.setMark(b, "mordent", true); M.setMark(b, "breath", true);
+    M.setMark(c, "arpeggio", true); M.setMark(c, "tremolo", true);
+    M.setMark(d, "invMordent", true); M.setMark(d, "caesura", true);
+    const want = JSON.stringify(s.staves[0].bars[0].map((e) => e.marks));
+    const x = importMusicXML(exportMusicXML(s), "o.musicxml"), m = importMSCX(exportMSCX(s), "o.mscx");
+    for (const [k, r] of [["MusicXML", x], ["MuseScore", m]]) {
+      const got = JSON.stringify(r.score.staves[0].bars[0].map((e) => e.marks));
+      const w = r.report.warnings.filter((x) => !/instrument sound/.test(x));
+      if (got !== want || w.length) return `${k}: ${got} ${w}`;
+    }
+    return M.isValidScore(s) || "validation";
   });
 
   await check("drum notes move a line keeping their drum, as a file's own drum map has them (DESIGN §28)", () => {

@@ -10,7 +10,10 @@ export const DURS = ["w", "h", "q", "8", "16", "32"];
 export const BASE = { w: 1920, h: 960, q: 480, 8: 240, 16: 120, 32: 60 };
 export const CLEFS = ["treble", "bass", "alto", "tenor"];
 // Marks a note or rest can carry, in drawing and file order (DESIGN §16). Only a fermata goes on a rest.
-export const MARKS = ["fermata", "staccato", "accent", "tenuto", "marcato", "scoop", "fall", "doit"];
+export const MARKS = ["fermata", "staccato", "accent", "tenuto", "marcato", "scoop", "fall", "doit",
+  "trill", "mordent", "invMordent", "turn", "tremolo", "arpeggio", "breath", "caesura"]; // DESIGN §34 from trill on
+// One ornament per note; mordent is MusicXML's (with the stroke, down to the note below), invMordent the one without.
+export const ORNAMENTS = ["trill", "mordent", "invMordent", "turn"];
 export const STEP_NAMES = "CDEFGAB";
 const STEP_SEMIS = [0, 2, 4, 5, 7, 9, 11];
 const SHARP_ORDER = [3, 0, 4, 1, 5, 2, 6];
@@ -461,6 +464,9 @@ export function setMark(ev, mark, on) {
   if (on) m.add(mark); else m.delete(mark);
   if (on && mark === "fall") m.delete("doit"); // a note ends one way (DESIGN §31)
   if (on && mark === "doit") m.delete("fall");
+  if (on && ORNAMENTS.includes(mark)) for (const o of ORNAMENTS) if (o !== mark) m.delete(o);
+  if (on && mark === "breath") m.delete("caesura");
+  if (on && mark === "caesura") m.delete("breath");
   if (m.size) ev.marks = MARKS.filter((x) => m.has(x)); else delete ev.marks;
 }
 

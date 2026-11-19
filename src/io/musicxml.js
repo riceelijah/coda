@@ -14,8 +14,11 @@ const SHORTER = new Set(["64th", "128th", "256th", "512th", "1024th"]);
 const CLEF_OUT = { treble: ["G", 2], bass: ["F", 4], alto: ["C", 3], tenor: ["C", 4], percussion: ["percussion", 0] };
 
 // Marks (DESIGN §16): MusicXML <articulations> children <-> Coda mark names.
-const ARTIC_OUT = { staccato: "<staccato/>", accent: "<accent/>", tenuto: "<tenuto/>", marcato: '<strong-accent type="up"/>', scoop: "<scoop/>", fall: "<falloff/>", doit: "<doit/>" };
-const ARTIC_IN = { staccato: "staccato", accent: "accent", tenuto: "tenuto", "strong-accent": "marcato", scoop: "scoop", falloff: "fall", doit: "doit" };
+const ARTIC_OUT = { staccato: "<staccato/>", accent: "<accent/>", tenuto: "<tenuto/>", marcato: '<strong-accent type="up"/>', scoop: "<scoop/>", fall: "<falloff/>", doit: "<doit/>", breath: "<breath-mark/>", caesura: "<caesura/>" };
+const ARTIC_IN = { staccato: "staccato", accent: "accent", tenuto: "tenuto", "strong-accent": "marcato", scoop: "scoop", falloff: "fall", doit: "doit", "breath-mark": "breath", caesura: "caesura" };
+// ornaments (DESIGN §34): MusicXML's mordent has the stroke; inverted-mordent is the upper one
+const ORN_OUT = { trill: "<trill-mark/>", mordent: "<mordent/>", invMordent: "<inverted-mordent/>", turn: "<turn/>", tremolo: '<tremolo type="single">3</tremolo>' };
+const ORN_IN = { "trill-mark": "trill", mordent: "mordent", "inverted-mordent": "invMordent", turn: "turn" };
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -59,7 +62,10 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl
     if (ev.marks.includes("fermata")) nots.push('<fermata type="upright"/>');
     const arts = p ? ev.marks.filter((m) => ARTIC_OUT[m]) : [];
     if (arts.length) nots.push(`<articulations>${arts.map((m) => ARTIC_OUT[m]).join("")}</articulations>`);
+    const orns = p ? ev.marks.filter((m) => ORN_OUT[m]) : [];
+    if (orns.length) nots.push(`<ornaments>${orns.map((m) => ORN_OUT[m]).join("")}</ornaments>`);
   }
+  if (p && ev.marks?.includes("arpeggio") && ev.pitches.length > 1) nots.push("<arpeggiate/>"); // on every note of the chord
   if (nots.length) x.push(`<notations>${nots.join("")}</notations>`);
   if (!chord && syl) syl.forEach((s, v) => s && x.push(`<lyric number="${v + 1}"><syllabic>${s}</syllabic><text>${esc(ev.lyrics[v].text)}</text></lyric>`));
   x.push("</note>");
@@ -548,7 +554,7 @@ const NOTE_READ = new Set(["chord", "grace", "pitch", "unpitched", "rest", "dura
   "stem", "notehead", "notehead-text", "staff", "beam", "notations", "lyric", "instrument", "play", "listen", "footnote", "level"]);
 const MARKS = {
   articulations: "Other articulations (not imported)",
-  ornaments: "Ornaments (not imported)", technical: "Technical markings (not imported)", arpeggiate: "Arpeggios (not imported)",
+  technical: "Technical markings (not imported)",
   glissando: "Slides on rests (not imported)", slide: "Slides on rests (not imported)",
 };
 
@@ -583,7 +589,23 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
           if (ARTIC_IN[a.localName] && !isRest) marks.push(ARTIC_IN[a.localName]);
           else report.count(MARKS.articulations);
         }
-      } else if (c.localName === "ornaments" || c.localName === "technical") report.count(MARKS[c.localName], c.children.length);
+      } else if (c.localName === "ornaments") {
+        for (const o of c.children) {
+          const t = o.localName;
+          if (isRest) report.count("Ornaments on rests (not imported)");
+          else if (ORN_IN[t]) marks.push(ORN_IN[t]);
+          else if (t === "tremolo" && (o.getAttribute("type") || "single") === "single") {
+            marks.push("tremolo");
+            if (o.textContent.trim() !== "3") report.count("Tremolos drawn with three strokes");
+          } else if (t === "tremolo") { if (o.getAttribute("type") === "start") report.count("Tremolos between two notes (not imported)"); }
+          else if (t === "wavy-line") { if (o.getAttribute("type") === "start") report.count("Trill lines (shown as a trill sign)"); }
+          else if (t !== "accidental-mark") report.count(`Ornaments (${t}) not imported`);
+          else report.count("Accidentals on ornaments (not imported)");
+        }
+      } else if (c.localName === "arpeggiate" && !isRest) {
+        marks.push("arpeggio");
+        if (c.getAttribute("direction") && !kid(el, "chord")) report.count("Arpeggios with arrows (drawn plain)");
+      } else if (c.localName === "technical") report.count(MARKS.technical, c.children.length);
       else if (c.localName === "slur") {
         const t = c.getAttribute("type");
         // one slur at a time per staff and layer: the first number opened is followed, others counted

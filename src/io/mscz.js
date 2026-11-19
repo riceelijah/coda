@@ -13,7 +13,11 @@ const SHORTER = new Set(["64th", "128th", "256th", "512th", "1024th"]);
 // MuseScore articulation subtype -> Coda marks (DESIGN §16). Combined ones ("articAccentStaccatoAbove")
 // give two; MuseScore 2 calls an accent "sforzato". Staccatissimo and the rest give none.
 const CHORDLINE_IN = { 1: "fall", 2: "doit", 4: "scoop" }, CHORDLINE_OUT = { fall: 1, doit: 2, scoop: 4 };
+// ornaments as MuseScore 3 and 4 write them (DESIGN §34): ornamentMordent has the stroke, ornamentShortTrill doesn't
+const ORN_MS_OUT = { trill: "ornamentTrill", mordent: "ornamentMordent", invMordent: "ornamentShortTrill", turn: "ornamentTurn" };
+const ORN_MS_IN = { ...Object.fromEntries(Object.entries(ORN_MS_OUT).map(([k, v]) => [v, k])), trill: "trill", prall: "invMordent", mordent: "mordent", turn: "turn" };
 export function markOf(sub) {
+  if (ORN_MS_IN[sub]) return [ORN_MS_IN[sub]]; // MuseScore 3 writes ornaments as articulations
   if (/staccatissimo/i.test(sub)) return [];
   if (/^fermata/i.test(sub)) return ["fermata"];
   return [["staccato", /staccato/i], ["accent", /accent|sforzato/i], ["tenuto", /tenuto/i], ["marcato", /marcato/i]]
@@ -31,12 +35,13 @@ const txt = (el, name) => { const k = kid(el, name); return k ? k.textContent.tr
 const LAYOUT = ["eid", "linkedTo", "linkedMain", "visible", "offset", "color", "placement", "track", "Beam", "BeamMode", "StemDirection", "Stem", "Hook", "NoteDot", "noStem", "stemDirection", "mirror", "dotPosition", "headType", "fixed", "fixedLine", "line", "Events", "veloType", "velocity", "veloOffset", "endSpanner", "tuning", "Accidental", "duration", "autoplace", "minDistance", "userOff", "pos"];
 // Measure-level: repeats are read above; the rest is layout. LayoutBreak passes silently: MuseScore writes one per system.
 const MEASURE_ONLY = ["voice", "startRepeat", "endRepeat", "irregular", "LayoutBreak", "multiMeasureRest", "breakMultiMeasureRest", "vspacer", "vspacerUp", "vspacerDown", "vspacerFixed", "noOffset", "measureNumberMode", "stretch", "MeasureNumber", "MMRest"];
-const VOICE_READ = new Set([...LAYOUT, ...MEASURE_ONLY, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "StaffState"]);
+const VOICE_READ = new Set([...LAYOUT, ...MEASURE_ONLY, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "StaffState", "Breath"]);
 const VOICE_NAMES = { Harmony: "Chord symbols (not imported)", Breath: "Breath marks and caesuras (not imported)", FiguredBass: "Figured bass (not imported)", Tremolo: "Tremolos (not imported)", TremoloTwoChord: "Tremolos (not imported)", FretDiagram: "Fret diagrams (not imported)", InstrumentChange: "Instrument changes (not imported)", tick: "Positions in MuseScore 2 voices (notes may be misplaced)", Image: "Images (not imported)" };
 const MEASURE_READ = new Set([...LAYOUT, ...MEASURE_ONLY]);
-const CHORD_READ = new Set([...LAYOUT, ...GRACE, "durationType", "dots", "Note", "Articulation", "ChordLine", "Lyrics", "Spanner", "Tuplet"]);
+const CHORD_READ = new Set([...LAYOUT, ...GRACE, "durationType", "dots", "Note", "Articulation", "ChordLine", "Lyrics", "Spanner", "Tuplet", "Ornament", "Arpeggio", "TremoloSingleChord", "Tremolo"]);
 const CHORD_NAMES = { Ornament: "Ornaments (trills, mordents, turns) (not imported)", Arpeggio: "Arpeggios (not imported)", TremoloSingleChord: "Tremolos (not imported)", Tremolo: "Tremolos (not imported)", small: "Cue notes (shown and played as normal notes)", staffMove: "Cross-staff notes (shown on their own staff)" };
 const NOTE_READ = new Set([...LAYOUT, "pitch", "tpc", "tpc2", "Spanner", "Tie", "play", "small"]);
+const DRUM_NOTE_READ = new Set([...NOTE_READ, "head"]); // a drum's notehead comes from the kit (DESIGN §27)
 const NOTE_NAMES = { Fingering: "Fingering (not imported)", headGroup: "Special noteheads (shown as normal)", head: "Special noteheads (shown as normal)", Bend: "Bends (not imported)", fret: "Tablature frets and strings (not imported)", string: "Tablature frets and strings (not imported)" };
 
 export function importMSCZ(bytes, fileName = "") {
@@ -258,6 +263,11 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (d) pendDyn[vi] = d; else report.count("Unusual dynamics (not imported)");
             break;
           }
+          case "Breath": { // after the note it follows (DESIGN §34)
+            const m = /caesura/i.test(txt(el, "symbol") || txt(el, "subtype") || "") ? "caesura" : "breath";
+            if (lastEv[vi]?.pitches.length) setMark(lastEv[vi], m, true); else report.count("Breath marks after rests (not imported)");
+            break;
+          }
           case "Fermata": fermata = true; break; // MuseScore 3+: before the chord or rest it belongs to
           case "Chord":
           case "Rest": {
@@ -280,6 +290,17 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             for (const a of kids(el, "Articulation")) {
               const got = markOf(txt(a, "subtype") || "");
               if (got.length) marks.push(...got); else report.count("Other articulations (not imported)");
+            }
+            for (const o of kids(el, "Ornament")) { // DESIGN §34
+              const m = ORN_MS_IN[txt(o, "subtype")];
+              if (m) marks.push(m); else report.count("Other ornaments (not imported)");
+            }
+            const arp = kid(el, "Arpeggio");
+            if (arp) { marks.push("arpeggio"); if (txt(arp, "subtype") !== "0") report.count("Arpeggios with arrows or brackets (drawn plain)"); }
+            for (const tr of [...kids(el, "TremoloSingleChord"), ...kids(el, "Tremolo")]) {
+              const sub = txt(tr, "subtype") || "";
+              if (!/^r/.test(sub)) report.count("Tremolos between two notes (not imported)");
+              else { marks.push("tremolo"); if (sub !== "r32") report.count("Tremolos drawn with three strokes"); }
             }
             for (const cl of kids(el, "ChordLine")) { // brass effects (DESIGN §31): 1 fall, 2 doit, 3 plop, 4 scoop
               const m = CHORDLINE_IN[txt(cl, "subtype")];
@@ -318,6 +339,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
             }
             for (const m of marks) if (!isRest || m === "fermata") setMark(ev, m, true);
+            if (isRest && marks.some((m) => m !== "fermata")) report.count("Marks on rests (not imported)");
             if (pendDyn[vi]) { ev.dyn = pendDyn[vi]; pendDyn[vi] = null; }
             if (pendText[vi]) {
               if (pendText[vi].length > MAX_TEXT) report.count(`Text cut to ${MAX_TEXT} characters`);
@@ -360,7 +382,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
         }
         if (el.localName === "Chord" || el.localName === "Rest") {
           countUnread(report, el, CHORD_READ, CHORD_NAMES);
-          for (const n of kids(el, "Note")) countUnread(report, n, NOTE_READ, NOTE_NAMES);
+          for (const n of kids(el, "Note")) countUnread(report, n, d.drums || staff.clef === "percussion" ? DRUM_NOTE_READ : NOTE_READ, NOTE_NAMES);
         }
       }
       if (pendG.notes.length) report.count("Grace notes with no note after them in the bar (not imported)", pendG.notes.length);
@@ -600,7 +622,12 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
         (sp.slurPrev ? `<Spanner type="Slur"><prev>${sp.slurPrev}</prev></Spanner>` : "");
       const lyr = (syl.get(e) || []).map((s, v) => s ? `<Lyrics>${v ? `<no>${v}</no>` : ""}${s === "single" ? "" : `<syllabic>${s}</syllabic>`}<text>${esc(e.lyrics[v].text)}</text></Lyrics>` : "").join("");
       const lines = (e.marks || []).filter((m) => CHORDLINE_OUT[m]).map((m) => `<ChordLine><subtype>${CHORDLINE_OUT[m]}</subtype></ChordLine>`).join("");
-      x.push(`<Chord>${head}${lyr}${arts}${slurs}${notes}${lines}</Chord>`);
+      const has = (m) => e.marks?.includes(m);
+      const orn = (e.marks || []).filter((m) => ORN_MS_OUT[m]).map((m) => `<Ornament><subtype>${ORN_MS_OUT[m]}</subtype></Ornament>`).join("") +
+        (has("arpeggio") && e.pitches.length > 1 ? "<Arpeggio><subtype>0</subtype></Arpeggio>" : "") +
+        (has("tremolo") ? "<TremoloSingleChord><subtype>r32</subtype></TremoloSingleChord>" : "");
+      x.push(`<Chord>${head}${lyr}${arts}${orn}${slurs}${notes}${lines}</Chord>`);
+      if (has("breath") || has("caesura")) x.push(`<Breath><symbol>${has("caesura") ? "caesura" : "breathMarkComma"}</symbol></Breath>`);
     }
     if (sp.hpPrev) x.push(`<Spanner type="HairPin"><prev>${sp.hpPrev}</prev></Spanner>`);
     if (open) { open.left -= eventTicks(e); if (open.left <= 0) { x.push("<endTuplet/>"); open = null; } }

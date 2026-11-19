@@ -1336,6 +1336,8 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   | Text above a note (dolce, pizz.) | Notes ▸ Text above note… (§30) |
   | Rehearsal mark | Score ▸ Rehearsal mark… (§30) |
   | Pickup bar, short last bar | File ▸ New (Pickup beats); Score ▸ Bar length (pickup)… (§33) |
+  | Trill, mordents, turn, tremolo, arpeggio | Notes ▸ Ornaments (§34) |
+  | Breath mark, caesura | Notes ▸ Articulations (§34) |
 
 ## 29. Tempo changes (Phase 34)
 
@@ -1430,3 +1432,18 @@ Print, and ⌘/Ctrl+P is now its PDF item.
 - Import: MusicXML `implicit="yes"` bars take their longest staff's length; MuseScore `len`.
   A length Coda can't hold (not whole 32nds) is counted and shown full. MuseScore's
   `<multiMeasureRest>` summary measures are drawings, not bars, and are skipped.
+
+## 34. Ornaments and breath marks (Phase 40)
+
+- New `MARKS`: trill, mordent, invMordent, turn (one of these four per note), tremolo (single-note,
+  three strokes), arpeggio (drawn on chords), breath and caesura (one of the two, drawn after the
+  note). Notes only; rests keep just the fermata.
+- Names follow MusicXML: `mordent` has the stroke (down to the note below), `invMordent` is the upper
+  one without. VexFlow and MuseScore name them the other way round: VexFlow `mordent_inverted` /
+  MuseScore `ornamentMordent` is Coda's `mordent`; `mordent` / `ornamentShortTrill` is `invMordent`.
+- MusicXML: `<ornaments>` (trill-mark, mordent, inverted-mordent, turn, single tremolo),
+  `<arpeggiate/>` on every chord note, `<breath-mark/>` and `<caesura/>` in articulations.
+  Counted: two-note tremolos, other stroke counts (drawn as three), arrowed arpeggios, trill lines,
+  other ornaments.
+- MuseScore: `<Ornament>` (and MuseScore 3 articulation subtypes), `<Arpeggio>`,
+  `<TremoloSingleChord>`/`<Tremolo>`, and voice-level `<Breath>` after the chord it follows.
