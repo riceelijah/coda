@@ -1581,7 +1581,7 @@ Ceilings:
 - **No 7-tuplets.** 480 ticks a quarter has no factor of 7, so no note value divides by 7. A typed 7:4 is
   refused like any ratio that can't be whole ticks, and imported septuplets keep their written
   lengths and are counted (§14.4). Changing the tick grid would change every stored pickup length.
-- A dotted 64th left alone leaves 15 ticks no rest can fill, as a double-dotted 32nd already does.
+- Only a gap of exactly 15 ticks can't be filled; any other odd multiple of 15 is padded with a dotted 64th.
 
 ## 41. Layout: breaks, beams, cue notes, multi-bar rests, go to bar (Phase 45)
 

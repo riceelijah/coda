@@ -1407,6 +1407,18 @@ export async function run({ check, eq }) {
     return true;
   });
 
+  check("phase 44–45 review: dotted-64th padding, beams in files, a break on a deleted bar", () => {
+    const sum = (t) => M.splitTicks(t).reduce((a, d) => a + M.eventTicks({ dur: d.dur ?? d, dots: d.dots || 0 }), 0);
+    for (const t of [45, 75, 1875, 105]) if (sum(t) !== t) return `splitTicks(${t}) = ${sum(t)}`;
+    const s = M.newScore({ bars: 3 });
+    s.staves[0].bars[0] = Array.from({ length: 8 }, () => ev("8", "C5")); // every eighth on its own
+    s.staves[0].bars[0].forEach((e, i) => { if (i) e.beam = "break"; });
+    const x = importMusicXML(exportMusicXML(s), "s.musicxml").score;
+    if (M.beamGroups(x.staves[0].bars[0], [4, 4]).length) return "unbeamed bar beamed again";
+    M.setBreak(s, 1, "line"); M.deleteMeasure(s, 1); // the line still starts where the deleted bar was
+    return s.measures[1].brk === "line" || "break lost with its bar";
+  });
+
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;

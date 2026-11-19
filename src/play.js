@@ -235,6 +235,7 @@ function dynamics(score, from) {
       bars.forEach((bar, b) => {
         let at = starts[b] - off;
         for (const ev of bar) {
+          if (ev.cue) { at += eventTicks(ev); continue; } // another part's marks (DESIGN §41)
           if (DYN_VEL[ev.dyn]) levels.push([at, DYN_VEL[ev.dyn]]);
           else if (ev.dyn) { accents.set(at, ACCENT_VEL[ev.dyn]); if (ev.dyn === "fp") levels.push([at + 1, DYN_VEL.p]); }
           if (ev.hpEnd && open) { ramps.push({ ...open, t1: at + eventTicks(ev) }); open = null; } // an end first: a new one may start here

@@ -669,14 +669,15 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
             else if (dim && v !== layer) notes[i].setStyle({ fillStyle: DIM, strokeStyle: DIM });
           });
           const grey = dim && v !== layer;
+          // beams set by hand (DESIGN §41): the model's groups, so files and page agree. Made before the
+          // tuplets, which leave out their bracket when their notes are beamed.
+          if (bar.some((e) => e.beam)) for (const g of beamGroups(bar, time)) { const bm = new VFl.Beam(g.map((i) => notes[i]), !stem); bm.grey = grey; beams.push(bm); }
           for (const run of tupletRuns(bar)) {
             tuplets.push(new VFl.Tuplet(run.idx.map((i) => notes[i]),
-              { num_notes: run.tup[0], notes_occupied: run.tup[1], location: stem < 0 ? -1 : 1 }));
+              { num_notes: run.tup[0], notes_occupied: run.tup[1], location: (stem || notes[run.idx[0]].getStemDirection()) < 0 ? -1 : 1 }));
             tuplets[tuplets.length - 1].grey = grey;
           }
-          if (bar.some((e) => e.beam)) { // beams set by hand (DESIGN §41): the model's groups, so files and page agree
-            for (const g of beamGroups(bar, time)) { const bm = new VFl.Beam(g.map((i) => notes[i]), !stem); bm.grey = grey; beams.push(bm); }
-          } else if (bar.some((e) => e.pitches.length && ["8", "16", "32", "64"].includes(e.dur))) {
+          if (bar.some((e) => e.beam)) { /* beamed above */ } else if (bar.some((e) => e.pitches.length && ["8", "16", "32", "64"].includes(e.dur))) {
             for (const bm of VFl.Beam.generateBeams(notes, { groups: VFl.Beam.getDefaultBeamGroups(`${time[0]}/${time[1]}`), maintain_stem_directions: !!stem })) {
               bm.grey = grey;
               beams.push(bm);

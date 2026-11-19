@@ -362,8 +362,12 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (!dur) { report.count("Notes with unknown lengths skipped"); break; }
             let dots = Math.min(2, +(txt(el, "dots") || 0));
             if (!okDur(dur, dots)) { dots = 1; report.count("Double-dotted 64th notes given one dot"); }
-            const ev = { dur, dots, tie: false, pitches: [], ...(+txt(el, "small") ? { cue: true } : {}) }; // cue notes (DESIGN §41)
+            // cue notes (DESIGN §41): small and not played; small notes that play are drawn full size
+            const cue = +txt(el, "small") && [...el.children].filter((c) => c.tagName === "Note").every((n) => txt(n, "play") === "0");
+            if (+txt(el, "small") && !cue) report.count("Small notes that play drawn full size");
+            const ev = { dur, dots, tie: false, pitches: [], ...(cue ? { cue: true } : {}) };
             const bmode = txt(el, "BeamMode");
+            if (bmode && !["begin", "mid", "no"].includes(bmode)) report.count("Beam settings not read (drawn automatically)");
             if (["begin", "mid", "no"].includes(bmode)) ev._bm = bmode; // beams set by hand (DESIGN §41)
             const ratio = txt(el, "Tuplet") ? tuplets[txt(el, "Tuplet")] : tup;
             if (ratio && ratio[0] > 0 && ratio[1] > 0 && ratio[0] !== ratio[1]) {
@@ -441,7 +445,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             }
             lastEv[vi] = ev;
             // a chord or rest that starts past where this voice has got to: rests in front
-            const gap = Math.floor((cur - barTicks(bar)) / 60) * 60;
+            const gap = Math.floor((cur - barTicks(bar)) / 30) * 30; // the 64th grid
             if (gap > 0) {
               for (const d of splitTicks(gap)) bar.push({ dur: d.dur, dots: d.dots, tie: false, pitches: [] });
               report.count("Gaps in a voice filled with rests");
@@ -486,7 +490,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
 
   score.measures.push(...measuresFrom(firstAttrs[score.staves.findIndex((st) => st.clef !== "percussion")] || firstAttrs[0])); // the key from the first staff that isn't drums
   for (const st of score.staves) for (const bars of allLayers(st)) bars.forEach((bar, b) => {
-    if (bar.some((e) => e._bm)) beamsFromModes(bar, attrsAt(score, b).time, bar.map((e) => e._bm));
+    if (bar.some((e) => e._bm)) { const n = beamsFromModes(bar, attrsAt(score, b).time, bar.map((e) => e._bm)); if (n) report.count("Beams over rests or long notes drawn automatically", n); }
     for (const e of bar) delete e._bm;
   });
   const broken = clearBrokenSpans(score), slides = clearBrokenSlides(score);

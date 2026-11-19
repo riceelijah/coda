@@ -68,7 +68,7 @@ export function nearestDur(ticks) {
 const FILL = [1920, 1440, 960, 720, 480, 360, 240, 180, 120, 90, 60, 45, 30];
 export function splitTicks(ticks) {
   const out = [];
-  for (const v of FILL) while (ticks >= v) { out.push(durFromTicks(v)); ticks -= v; }
+  for (const v of FILL) while (ticks >= v && (v === 45 || ticks - v !== 15)) { out.push(durFromTicks(v)); ticks -= v; }
   return out;
 }
 
@@ -927,11 +927,12 @@ export function addMeasure(score, after) {
 
 export function deleteMeasure(score, idx) {
   if (score.measures.length <= 1) return "A score needs at least one bar";
-  const a0 = attrsAt(score, 0), tm = score.measures[idx].tempo;
+  const a0 = attrsAt(score, 0), tm = score.measures[idx].tempo, brk = score.measures[idx].brk;
   score.measures.splice(idx, 1);
   // a tempo change on the deleted bar moves to the bar after it, like a clef change
   const nx = score.measures[idx];
   if (tm && nx && !nx.tempo) nx.tempo = tm;
+  if (brk && nx && !nx.brk) nx.brk = brk; // so does a break
   if (nx?.tempo && idx && nx.tempo === tempoAt(score, idx - 1)) delete nx.tempo; // no longer a change
   for (const st of score.staves) for (const bars of allLayers(st)) bars.splice(idx, 1);
   // a clef change on the deleted bar moves to the bar after it, so that bar keeps its clef
@@ -1290,8 +1291,10 @@ export function beamGroups(bar, time, auto = false) {
 
 // Beam modes read from a file, one per event ("begin", "mid", "no", or undefined for as usual), into the
 // overrides that give that beaming here.
+// Returns how many beams the file joined that Coda can't (over a rest or a long note): drawn automatically.
 export function beamsFromModes(bar, time, modes) {
   const of = new Map();
+  let lost = 0;
   beamGroups(bar, time, true).forEach((g, k) => g.forEach((i) => of.set(i, k)));
   bar.forEach((ev, i) => {
     delete ev.beam;
@@ -1299,8 +1302,10 @@ export function beamsFromModes(bar, time, modes) {
     const auto = of.has(i) && of.get(i) === of.get(i - 1), m = modes[i];
     const want = m === "begin" || m === "no" || modes[i - 1] === "no" ? false : m === "mid" ? true : auto;
     if (want && !auto && ev.pitches.length && bar[i - 1].pitches.length && BASE[ev.dur] < 480 && BASE[bar[i - 1].dur] < 480) ev.beam = "join";
+    else if (want && !auto) lost++;
     else if (!want && auto) ev.beam = "break";
   });
+  return lost;
 }
 
 // ---------- line and page breaks (DESIGN §41) ----------

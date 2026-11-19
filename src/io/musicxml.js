@@ -191,7 +191,7 @@ export function exportMusicXML(score) {
     `<work><work-title>${esc(score.title || "")}</work-title></work>`,
     "<identification>",
     score.composer ? `<creator type="composer">${esc(score.composer)}</creator>` : "",
-    "<encoding><software>Coda</software></encoding></identification>",
+    "<encoding><software>Coda</software><supports element=\"beam\" type=\"yes\"/></encoding></identification>",
     "<part-list>",
   ];
   groups.forEach((g, i) => {
@@ -335,7 +335,8 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   const doc = parseXml(text);
   const ours = [...doc.getElementsByTagName("software")].some((e) => e.textContent.trim() === "Coda");
   // beams are read from Coda's own files only (DESIGN §41): others beam every note their own way
-  const beamed = ours && doc.getElementsByTagName("beam").length > 0;
+  // beams as written: Coda's own files that hold any, or that say they encode them (none at all = all unbeamed)
+  const beamed = ours && (doc.getElementsByTagName("beam").length > 0 || [...doc.getElementsByTagName("supports")].some((x) => x.getAttribute("element") === "beam" && x.getAttribute("type") === "yes"));
   const root = doc.documentElement;
   if (root.localName === "score-timewise") throw new Error("This is a 'timewise' MusicXML file, which Coda can't read yet. Most programs can re-export it as standard (partwise) MusicXML.");
   if (root.localName !== "score-partwise") throw new Error("This XML file isn't a MusicXML score.");
@@ -589,7 +590,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
 
   score.measures.push(...measuresFrom((partAttrs.find((a) => !a.perc) || partAttrs[0]).attrs));
   for (const st of score.staves) for (const bars of allLayers(st)) bars.forEach((bar, b) => {
-    if (bar.some((e) => "_bm" in e)) beamsFromModes(bar, attrsAt(score, b).time, bar.map((e) => e._bm));
+    if (bar.some((e) => "_bm" in e)) { const n = beamsFromModes(bar, attrsAt(score, b).time, bar.map((e) => e._bm)); if (n) report.count("Beams over rests or long notes drawn automatically", n); }
     for (const e of bar) delete e._bm;
   });
   const broken = clearBrokenSpans(score), slides = clearBrokenSlides(score);
@@ -814,7 +815,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   }
   const bar = barOf(st, layer);
   // a voice that starts later than where its layer has got to: fill the gap with rests
-  const gap = Math.floor((start - barTicks(bar)) / 60) * 60;
+  const gap = Math.floor((start - barTicks(bar)) / 30) * 30; // the 64th grid
   if (gap > 0) {
     for (const d of splitTicks(gap)) bar.push({ dur: d.dur, dots: d.dots, tie: false, pitches: [] });
     report.count("Gaps in a voice filled with rests");
