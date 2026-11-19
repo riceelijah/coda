@@ -1176,7 +1176,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
 - **Model:** flags on the first and last event of a layer: `slur`/`slurEnd`, `hp` (`"<"` or
   `">"`)/`hpEnd`. No nesting or overlap within a kind. `clearBrokenSpans` runs after every
   `edit()` and import, dropping orphan ends and overlaps (imports count them).
-- **Entry:** select a range, then S (slur) or Notes ▸ Crescendo / Diminuendo hairpin. The same
+- **Entry:** select a range, then S (slur) or Notes ▸ Slurs and lines ▸ Crescendo / Diminuendo hairpin. The same
   command on exactly that range removes it; a new one replaces any inside it.
 - **Drawn** by hand on the SVG (slurs as filled curves, hairpins as lines), split at line ends;
   hairpins sit under slurs, lyrics and dynamics.
@@ -1465,7 +1465,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
 ## 35. Marking palettes
 
 - Below the note tools, six palette buttons (Articulations, Ornaments, Dynamics, Slurs and
-  hairpins, Brass effects, Text/lyrics/tempo) each open a small grid of tools beside the palette,
+  lines, Brass effects, Text/lyrics/tempo) each open a small grid of tools beside the palette,
   like a sub-palette. A tool runs the same command as its menu item on the selection, is greyed out
   when that command can't run, and the grid stays open for the next selection (Esc, the button
   again, or another palette button closes it).
@@ -1478,3 +1478,30 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   first system is indented to fit the longest (up to 170 px). A score of one part with the
   default name "Staff" shows none. Later systems show no names (no abbreviations yet).
 
+
+## 37. Octave lines, pedal marks, lyric extenders, nested slurs (Phase 41)
+
+- Notes ▸ Slurs and lines holds Slur, the hairpins, 8va, 8vb, 15ma, 15mb and Pedal; the same tools
+  are in the Slurs and lines palette. Each goes over the selection (one note is enough for an
+  octave line or a pedal); again removes it; a different octave line replaces it.
+- Model: spans like slurs (§23): `ott` ("8va", "8vb", "15ma", "15mb") or `ped: true` on the first
+  event, `ottEnd` / `pedEnd` on the last. They may start and end on one event, so their start is
+  read before their end (`ONE_NOTE`) and they can't share a note with the one before. Pitches stay
+  as written; `staffLines` gives each staff's lines in ticks (from any layer, for the whole staff).
+- Playback: notes under an octave line sound 1 or 2 octaves away. A note struck under a pedal
+  rings to the end of the pedal's last note (`ring`, audio only); MIDI export writes the pedal as
+  CC64 instead. MIDI import counts sustain pedal (not read).
+- Drawing: "8va" (etc.) with a dashed line and an end hook above the staff (below for 8vb/15mb);
+  "Ped." with a line under the notes, up at the lift. Split at line breaks: "(8)" on later lines.
+- Files: MusicXML `<octave-shift>` (pitches in the file sound: Coda writes the notes an octave away
+  under one and reads them back written; sizes other than 8 and 15 counted, notes kept sounding) and
+  `<pedal>` (start, change, stop; sostenuto counted). MuseScore `Ottava` and `Pedal` spanners
+  (MuseScore keeps written pitch, as Coda does).
+- Lyric extenders: `ext: true` on a syllable, typed as `_` in the lyric box (moves on, like `-`). The
+  line runs under the notes up to the last one before the verse's next syllable (`melismas`), to
+  the line's end if that's on a later line. MusicXML `<extend/>`; MuseScore `<ticks_f>` (the
+  distance to that last note).
+- Nested slurs: a slur that overlaps one already in the layer (inside it or around it) goes on a
+  second level, `slur2` / `slur2End`, drawn clear of the other. A third over the same notes is
+  refused. MusicXML: slur numbers voice and voice + 8; any two open at once are read, a third is
+  counted. MuseScore: the inner (later) one is taken to end first.

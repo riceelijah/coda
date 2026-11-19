@@ -348,7 +348,7 @@ export async function run({ check, eq }) {
       ${W("crescendo")}${N("C", sl("start", 3))}${W("stop")}${N("D")}${N("E", sl("start", 2))}${N("F", sl("stop", 3))}</measure></part></score-partwise>`;
     const { score: g, report } = importMusicXML(xml, "s.musicxml"), w = report.warnings.join("; "), b = g.staves[0].bars[0];
     if (b[0].hp || b[0].hpEnd || !b[0].slur || !b[3].slurEnd || b[2].slur) return JSON.stringify(b);
-    return w === "Hairpins over a single note (not imported): 1; Slurs inside other slurs (not imported): 1" || w;
+    return w === "Hairpins over a single note (not imported): 1; Unfinished or overlapping slurs and lines (not imported): 1" || w; // slur 2 opens inside 3 and never closes
   });
 
   await check("hairpins in playback: ramp to the next dynamic, else 16 steps that hold (DESIGN §23)", () => {
@@ -400,8 +400,8 @@ export async function run({ check, eq }) {
         <lyric><syllabic>end</syllabic><text>di</text><extend/></lyric></note></measure></part></score-partwise>`;
     const { score: got, report } = importMusicXML(xml, "l.musicxml");
     const e = got.staves[0].bars[0], msg = JSON.stringify(report);
-    if (!eq(e[0].lyrics, [{ text: "la", hyph: true }, { text: "two" }]) || !eq(e[1].lyrics, [{ text: "di" }])) return JSON.stringify(e);
-    return (/beyond verse 5.*: 2/.test(msg) && /extender.*1/.test(msg)) || msg;
+    if (!eq(e[0].lyrics, [{ text: "la", hyph: true }, { text: "two" }]) || !eq(e[1].lyrics, [{ text: "di", ext: true }])) return JSON.stringify(e);
+    return (/beyond verse 5.*: 2/.test(msg) && !/extender/.test(msg)) || msg;
   });
 
   await check("clef changes: setClef tidies, bars added and deleted keep them, validation, import placement (DESIGN §25)", () => {
@@ -1041,6 +1041,44 @@ export async function run({ check, eq }) {
     const y = importMSCX(raw, "u.mscx");
     if (y.score.staves[0].bars[0][1].text !== 'a < b & "c"' || y.score.measures[2].rehearsal) return "markup " + sig(y.score);
     return JSON.stringify(y.report).includes("Rehearsal marks Coda can't show") || JSON.stringify(y.report);
+  });
+
+  await check("octave lines, pedal, extenders, nested slurs: model, playback, MusicXML, MuseScore, MIDI (DESIGN §37)", () => {
+    const s = M.newScore({ preset: "treble", bars: 2 });
+    s.staves[0].bars[0] = [ev("q", "C5", { lyrics: ["la"] }), ev("q", "D5"), ev("q", "E5"), ev("q", "F5", { lyrics: ["di"] })];
+    s.staves[0].bars[1] = [ev("q", "G5"), ev("q", "A5"), ev("h", "B5")];
+    const [a, b2, c, d] = s.staves[0].bars[0], [e, f, g] = s.staves[0].bars[1];
+    a.lyrics[0].ext = true;
+    if (M.toggleSpan([g], "ott", "8va") || M.toggleSpan([a, b2], "ped") || M.toggleSpan([c], "ped")) return "toggle";
+    if (M.toggleSpan([b2, c], "ped") !== "That would overlap another pedal mark") return "overlap allowed";
+    if (M.toggleSlur(s.staves[0].bars.flat(), [a, b2, c, d, e]) || M.toggleSlur(s.staves[0].bars.flat(), [b2, c]) || !b2.slur2 || !c.slur2End) return "nested " + JSON.stringify(s.staves[0].bars[0]);
+    if (M.toggleSlur(s.staves[0].bars.flat(), [b2, c, d]) !== "Two slurs at most over a note") return "third slur";
+    if (M.clearBrokenSpans(s) || !M.isValidScore(s)) return "valid";
+    if (M.isValidScore({ ...s, staves: [{ ...s.staves[0], bars: [[{ ...ev("w", "C4"), ott: "toString" }], []] }] })) return "bad ott valid";
+    if (M.melismas(s).get(a)?.[0].last !== c || M.melismas(s).get(a)[0].ticks !== 960) return "melisma";
+    // playback: the 8va sounds an octave up; the pedal rings each note to the end of its last note
+    const { notes, pedals } = schedule(s);
+    if (notes.map((n) => n.midi).join() !== "72,74,76,77,79,81,95") return "midi " + notes.map((n) => n.midi);
+    if (notes[0].ring !== 960 || notes[1].ring || notes[2].ring !== undefined || pedals[0].join("|") !== "0,960|960,1440") return "pedal " + JSON.stringify(notes.slice(0, 3)) + JSON.stringify(pedals);
+    const mid = exportMIDI(s), cc = [...mid].filter((x, i) => x === 0xb0 && mid[i + 1] === 64).length;
+    if (cc !== 4 || !/Sustain pedal \(not imported\): 2/.test(importMIDI(mid, "p.mid").report.warnings.join())) return "MIDI pedal " + cc + importMIDI(mid, "p.mid").report.warnings;
+    const sig = (sc) => sc.staves[0].bars.flat().map((x) => ["slur", "slurEnd", "slur2", "slur2End", "ped", "pedEnd", "ott", "ottEnd"].filter((k) => x[k]).map((k) => k + (k === "ott" ? x.ott : "")).join("+") + (x.lyrics?.[0]?.ext ? "_" : "")).join(" ") + " " + brief(sc.staves[0]);
+    const xml = exportMusicXML(s);
+    if (!xml.includes('<octave-shift type="down" size="8"/>') || !/<step>B<\/step><octave>6/.test(xml) || !xml.includes('<slur type="start" number="9"/>')) return "MusicXML out";
+    for (const [n, r] of [["MusicXML", importMusicXML(xml, "o.musicxml")], ["MuseScore", importMSCX(exportMSCX(s), "o.mscx")]]) {
+      if (sig(r.score) !== sig(s)) return n + " " + sig(r.score) + " vs " + sig(s);
+      const w = r.report.warnings.filter((x) => !/instrument sound/.test(x));
+      if (w.length) return n + " " + w;
+    }
+    // a file's octave shift: notes in the file sound; Coda keeps them written. 22ma is counted.
+    const N = (x, o) => `<note><pitch><step>${x}</step><octave>${o}</octave></pitch><duration>1</duration><type>quarter</type></note>`;
+    const D = (t) => `<direction><direction-type>${t}</direction-type></direction>`;
+    const raw = `<score-partwise><part-list><score-part id="P1"><part-name>V</part-name></score-part></part-list><part id="P1"><measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      ${D('<octave-shift type="up" size="8"/>')}${N("C", 3)}${N("D", 3)}${D('<octave-shift type="stop" size="8"/>')}${D('<pedal type="start"/>')}${N("E", 4)}${D('<pedal type="change"/>')}${D('<octave-shift type="down" size="22"/>')}${N("F", 6)}${D('<pedal type="stop"/>')}</measure></part></score-partwise>`;
+    const r = importMusicXML(raw, "r.musicxml"), got = sig(r.score);
+    if (got !== "ott8vb ottEnd ped+pedEnd ped+pedEnd C4:q D4:q E4:q F6:q") return got;
+    return /Octave lines Coda can't show.*: 1/.test(r.report.warnings.join()) || r.report.warnings.join();
   });
 
   // Later phases: MIDI, MuseScore, musx.

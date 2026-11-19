@@ -525,12 +525,62 @@ export function nextRehearsal(score, b) {
 // ---------- slurs and hairpins (DESIGN §23) ----------
 // A span is a flag on its first event (slur: true, hp: "<" or ">") and one on its last (slurEnd,
 // hpEnd), in the same staff and layer. One of each kind at a time per layer.
-export const SPAN_KINDS = [["slur", "slurEnd"], ["hp", "hpEnd"]];
+// slur2: a slur inside another (a phrase mark over slurs). Octave lines (ott: "8va", "8vb", "15ma",
+// "15mb") and pedal marks (ped: true) belong to the whole staff (DESIGN §37).
+export const SPAN_KINDS = [["slur", "slurEnd"], ["slur2", "slur2End"], ["hp", "hpEnd"], ["ott", "ottEnd"], ["ped", "pedEnd"]];
+// Lines that may cover one note: their start is read before their end on the same event, so they
+// can't share a note with the one before (the pedal lifts at the end of its last note).
+export const ONE_NOTE = new Set(["ott", "ped"]);
+export const OTT_SHIFT = { "8va": 1, "8vb": -1, "15ma": 2, "15mb": -2 }; // octaves the notes sound above what's written
+// Octave lines and pedal marks on staff s, from any layer, in ticks from the score's start: a start
+// event's onset to the end of its end event. {ott: [{a, z, oct}], ped: [{a, z}]}
+export function staffLines(score, s) {
+  const out = { ott: [], ped: [] };
+  allLayers(score.staves[s]).forEach((bars) => {
+    const open = {};
+    let t = 0;
+    bars.forEach((bar, b) => {
+      let at = t;
+      for (const ev of bar) {
+        const end = at + eventTicks(ev);
+        if (ev.ott) open.ott = { a: at, oct: OTT_SHIFT[ev.ott] || 0 };
+        if (ev.ped) open.ped = { a: at };
+        if (ev.ottEnd && open.ott) { out.ott.push({ ...open.ott, z: end }); open.ott = null; }
+        if (ev.pedEnd && open.ped) { out.ped.push({ ...open.ped, z: end }); open.ped = null; }
+        at = end;
+      }
+      t += barLen(score, b);
+    });
+  });
+  return out;
+}
+// Octaves a note at tick t on staff s sounds above its written pitch.
+export const ottAt = (lines, t) => lines.ott.find((r) => t >= r.a && t < r.z)?.oct || 0;
+// A slur over the events (in layer order, `layer` all of the layer's events). One that overlaps a
+// slur already there, inside it or around it, goes on the second level (slur2); a third is refused.
+export function toggleSlur(layer, events) {
+  const a = events[0], z = events[events.length - 1];
+  if (a.slur2 && z.slur2End) return toggleSpan(events, "slur2");
+  if (a.slur && z.slurEnd) return toggleSpan(events, "slur");
+  let open = false, over = false, inside = false;
+  for (const ev of layer) {
+    if (ev.slurEnd && ev !== z) { if (inside && ev !== a) over = true; open = false; } // one ending on the first note is a neighbour
+    if (ev === a) { inside = true; over ||= open; }
+    if (inside && ev.slur && ev !== z) over = true; // one starting on the last note is a neighbour
+    if (ev.slur) open = true;
+    if (ev === z) break;
+  }
+  if (!over) return toggleSpan(events, "slur");
+  if (events.some((e, k) => (k < events.length - 1 && e.slur2) || (k && e.slur2End))) return "Two slurs at most over a note";
+  return toggleSpan(events, "slur2");
+}
 // Over events in order (2 or more): set the span, or remove it when exactly that one is there.
 export function toggleSpan(events, kind, type = true) {
-  if (events.length < 2) return "Select two or more notes";
+  if (events.length < 2 && !ONE_NOTE.has(kind)) return "Select two or more notes";
   const end = kind + "End", a = events[0], z = events[events.length - 1];
   if (a[kind] === type && z[end]) { delete a[kind]; delete z[end]; return null; }
+  if (ONE_NOTE.has(kind) && ((a[end] && !a[kind]) || (z[kind] && !z[end]))) return kind === "ped" ? "That would overlap another pedal mark" : "That would overlap another octave line";
+  if (ONE_NOTE.has(kind)) { delete a[end]; delete z[kind]; } // the same line, made longer or shorter
   // spans inside are replaced; a span ending on the first note or starting on the last is a neighbour, kept
   for (const e of events.slice(1, -1)) { delete e[kind]; delete e[end]; }
   a[kind] = type; z[end] = true;
@@ -542,9 +592,11 @@ export function clearBrokenSpans(score) {
   let n = 0;
   for (const st of score.staves) for (const bars of allLayers(st)) for (const [k, ke] of SPAN_KINDS) {
     let open = null;
+    const first = ONE_NOTE.has(k);
     for (const bar of bars) for (const ev of bar) {
+      if (ev[k] && first) { if (open) { delete open[k]; n++; } open = ev; }
       if (ev[ke]) { if (open) open = null; else { delete ev[ke]; n++; } }
-      if (ev[k]) { if (open) { delete open[k]; n++; } open = ev; }
+      if (ev[k] && !first) { if (open) { delete open[k]; n++; } open = ev; }
     }
     if (open) { delete open[k]; n++; }
   }
@@ -552,8 +604,8 @@ export function clearBrokenSpans(score) {
 }
 
 // ---------- lyrics (DESIGN §24) ----------
-// ev.lyrics = [{text, hyph?} | null, …]: verse v's syllable at index v (null: none in that verse),
-// hyph a hyphen to the next one. No trailing nulls; absent when empty. Notes only.
+// ev.lyrics = [{text, hyph?, ext?} | null, …]: verse v's syllable at index v (null: none in that verse),
+// hyph a hyphen to the next one, ext an extender line (DESIGN §37). No trailing nulls; absent when empty. Notes only.
 export const MAX_LYRIC = 40, MAX_VERSES = 5;
 // ---------- grace notes (DESIGN §26) ----------
 // ev.grace = [pitch, …]: single grace notes before a note, played on the beat. One draws as a
@@ -585,12 +637,36 @@ export function syllabics(score) {
   return m;
 }
 
-export function setLyric(ev, text, hyph = false, verse = 0) {
+// Extender lines (DESIGN §37): event -> by verse {last: the last note it's held over, ticks from the
+// syllable's onset to that note's}. It runs to the note before the verse's next syllable.
+export function melismas(score) {
+  const m = new Map();
+  for (const st of score.staves) for (const bars of allLayers(st)) {
+    const open = [];
+    let t = 0;
+    bars.forEach((bar, b) => {
+      let at = t;
+      for (const ev of bar) {
+        if (ev.pitches.length) for (let v = 0; v < MAX_VERSES; v++) {
+          if (ev.lyrics?.[v]) {
+            open[v] = ev.lyrics[v].ext ? { at, ev } : null;
+            if (open[v]) (m.get(ev) || m.set(ev, []).get(ev))[v] = { last: ev, ticks: 0 };
+          } else if (open[v]) m.get(open[v].ev)[v] = { last: ev, ticks: at - open[v].at };
+        }
+        at += eventTicks(ev);
+      }
+      t += barLen(score, b);
+    });
+  }
+  return m;
+}
+// ext: an extender line after the syllable, under the notes it's held over (DESIGN §37)
+export function setLyric(ev, text, hyph = false, verse = 0, ext = false) {
   if (!Number.isInteger(verse) || verse < 0 || verse >= MAX_VERSES) return;
   if (!ev.pitches.length) { delete ev.lyrics; return; }
   const t = String(text || "").trim().slice(0, MAX_LYRIC);
   const ls = Array.from({ length: Math.max(ev.lyrics?.length || 0, verse + 1) }, (_, i) => ev.lyrics?.[i] ?? null); // no holes
-  ls[verse] = t ? (hyph ? { text: t, hyph: true } : { text: t }) : null;
+  ls[verse] = t ? { text: t, ...(hyph ? { hyph: true } : {}), ...(ext ? { ext: true } : {}) } : null;
   while (ls.length && !ls[ls.length - 1]) ls.pop();
   if (ls.length) ev.lyrics = ls; else delete ev.lyrics;
 }
@@ -1042,9 +1118,10 @@ export function isValidScore(sc) {
       (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&
       (e.gliss === undefined || (e.gliss === true && e.pitches.length > 0)) &&
       (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true) &&
+      [e.slur2, e.slur2End, e.ped, e.pedEnd, e.ottEnd].every((f) => f === undefined || f === true) && (e.ott === undefined || Object.hasOwn(OTT_SHIFT, e.ott)) &&
       (e.lyrics === undefined || (Array.isArray(e.lyrics) && e.lyrics.length > 0 && e.lyrics.length <= MAX_VERSES &&
         e.pitches.length > 0 && e.lyrics[e.lyrics.length - 1] !== null && e.lyrics.every((l) => l === null ||
-        (typeof l.text === "string" && l.text.length > 0 && l.text.length <= MAX_LYRIC && (l.hyph === undefined || l.hyph === true)))))));
+        (typeof l.text === "string" && l.text.length > 0 && l.text.length <= MAX_LYRIC && (l.hyph === undefined || l.hyph === true) && (l.ext === undefined || l.ext === true)))))));
     const okClefs = (c) => c === undefined || (c && typeof c === "object" && Object.keys(c).length > 0 &&
       Object.entries(c).every(([k, v]) => /^[1-9]\d*$/.test(k) && +k < n && CLEFS.includes(v)));
     return sc.staves.every((st, k) => (okPitch = isPerc(st) ? drum : pitched) && (CLEFS.includes(st.clef) || isPerc(st)) && okBars(st.bars) && okClefs(st.clefs) &&

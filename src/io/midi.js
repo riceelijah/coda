@@ -67,6 +67,7 @@ export function parseSMF(bytes) {
         if (hi === 0x90 && d2 > 0) events.push({ tick, on: true, ch, note: d1 });
         else if (hi === 0x80 || hi === 0x90) events.push({ tick, on: false, ch, note: d1 });
         else if (hi === 0xc0) events.push({ tick, program: d1 & 0x7f, ch });
+        else if (hi === 0xb0 && d1 === 64) events.push({ tick, meta: -1, ch, down: d2 >= 64 }); // sustain pedal: counted
       }
     }
     off = end;
@@ -119,8 +120,9 @@ export function importMIDI(bytes, fileName = "") {
   const programs = new Map(); // first program change per source
   let extraPrograms = 0;
   tracks.forEach((evs, ti) => {
-    const open = new Map(); // ch:note -> [start ticks]
+    const open = new Map(), down = new Set(); // ch:note -> [start ticks]; channels with the pedal down
     for (const e of evs) {
+      if (e.meta === -1) { if (e.down && !down.has(e.ch)) report.count("Sustain pedal (not imported)"); if (e.down) down.add(e.ch); else down.delete(e.ch); continue; }
       if (e.meta !== undefined) continue;
       if (e.program !== undefined) {
         if (e.ch === 9) continue;
@@ -238,7 +240,7 @@ export function importMIDI(bytes, fileName = "") {
 // per staff with its name and instrument. MIDI is performance data: marks, spellings and the
 // split into layers are not kept.
 export function exportMIDI(score) {
-  const { notes, barStart, held } = schedule(score);
+  const { notes, barStart, held, pedals } = schedule(score);
   const vlq = (n) => { const b = [n & 0x7f]; while ((n >>= 7)) b.unshift((n & 0x7f) | 0x80); return b; };
   const track = (evs) => { // evs: [{tick, bytes}], sorted
     const out = [];
@@ -277,6 +279,7 @@ export function exportMIDI(score) {
     for (const n of notes) if (n.staff === s) {
       ons.push({ tick: n.start, on: 1, bytes: [0x90 | ch, n.midi, n.vel ?? 80] }, { tick: n.end, on: 0, bytes: [0x80 | ch, n.midi, 0] });
     }
+    for (const [a, z] of pedals[s]) ons.push({ tick: a, on: 1, bytes: [0xb0 | ch, 64, 127] }, { tick: z, on: 0, bytes: [0xb0 | ch, 64, 0] }); // DESIGN §37
     ons.sort((a, b) => a.tick - b.tick || a.on - b.on); // note-offs first at equal ticks
     tracks.push(track(evs.concat(ons)));
   });

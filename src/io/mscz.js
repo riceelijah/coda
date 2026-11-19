@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides, melismas, ONE_NOTE, OTT_SHIFT } from "../model.js";
 import { FINGER, ORNAMENTS, parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
@@ -131,6 +131,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     const tuplets = {}; // MuseScore 3: id -> ratio
     const pendDyn = []; // per voice: dynamic waiting for its chord or rest (DESIGN §22)
     const pendText = []; // per voice: text waiting for its chord or rest (DESIGN §30)
+    const pendLine = [], openLine = [], slurOpen = []; // per voice: {ott, ped} waiting for a note; open (DESIGN §37)
     const pendHp = [], lastEv = []; // per voice: hairpin waiting for its first note; last event (DESIGN §23)
     // a <Note>'s written pitch: pitch and tpc are concert; Coda keeps the written note (tpc2)
     const notePitch = (n) => {
@@ -221,6 +222,13 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (type === "HairPin") {
               if (kid(el, "next")) pendHp[vi] = ["<", ">", "<", ">"][+txt(kid(el, "HairPin"), "subtype") || 0] || "<";
               else if (kid(el, "prev") && (bar.length ? bar[bar.length - 1] : lastEv[vi])) (bar.length ? bar[bar.length - 1] : lastEv[vi]).hpEnd = true;
+            } else if (type === "Ottava" || type === "Pedal") { // DESIGN §37: MuseScore keeps the written pitch, as Coda does
+              const kind = type === "Ottava" ? "ott" : "ped", last = bar.length ? bar[bar.length - 1] : lastEv[vi];
+              if (kid(el, "next")) {
+                const sub = txt(kid(el, "Ottava"), "subtype") || "0", o = OTT_MS_IN[sub];
+                if (kind === "ott" && !o) report.count("Octave lines Coda can't show (not imported)");
+                else (pendLine[vi] ||= {})[kind] = kind === "ott" ? o : true;
+              } else if (kid(el, "prev") && last && openLine[vi]?.[kind]) { last[kind + "End"] = true; openLine[vi][kind] = false; }
             } else if (type === "Volta") { // the first staff's: an ending over the next `measures` bars
               if (si > 0 || !kid(el, "next")) break;
               const nums = parseVolta(txt(kid(el, "Volta"), "endings") || "");
@@ -352,12 +360,25 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               pendText[vi] = null;
             }
             if (pendHp[vi]) { ev.hp = pendHp[vi]; pendHp[vi] = null; }
+            for (const k in pendLine[vi] || {}) { ev[k] = pendLine[vi][k]; (openLine[vi] ||= {})[k] = true; }
+            pendLine[vi] = null;
             let graceSlurs = pendG.slurs; // a grace note's slur ends here too; that end isn't this note's
             pendG.slurs = 0;
-            for (const sp of kids(el, "Spanner")) {
-              if (sp.getAttribute("type") === "Slur" && kid(sp, "prev") && graceSlurs > 0) { graceSlurs--; continue; }
-              if (sp.getAttribute("type") === "Slur") { if (kid(sp, "next")) ev.slur = true; else if (kid(sp, "prev")) ev.slurEnd = true; }
-              else if (kid(sp, "next")) report.count(`Lines (${sp.getAttribute("type")}) not imported`);
+            // slurs: two at a time, the inner one (slur2) ending first (DESIGN §37); ends before starts
+            const sps = kids(el, "Spanner"), slurs = (slurOpen[vi] ||= [false, false]);
+            for (const sp of sps) {
+              if (sp.getAttribute("type") !== "Slur" || !kid(sp, "prev") || kid(sp, "next")) continue;
+              if (graceSlurs > 0) { graceSlurs--; continue; }
+              if (slurs[2]) { slurs[2]--; continue; } // a third slur's end
+              if (slurs[1]) { ev.slur2End = true; slurs[1] = false; } else if (slurs[0]) { ev.slurEnd = true; slurs[0] = false; }
+            }
+            for (const sp of sps) {
+              if (sp.getAttribute("type") === "Slur") {
+                if (!kid(sp, "next")) continue;
+                if (!slurs[0] && !ev.slur) { ev.slur = true; slurs[0] = true; }
+                else if (!slurs[1] && !ev.slur2) { ev.slur2 = true; slurs[1] = true; }
+                else { report.count("Third slurs inside two others (not imported)"); slurs[2] = (slurs[2] || 0) + 1; }
+              } else if (kid(sp, "next")) report.count(`Lines (${sp.getAttribute("type")}) not imported`);
             }
             lyricIn(el, ev, report);
             if (pendG.notes.length) {
@@ -403,6 +424,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     if (pendDyn.some(Boolean)) report.count("Dynamics after the last note (not imported)");
     if (pendText.some(Boolean)) report.count("Text after the last note (not imported)");
     if (pendHp.some(Boolean)) report.count("Hairpins with no notes (not imported)");
+    for (const p of pendLine) for (const k in p || {}) report.count(k === "ott" ? "Octave lines with no notes (not imported)" : "Pedal marks with no notes (not imported)");
     if (!staff.clef) staff.clef = "treble";
     if (d.drums || staff.clef === "percussion") { // DESIGN §27
       // a percussion clef without a drum set: drums by position
@@ -414,7 +436,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
 
   score.measures.push(...measuresFrom(firstAttrs[score.staves.findIndex((st) => st.clef !== "percussion")] || firstAttrs[0])); // the key from the first staff that isn't drums
   const broken = clearBrokenSpans(score), slides = clearBrokenSlides(score);
-  if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
+  if (broken) report.count("Unfinished or overlapping slurs and lines (not imported)", broken);
   if (slides) report.count("Slides not to the very next note, or between chords of different sizes (not imported)", slides);
   padBars(score);
   applyTempi(score, tempi, report);
@@ -437,6 +459,7 @@ const CLEF_OUT = { treble: "G", bass: "F", alto: "C3", tenor: "C4", percussion: 
 const HEAD_MS = { x: "cross", cx: "xcircle", d: "diamond", t: "triangle-up" };
 const drumset = () => [...DRUMS.values()].map((d) => `<Drum pitch="${d.n}"><head>${HEAD_MS[d.head] || "normal"}</head><line>${38 - (d.oct * 7 + d.step)}</line>` +
   `<voice>0</voice><name>${esc(d.name)}</name><stem>1</stem></Drum>`).join("");
+const OTT_MS_IN = { "8va": "8va", "8vb": "8vb", "15ma": "15ma", "15mb": "15mb", 0: "8va", 1: "8vb", 2: "15ma", 3: "15mb" };
 const ARTIC_OUT = { staccato: "articStaccatoAbove", accent: "articAccentAbove", tenuto: "articTenutoAbove", marcato: "articMarcatoAbove" };
 const gcd = (a, b) => (b ? gcd(b, a % b) : a);
 const frac = (ticks) => { const g = gcd(Math.abs(ticks), 1920) || 1; return `${ticks / g}/${1920 / g}`; };
@@ -444,7 +467,7 @@ const tpcOf = (p) => [14, 16, 18, 13, 15, 17, 19][p.step] + 7 * p.alter;
 const loc = (dm, dt) => `<location>${dm ? `<measures>${dm}</measures>` : ""}${dt ? `<fractions>${frac(dt)}</fractions>` : ""}</location>`;
 
 // A chord's <Lyrics> onto `ev` by verse (DESIGN §24): <no> is the verse − 1, none for verse 1.
-// Verses past the fifth and extender lines are counted.
+// Verses past the fifth are counted; a held syllable (ticks) gets an extender line.
 function lyricIn(el, ev, report) {
   const ls = kids(el, "Lyrics").filter((l) => txt(l, "text"));
   if (!ls.length) return;
@@ -453,14 +476,14 @@ function lyricIn(el, ev, report) {
     const v = parseInt(txt(l, "no") || "0", 10);
     if (!(v >= 0 && v < MAX_VERSES)) { report.count(`Lyrics beyond verse ${MAX_VERSES} (not imported)`); continue; }
     if (ev.lyrics?.[v]) { report.count("Second lyrics in the same verse on one note (not imported)"); continue; }
-    if (kid(l, "ticks_f") || kid(l, "ticks")) report.count("Lyric extender lines (not imported)");
+    const hyph = ["begin", "middle"].includes(txt(l, "syllabic")), held = (parseInt(txt(l, "ticks"), 10) || 0) > 0 || /^[1-9]/.test(txt(l, "ticks_f") || "");
     if (txt(l, "text").length > MAX_LYRIC) report.count("Long lyrics shortened");
-    setLyric(ev, txt(l, "text"), ["begin", "middle"].includes(txt(l, "syllabic")), v);
+    setLyric(ev, txt(l, "text"), hyph, v, held && !hyph); // a held syllable: an extender line (DESIGN §37); after a hyphen, the hyphen
   }
 }
 
 export function exportMSCX(score) {
-  const syl = syllabics(score);
+  const syl = syllabics(score), mel = melismas(score);
   const x = ['<?xml version="1.0" encoding="UTF-8"?>', '<museScore version="4.20">', "<Score>", "<Division>480</Division>"];
   x.push(`<metaTag name="workTitle">${esc(score.title || "")}</metaTag>`, `<metaTag name="composer">${esc(score.composer || "")}</metaTag>`);
   let id = 0;
@@ -500,7 +523,7 @@ export function exportMSCX(score) {
         }
         const bar = layers[v][b];
         if (v === 0 && !bar.length) x.push(`<Rest><durationType>measure</durationType><duration>${frac(cap)}</duration></Rest>`);
-        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st, spans[v], syl));
+        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st, spans[v], syl, mel));
         if (v === 0 && s === 0) x.push(...navEnd(score.measures, b, cap));
         const nc = v === 0 && st.clefs?.[b + 1]; // a clef change goes at the end of the bar before, as MuseScore writes it
         if (nc) x.push(`<Clef><concertClefType>${CLEF_OUT[nc]}</concertClefType><transposingClefType>${CLEF_OUT[nc]}</transposingClefType></Clef>`);
@@ -568,29 +591,31 @@ function tieMap(bars) {
   return map;
 }
 
-// Slurs and hairpins (DESIGN §23): "b:i" -> {slurNext, slurPrev, hpNext, hpPrev} locations. A slur
-// runs onset to onset; a hairpin from its first onset to the end of its last note.
+// Slurs, hairpins, octave lines and pedal marks (DESIGN §23, §35): "b:i" -> {slurNext, slurPrev,
+// hpNext, …} locations. A slur runs onset to onset; the others from the first onset to the end of the last note.
 function spanMap(bars) {
   const pos = [];
   bars.forEach((bar, b) => { let t = 0; bar.forEach((e, i) => { pos.push({ b, i, t, e }); t += eventTicks(e); }); });
   const map = {}, at = (p) => (map[p.b + ":" + p.i] ||= {});
   for (const [k, ke] of SPAN_KINDS) {
     let a = null;
+    const first = ONE_NOTE.has(k);
     for (const p of pos) {
+      if (first && p.e[k]) a = p;
       if (p.e[ke] && a) {
-        const zt = k === "slur" ? p.t : p.t + eventTicks(p.e);
+        const zt = k.startsWith("slur") ? p.t : p.t + eventTicks(p.e);
         at(a)[k + "Next"] = loc(p.b - a.b, zt - a.t);
         at(p)[k + "Prev"] = loc(a.b - p.b, a.t - zt);
         a = null;
       }
-      if (p.e[k]) a = p;
+      if (!first && p.e[k]) a = p;
     }
   }
   return map;
 }
 
 // One voice's events; a first voice is padded with rests to `cap`.
-function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
+function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map(), mel = new Map()) {
   const x = [];
   let open = null; // {tup, left: ticks still to fill}
   bar.forEach((e, i) => {
@@ -605,6 +630,8 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
     if (e.dyn) x.push(`<Dynamic><subtype>${e.dyn}</subtype><velocity>${DYN_VEL[e.dyn] || ACCENT_VEL[e.dyn]}</velocity></Dynamic>`);
     const sp = spans[b + ":" + i] || {};
     if (sp.hpNext) x.push(`<Spanner type="HairPin"><HairPin><subtype>${e.hp === ">" ? 1 : 0}</subtype></HairPin><next>${sp.hpNext}</next></Spanner>`);
+    if (sp.ottNext) x.push(`<Spanner type="Ottava"><Ottava><subtype>${e.ott}</subtype></Ottava><next>${sp.ottNext}</next></Spanner>`);
+    if (sp.pedNext) x.push(`<Spanner type="Pedal"><Pedal><beginText>&lt;sym&gt;keyboardPedalPed&lt;/sym&gt;</beginText><endHookType>1</endHookType></Pedal><next>${sp.pedNext}</next></Spanner>`);
     const head = `${e.dots ? `<dots>${e.dots}</dots>` : ""}<durationType>${TYPE_NAME[e.dur]}</durationType>`;
     if (!e.pitches.length) x.push(`<Rest>${head}</Rest>`);
     else {
@@ -625,8 +652,10 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
       for (const p of e.grace || []) x.push(`<Chord><durationType>${one ? "eighth" : "16th"}</durationType>${one ? "<acciaccatura/>" : "<grace16/>"}<Note>${pitchXml(p)}</Note></Chord>`);
       // ponytail: MuseScore slurs need chords at both ends; one on a rest is left out of this file
       const slurs = (sp.slurNext ? `<Spanner type="Slur"><Slur/><next>${sp.slurNext}</next></Spanner>` : "") +
-        (sp.slurPrev ? `<Spanner type="Slur"><prev>${sp.slurPrev}</prev></Spanner>` : "");
-      const lyr = (syl.get(e) || []).map((s, v) => s ? `<Lyrics>${v ? `<no>${v}</no>` : ""}${s === "single" ? "" : `<syllabic>${s}</syllabic>`}<text>${esc(e.lyrics[v].text)}</text></Lyrics>` : "").join("");
+        (sp.slurPrev ? `<Spanner type="Slur"><prev>${sp.slurPrev}</prev></Spanner>` : "") +
+        (sp.slur2Next ? `<Spanner type="Slur"><Slur/><next>${sp.slur2Next}</next></Spanner>` : "") +
+        (sp.slur2Prev ? `<Spanner type="Slur"><prev>${sp.slur2Prev}</prev></Spanner>` : "");
+      const lyr = (syl.get(e) || []).map((s, v) => s ? `<Lyrics>${v ? `<no>${v}</no>` : ""}${s === "single" ? "" : `<syllabic>${s}</syllabic>`}${mel.get(e)?.[v]?.ticks ? `<ticks_f>${frac(mel.get(e)[v].ticks)}</ticks_f>` : ""}<text>${esc(e.lyrics[v].text)}</text></Lyrics>` : "").join("");
       const lines = (e.marks || []).filter((m) => CHORDLINE_OUT[m]).map((m) => `<ChordLine><subtype>${CHORDLINE_OUT[m]}</subtype></ChordLine>`).join("");
       const has = (m) => e.marks?.includes(m);
       const orn = (e.marks || []).filter((m) => ORN_MS_OUT[m]).map((m) => `<Ornament><subtype>${ORN_MS_OUT[m]}</subtype></Ornament>`).join("") +
@@ -636,6 +665,8 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
       if (has("breath") || has("caesura")) x.push(`<Breath><symbol>${has("caesura") ? "caesura" : "breathMarkComma"}</symbol></Breath>`);
     }
     if (sp.hpPrev) x.push(`<Spanner type="HairPin"><prev>${sp.hpPrev}</prev></Spanner>`);
+    if (sp.ottPrev) x.push(`<Spanner type="Ottava"><prev>${sp.ottPrev}</prev></Spanner>`);
+    if (sp.pedPrev) x.push(`<Spanner type="Pedal"><prev>${sp.pedPrev}</prev></Spanner>`);
     if (open) { open.left -= eventTicks(e); if (open.left <= 0) { x.push("<endTuplet/>"); open = null; } }
   });
   if (open) x.push("<endTuplet/>");

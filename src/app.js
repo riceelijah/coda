@@ -338,6 +338,9 @@ const SVG_ICON = {
   tempo: '<text x="12" y="16" font-size="10" text-anchor="middle" fill="currentColor" font-family="Georgia, serif">♩=</text>',
   finger: '<text x="12" y="17" font-size="14" text-anchor="middle" fill="currentColor" font-family="Georgia, serif">1 3</text>',
   none: '<path d="M6 6 L18 18 M18 6 L6 18" stroke="currentColor" stroke-width="1.8"/>',
+  ped: '<text x="12" y="15" font-size="10" text-anchor="middle" fill="currentColor" font-family="Georgia, serif" font-style="italic" font-weight="bold">Ped.</text><path d="M4 19 H20 V14" fill="none" stroke="currentColor"/>',
+  ...Object.fromEntries(["8va", "8vb", "15ma", "15mb"].map((o) => [o, `<text x="${o.length > 3 ? 3 : 4}" y="${o.endsWith("b") ? 19 : 11}" font-size="${o.length > 3 ? 8 : 10}" fill="currentColor" font-family="Georgia, serif" font-style="italic">${o}</text>` +
+    `<path d="M${o.endsWith("b") ? "4 8 H20 V4" : "4 16 H20 V20"}" fill="none" stroke="currentColor" stroke-dasharray="2 2"/>`])),
 };
 const dynIcon = (d) => `<text x="12" y="16" font-size="${d.length > 2 ? 10 : 13}" text-anchor="middle" fill="currentColor" font-family="Georgia, serif" font-style="italic" font-weight="bold">${d}</text>`;
 const MARK_GLYPH = { fermata: "fermataAbove", staccato: "articStaccatoAbove", accent: "articAccentAbove", tenuto: "articTenutoAbove", marcato: "articMarcatoAbove",
@@ -347,11 +350,12 @@ const PALETTES = [
   ["Articulations", "accent", ["fermata", "staccato", "accent", "tenuto", "marcato", "breath", "caesura"].map((m) => "n-" + m)],
   ["Ornaments", "trill", ["n-trill", "n-invMordent", "n-mordent", "n-turn", "n-tremolo", "n-arpeggio"]],
   ["Dynamics", "mf", [...M.DYNS.map((d) => "d-" + d), "d-none"]],
-  ["Slurs and hairpins", "slur", ["n-slur", "n-cresc", "n-dim"]],
+  ["Slurs and lines", "slur", ["n-slur", "n-cresc", "n-dim", "n-8va", "n-8vb", "n-15ma", "n-15mb", "n-ped"]],
   ["Brass effects", "fall", ["n-scoop", "n-fall", "n-doit", "n-gliss"]],
   ["Text, fingering, lyrics and tempo", "text", ["n-text", "n-finger", "n-lyrics", "b-rehearsal", "b-tempo"]],
 ];
 const ICON_OF = { "n-slur": "slur", "n-cresc": "cresc", "n-dim": "dim", "n-gliss": "gliss", "n-tremolo": "tremolo", "n-arpeggio": "arpeggio",
+  "n-8va": "8va", "n-8vb": "8vb", "n-15ma": "15ma", "n-15mb": "15mb", "n-ped": "ped",
   "n-lyrics": "lyrics", "n-text": "text", "n-finger": "finger", "b-rehearsal": "rehearsal", "b-tempo": "tempo", "d-none": "none" };
 // An icon from the score's own music font, cropped to the glyph.
 function glyphIcon(code) {
@@ -503,11 +507,16 @@ function dynamic(d) {
 function span(kind, type) {
   if (!state.sel) { message("Select a note first", true); return; }
   const s = state.sel, r = range();
-  edit((sc) => M.toggleSpan(r.map((p) => sc.staves[s.staff].bars[p.bar][p.idx]), kind, type));
+  edit((sc) => {
+    const st = sc.staves[s.staff], evs = r.map((p) => st.bars[p.bar][p.idx]);
+    if (kind === "slur") return M.toggleSlur(st.bars.flat(), evs);
+    return M.toggleSpan(evs, kind, type);
+  });
 }
 
 // ---------- lyrics (DESIGN §24) ----------
-// A box under the selected note: Space or Tab moves on, "-" moves on with a hyphen, Shift+Tab
+// A box under the selected note: Space or Tab moves on, "-" moves on with a hyphen, "_" with an
+// extender line over the notes up to the next syllable (DESIGN §37), Shift+Tab
 // goes back, Enter or clicking away finishes, Escape drops what's typed. Each syllable is one edit.
 // ↑/↓ change verse (state.verse, kept for next time).
 function openLyrics() {
@@ -534,10 +543,10 @@ function placeLyricBox() {
   box.style.top = r.top - sheet.top + (base - 14 + state.verse * LYRIC_LINE - cell.svg.viewBox.baseVal.y) * k + "px";
 }
 
-function commitLyric(hyph) {
+function commitLyric(hyph, ext = extOf()) {
   const s = state.sel, ev = selEvent(), text = $("lyric-box").value.trim(), v = state.verse, l = ev?.lyrics?.[v];
-  if (!s || !ev || ((l?.text || "") === text && !!l?.hyph === (hyph && !!text))) return;
-  edit((sc) => { M.setLyric(sc.staves[s.staff].bars[s.bar][s.idx], text, hyph, v); return null; });
+  if (!s || !ev || ((l?.text || "") === text && !!l?.hyph === (hyph && !!text) && !!l?.ext === (ext && !!text))) return;
+  edit((sc) => { M.setLyric(sc.staves[s.staff].bars[s.bar][s.idx], text, hyph, v, ext); return null; });
 }
 
 // Next (dir 1) or previous note with pitches in the layer; false at either end.
@@ -554,13 +563,14 @@ function lyricStep(dir) {
 }
 
 function closeLyrics() { const box = $("lyric-box"); box.hidden = true; box.blur(); message(""); }
-const hyphOf = () => !!selEvent()?.lyrics?.[state.verse]?.hyph; // Enter, Shift+Tab and ↑/↓ keep the hyphen
+const hyphOf = () => !!selEvent()?.lyrics?.[state.verse]?.hyph; // Enter, Shift+Tab and ↑/↓ keep the hyphen and extender
+const extOf = () => !!selEvent()?.lyrics?.[state.verse]?.ext;
 
 function onLyricKey(e) {
   const k = e.key;
-  if (k === " " || (k === "Tab" && !e.shiftKey) || k === "-") {
+  if (k === " " || (k === "Tab" && !e.shiftKey) || k === "-" || k === "_") {
     e.preventDefault();
-    commitLyric(k === "-");
+    commitLyric(k === "-", k === "_");
     if (!lyricStep(1)) closeLyrics();
   } else if (k === "Tab") { e.preventDefault(); commitLyric(hyphOf()); lyricStep(-1); }
   else if (k === "Enter") { e.preventDefault(); commitLyric(hyphOf()); closeLyrics(); }
@@ -1580,6 +1590,8 @@ const CMD = {
   "n-nograce": { run: () => clearGrace(), on: hasSel },
   "n-cresc": { run: () => span("hp", "<"), on: hasSel },
   "n-dim": { run: () => span("hp", ">"), on: hasSel },
+  ...Object.fromEntries(Object.keys(M.OTT_SHIFT).map((o) => ["n-" + o, { run: () => span("ott", o), on: hasSel }])),
+  "n-ped": { run: () => span("ped", true), on: hasSel },
   "n-layer1": { run: () => setLayer(0) },
   "n-layer2": { run: () => setLayer(1) },
   "n-layer3": { run: () => setLayer(2) },

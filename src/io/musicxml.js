@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barLen, setBarLen, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER, ORNAMENTS,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER, ORNAMENTS, OTT_SHIFT, staffLines, ottAt,
 } from "../model.js";
 import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
@@ -26,18 +26,18 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 // Slur and wedge numbers: one per voice, so slurs in two hands or layers that overlap stay apart.
 // a pitch, or for a drum (DESIGN §27) its staff position as <unpitched>
-const pitchXml = (p) => (p.drum
+const pitchXml = (p, d = 0) => (p.drum
   ? `<unpitched><display-step>${"CDEFGAB"[p.step]}</display-step><display-octave>${p.oct}</display-octave></unpitched>`
-  : `<pitch><step>${"CDEFGAB"[p.step]}</step>${p.alter ? `<alter>${p.alter}</alter>` : ""}<octave>${p.oct}</octave></pitch>`);
+  : `<pitch><step>${"CDEFGAB"[p.step]}</step>${p.alter ? `<alter>${p.alter}</alter>` : ""}<octave>${p.oct + d}</octave></pitch>`);
 const HEAD_OUT = { x: "x", cx: "circle-x", d: "diamond", t: "triangle" };
 const drumInst = (pid, n) => `<instrument id="${pid}-I${n}"/>`;
 const headXml = (p) => (p.drum && HEAD_OUT[DRUMS.get(p.drum)?.head] ? `<notehead>${HEAD_OUT[DRUMS.get(p.drum).head]}</notehead>` : "");
 
-function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl, pid, slideStop, k = 0 }) {
+function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl, pid, slideStop, k = 0, d = 0 }) {
   const x = ["<note>"];
   if (chord) x.push("<chord/>");
   if (p) {
-    x.push(pitchXml(p));
+    x.push(pitchXml(p, d)); // under an octave line the file has the sounding octave (DESIGN §37)
   } else x.push("<rest/>");
   x.push(`<duration>${eventTicks(ev)}</duration>`);
   const tieStart = p && ev.tie;
@@ -58,7 +58,9 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl
   if (!chord && tupStart) nots.push('<tuplet type="start" bracket="yes"/>');
   if (!chord && tupStop) nots.push('<tuplet type="stop"/>');
   if (!chord && ev.slurEnd) nots.push(`<slur type="stop" number="${voice}"/>`); // DESIGN §23
+  if (!chord && ev.slur2End) nots.push(`<slur type="stop" number="${voice + 8}"/>`);
   if (!chord && ev.slur) nots.push(`<slur type="start" number="${voice}"/>`);
+  if (!chord && ev.slur2) nots.push(`<slur type="start" number="${voice + 8}"/>`); // a slur inside another: voices go to 8 in a part
   if (!chord && ev.marks) {
     if (ev.marks.includes("fermata")) nots.push('<fermata type="upright"/>');
     const arts = p ? ev.marks.filter((m) => ARTIC_OUT[m]) : [];
@@ -68,15 +70,15 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl
   }
   if (p && ev.marks?.includes("arpeggio") && ev.pitches.length > 1) nots.push("<arpeggiate/>"); // on every note of the chord
   if (nots.length) x.push(`<notations>${nots.join("")}</notations>`);
-  if (!chord && syl) syl.forEach((s, v) => s && x.push(`<lyric number="${v + 1}"><syllabic>${s}</syllabic><text>${esc(ev.lyrics[v].text)}</text></lyric>`));
+  if (!chord && syl) syl.forEach((s, v) => s && x.push(`<lyric number="${v + 1}"><syllabic>${s}</syllabic><text>${esc(ev.lyrics[v].text)}</text>${ev.lyrics[v].ext ? "<extend/>" : ""}</lyric>`));
   x.push("</note>");
   return x.join("");
 }
 
 // Grace notes (DESIGN §26): one is a slashed eighth, more are sixteenths, before their note.
-function graceXml(grace, staffNo, voice, pid) {
+function graceXml(grace, staffNo, voice, pid, d = 0) {
   const one = grace.length === 1;
-  return grace.map((p) => `<note><grace${one ? ' slash="yes"' : ""}/>${pitchXml(p)}${p.drum ? drumInst(pid, p.drum) : ""}` +
+  return grace.map((p) => `<note><grace${one ? ' slash="yes"' : ""}/>${pitchXml(p, d)}${p.drum ? drumInst(pid, p.drum) : ""}` +
     `<voice>${voice}</voice><type>${one ? "eighth" : "16th"}</type>${headXml(p)}${staffNo ? `<staff>${staffNo}</staff>` : ""}</note>`).join("");
 }
 
@@ -100,7 +102,7 @@ export function completeTuplet(bar, cap) {
 }
 
 // Notes for one staff in one bar. Returns {xml, ticks written}.
-function barXml(score, s, b, staffNo, voice, v, syl, pid) {
+function barXml(score, s, b, staffNo, voice, v, syl, pid, oct) {
   const cap = barLen(score, b);
   const bars = layerBars(score.staves[s], v);
   const bar = completeTuplet(bars[b], cap);
@@ -114,15 +116,20 @@ function barXml(score, s, b, staffNo, voice, v, syl, pid) {
   bar.forEach((ev, i) => {
     const before = i > 0 ? bar[i - 1] : prev;
     const tied = (p) => !!(before && before.tie && before.pitches.some((q) => q.step === p.step && q.oct === p.oct && q.drum === p.drum));
-    const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev), pid };
+    const d = oct.get(ev) || 0, flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev), pid, d };
     const dir = (body) => `<direction placement="below"><direction-type>${body}</direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`;
     if (ev.dyn) out.push(dir(`<dynamics><${ev.dyn}/></dynamics>`));
     if (ev.text) out.push(dir(`<words>${esc(ev.text)}</words>`).replace('placement="below"', 'placement="above"')); // DESIGN §30
     if (ev.hp) out.push(dir(`<wedge type="${ev.hp === "<" ? "crescendo" : "diminuendo"}" number="${voice}"/>`));
-    if (ev.grace) out.push(graceXml(ev.grace, staffNo, voice, pid));
+    if (ev.ott) out.push(dir(`<octave-shift type="${OTT_SHIFT[ev.ott] > 0 ? "down" : "up"}" size="${Math.abs(OTT_SHIFT[ev.ott]) > 1 ? 15 : 8}"/>`)
+      .replace('placement="below"', `placement="${OTT_SHIFT[ev.ott] > 0 ? "above" : "below"}"`)); // DESIGN §37
+    if (ev.ped) out.push(dir('<pedal type="start" line="yes"/>'));
+    if (ev.grace) out.push(graceXml(ev.grace, staffNo, voice, pid, d));
     if (!ev.pitches.length) out.push(noteXml(ev, null, flags));
     else ev.pitches.forEach((p, k) => out.push(noteXml(ev, p, { ...flags, chord: k > 0, tieStop: tied(p), slideStop: !!before?.gliss, k })));
     if (ev.hpEnd) out.push(dir(`<wedge type="stop" number="${voice}"/>`)); // after the note it ends on
+    if (ev.ottEnd) out.push(dir(`<octave-shift type="stop" size="${Math.abs(d) > 1 ? 15 : 8}"/>`));
+    if (ev.pedEnd) out.push(dir('<pedal type="stop" line="yes"/>'));
   });
   let ticks = barTicks(bar);
   if (ticks < cap) { out.push(restXml(cap - ticks, staffNo, voice, false)); ticks = cap; }
@@ -130,7 +137,11 @@ function barXml(score, s, b, staffNo, voice, v, syl, pid) {
 }
 
 export function exportMusicXML(score) {
-  const syl = syllabics(score);
+  const syl = syllabics(score), oct = new Map(); // event -> octaves its line raises it (DESIGN §37)
+  score.staves.forEach((st, s) => {
+    const lines = staffLines(score, s);
+    if (lines.ott.length) allLayers(st).forEach((bars) => { let t = 0; bars.forEach((bar, b) => { let at = t; for (const e of bar) { oct.set(e, ottAt(lines, at)); at += eventTicks(e); } t += barLen(score, b); }); });
+  });
   const groups = partGroups(score);
   const x = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -196,7 +207,7 @@ export function exportMusicXML(score) {
       // every layer bar with notes, as voice staff×4 + layer + 1, separated by <backup> (DESIGN §15)
       const chunks = [];
       g.forEach((s, k) => allLayers(score.staves[s]).forEach((bars, v) => {
-        if (v === 0 || bars[b].length) chunks.push(barXml(score, s, b, g.length > 1 ? k + 1 : 0, k * MAX_LAYERS + v + 1, v, syl, `P${gi + 1}`));
+        if (v === 0 || bars[b].length) chunks.push(barXml(score, s, b, g.length > 1 ? k + 1 : 0, k * MAX_LAYERS + v + 1, v, syl, `P${gi + 1}`, oct));
       }));
       chunks.forEach((r, i) => {
         x.push(r.xml);
@@ -316,6 +327,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     const pend = {}; // staff -> dynamic waiting for its note
     const pendText = {}; // staff -> text waiting for its note (DESIGN §30)
     const pendHp = {}, lastAny = {}; // staff -> hairpin waiting for its note; last event read
+    const lines = { shift: {}, pend: {}, open: {} }; // octave lines and pedal marks: staff -> octaves up; staff+kind -> waiting / open (DESIGN §37)
     const openHp = {}, openSlur = {}; // staff -> {ev: where the open hairpin starts, prev: one still open before it}; staff:layer -> open slur number
     // staff -> MusicXML voice ids in layer order: numeric order, so voice 1 is always layer 1
     const voiceOf = {};
@@ -445,6 +457,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
                 }
                 continue;
               }
+              if (c.localName === "octave-shift" || c.localName === "pedal") { lineDir(c, +(txt(el, "staff") || 1), pos.t, mi, lines, lastAny, report); continue; }
               if (c.localName === "dynamics") { // goes on the staff's next note or rest (DESIGN §22)
                 const d = DYN_IN[c.firstElementChild?.localName];
                 if (d) pend[+(txt(el, "staff") || 1)] = { dyn: d, at: pos.t, mi };
@@ -474,7 +487,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
         } else if (tag !== "note") countUnread(report, { children: [el] }, MEASURE_READ, MEASURE_NAMES);
         if (tag === "note") {
           const start = pos.t;
-          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums });
+          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums, lines });
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
@@ -487,6 +500,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     for (const k in pend) if (pend[k]) report.count("Dynamics after the last note (not imported)");
     for (const k in pendText) if (pendText[k]) report.count("Text after the last note (not imported)");
     for (const k in pendHp) if (pendHp[k]) report.count("Hairpins with no notes (not imported)");
+    for (const k in lines.pend) if (lines.pend[k]) report.count(k.endsWith("ott") ? "Octave lines with no notes (not imported)" : "Pedal marks with no notes (not imported)");
     staves.forEach((st) => { if (!st.clef) st.clef = "treble"; });
     finishDrums(staves, report);
     partAttrs.push({ attrs, perc: staves.every(isPerc) });
@@ -496,7 +510,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
 
   score.measures.push(...measuresFrom((partAttrs.find((a) => !a.perc) || partAttrs[0]).attrs));
   const broken = clearBrokenSpans(score), slides = clearBrokenSlides(score);
-  if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
+  if (broken) report.count("Unfinished or overlapping slurs and lines (not imported)", broken);
   if (slides) report.count("Slides not to the very next note, or between chords of different sizes (not imported)", slides);
 
   score.title = (root.querySelector("work > work-title")?.textContent || txt(root, "movement-title") ||
@@ -540,7 +554,6 @@ export const DYN_IN = { ppp: "ppp", pp: "pp", p: "p", mp: "mp", mf: "mf", f: "f"
   pppp: "ppp", ppppp: "ppp", pppppp: "ppp", ffff: "fff", fffff: "fff", ffffff: "fff", sfp: "fp", sfpp: "fp", sffz: "sfz", rfz: "sfz", rf: "sf", sfzp: "fp" };
 const DIRECTIONS = {
   segno: "Segno and coda signs (not imported)", coda: "Segno and coda signs (not imported)",
-  pedal: "Pedal marks (not imported)", "octave-shift": "Octave lines (not imported)",
   dashes: "Dashed lines after text (not imported)", bracket: "Bracket lines (not imported)", "other-direction": "Other directions (not imported)",
 };
 // What each level of a MusicXML file holds that Coda reads, or skips on purpose (layout, stems,
@@ -569,7 +582,7 @@ function finishDrums(staves, report) {
   });
 }
 
-function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums }) {
+function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums, lines }) {
   const isRest = !!kid(el, "rest");
   const grace = kid(el, "grace");
   if (grace && isRest) { report.count("Grace rests (not imported)"); return; }
@@ -617,11 +630,14 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
       else if (c.localName === "slur") {
         const t = c.getAttribute("type");
         // one slur at a time per staff and layer: the first number opened is followed, others counted
-        const num = c.getAttribute("number") || "1";
-        if (t === "start" && !openSlur[lk]) { openSlur[lk] = num; slur.start = true; }
-        else if (t === "start" && openSlur[lk] === num && kid(el, "chord")) slur.start = true; // the same slur on a chord note
-        else if (t === "start") report.count("Slurs inside other slurs (not imported)");
+        // two at a time per staff and layer (a slur inside another, DESIGN §37); a third is counted
+        const num = c.getAttribute("number") || "1", lk2 = lk + ":2";
+        if (t === "start" && kid(el, "chord") && (openSlur[lk] === num || openSlur[lk2] === num)) { /* the same slur on a chord note */ }
+        else if (t === "start" && !openSlur[lk]) { openSlur[lk] = num; slur.start = true; }
+        else if (t === "start" && !openSlur[lk2]) { openSlur[lk2] = num; slur.start2 = true; }
+        else if (t === "start") report.count("Third slurs inside two others (not imported)");
         else if (t === "stop" && openSlur[lk] === num) { delete openSlur[lk]; slur.stop = true; }
+        else if (t === "stop" && openSlur[lk2] === num) { delete openSlur[lk2]; slur.stop2 = true; }
       }
       else if ((c.localName === "slide" || c.localName === "glissando") && !isRest) { if (c.getAttribute("type") === "start") glide = true; }
       else if (MARKS[c.localName]) { if (c.getAttribute("type") !== "stop") report.count(MARKS[c.localName]); }
@@ -647,10 +663,10 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     let alter = parseFloat(txt(p, "alter") || "0");
     if (!Number.isInteger(alter)) { report.count("Microtonal alterations rounded"); alter = Math.round(alter); }
     if (step < 0 || !Number.isFinite(oct)) return;
-    pitch = { step, oct, alter: Math.max(-2, Math.min(2, alter)), ...(finger ? { finger } : {}) };
+    pitch = { step, oct: oct - (lines.shift[staffNo] || 0), alter: Math.max(-2, Math.min(2, alter)), ...(finger ? { finger } : {}) }; // written under an octave line
     if (p.localName === "unpitched") { // a drum (DESIGN §27): its instrument's MIDI note; finishDrums fills in the rest
       const n = drums?.[kid(el, "instrument")?.getAttribute("id")];
-      pitch = { step, oct, alter: 0, drum: isDrum(n) ? n : 0 }; // 0: not known yet
+      pitch = { step, oct: oct - (lines.shift[staffNo] || 0), alter: 0, drum: isDrum(n) ? n : 0 }; // 0: not known yet
       if (Number.isInteger(n) && !isDrum(n)) report.count("Drums outside the General MIDI kit (sound from their position)");
     }
   }
@@ -658,7 +674,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   if (grace) { // held until the note it comes before; before the chord branch so it can't join the last note
     if (!pitch) return;
     if (kid(el, "chord")) { report.count("Grace-note chords reduced to their first note"); return; }
-    if (marks.length || glide || slur.start || slur.stop || tieStart || kids(el, "lyric").length) report.count("Marks, slurs, ties and lyrics on grace notes (not imported)");
+    if (marks.length || glide || Object.keys(slur).length || tieStart || kids(el, "lyric").length) report.count("Marks, slurs, ties and lyrics on grace notes (not imported)");
     const g = (pendGrace[lk] ||= { notes: [], types: [] });
     g.notes.push(pitch);
     g.types.push((grace.getAttribute("slash") === "yes" ? "/" : "") + (txt(el, "type") || ""));
@@ -673,8 +689,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     }
     if (tieStart) ev.tie = true;
     addMarks(ev);
-    if (slur.start) ev.slur = true;
-    if (slur.stop) ev.slurEnd = true;
+    slurIn(ev, slur);
     lyricIn(el, ev, report);
     return;
   }
@@ -731,8 +746,11 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   }
   const ph = pendHp[staffNo];
   if (ph && (ph.mi < mi || start >= ph.at)) { ev.hp = ph.hp; pendHp[staffNo] = null; openHp[staffNo] = { ev, prev: openHp[staffNo] || null }; }
-  if (slur.start) ev.slur = true;
-  if (slur.stop) ev.slurEnd = true;
+  for (const kind of ["ott", "ped"]) {
+    const pl = lines.pend[staffNo + kind];
+    if (pl && (pl.mi < mi || start >= pl.at)) { ev[kind] = pl.val; lines.pend[staffNo + kind] = null; lines.open[staffNo + kind] = ev; }
+  }
+  slurIn(ev, slur);
   lyricIn(el, ev, report);
   const g = pendGrace[lk];
   if (g) {
@@ -750,6 +768,38 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   lastEvent[lk] = ev;
 }
 
+function slurIn(ev, slur) {
+  if (slur.start) ev.slur = true;
+  if (slur.stop) ev.slurEnd = true;
+  if (slur.start2) ev.slur2 = true;
+  if (slur.stop2) ev.slur2End = true;
+}
+
+// <octave-shift> and <pedal> (DESIGN §37): a start waits for the staff's next note; a stop ends on
+// the last note read. Notes under an octave line are written an octave from their sounding pitch.
+function lineDir(c, sn, at, mi, L, lastAny, report) {
+  const ott = c.localName === "octave-shift", kind = ott ? "ott" : "ped", k = sn + kind, t = c.getAttribute("type");
+  const stop = () => {
+    if (L.pend[k]) { report.count(ott ? "Octave lines with no notes (not imported)" : "Pedal marks with no notes (not imported)"); L.pend[k] = null; }
+    else if (L.open[k] && lastAny[sn]) lastAny[sn][kind + "End"] = true;
+    L.open[k] = null;
+  };
+  if (ott) {
+    const size = +(c.getAttribute("size") || 8);
+    if (t === "stop") { stop(); L.shift[sn] = 0; }
+    else if ((t === "up" || t === "down") && (size === 8 || size === 15)) {
+      if (L.open[k] || L.pend[k]) stop();
+      const o = (size === 15 ? 2 : 1) * (t === "down" ? 1 : -1);
+      L.shift[sn] = o;
+      L.pend[k] = { val: { 1: "8va", 2: "15ma", "-1": "8vb", "-2": "15mb" }[o], at, mi };
+    } else if (t === "up" || t === "down") report.count("Octave lines Coda can't show (notes kept at their sounding pitch)");
+  } else if (t === "start" || t === "change" || t === "resume") {
+    if (L.open[k] || L.pend[k]) stop();
+    L.pend[k] = { val: true, at, mi };
+  } else if (t === "stop" || t === "discontinue") stop();
+  else if (t === "sostenuto") report.count("Sostenuto pedal marks (not imported)");
+}
+
 // A note's lyrics onto `ev` by verse (DESIGN §24): number="1"–"5" (none is 1); a verse the event
 // already has (a chord's other notes) is kept. Other numbers and extender lines are counted.
 function lyricIn(el, ev, report) {
@@ -763,10 +813,9 @@ function lyricIn(el, ev, report) {
     if (seen.has(v)) { report.count("Second lyrics in the same verse on one note (not imported)"); continue; }
     seen.add(v);
     if (ev.lyrics?.[v]) continue;
-    if (kid(l, "extend") && kid(l, "extend").getAttribute("type") !== "stop") report.count("Lyric extender lines (not imported)");
     const text = kids(l, "text").map((t) => t.textContent.trim()).join("‿"); // elided syllables share a note
     if (text.length > MAX_LYRIC) report.count("Long lyrics shortened");
-    setLyric(ev, text, ["begin", "middle"].includes(txt(l, "syllabic")), v);
+    setLyric(ev, text, ["begin", "middle"].includes(txt(l, "syllabic")), v, !!kid(l, "extend") && kid(l, "extend").getAttribute("type") !== "stop");
   }
 }
 

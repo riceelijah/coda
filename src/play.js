@@ -1,6 +1,6 @@
 // Coda playback: sampled General MIDI sounds fetched on demand, with a triangle-wave fallback.
 // See docs/DESIGN.md §7 and §13.3.
-import { attrsAt, barCapacity, barLen, eventTicks, midi as midiOf, keyAt, keyAlter, diatonic, fromDiatonic, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder, tempoAt } from "./model.js";
+import { attrsAt, barCapacity, barLen, eventTicks, midi as midiOf, keyAt, keyAlter, diatonic, fromDiatonic, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder, tempoAt, staffLines, ottAt } from "./model.js";
 import { drumHit } from "./drumsynth.js";
 import { GM } from "./gm.js";
 import { getSound } from "./usersounds.js";
@@ -55,6 +55,7 @@ export function schedule(score, from = 0) {
   const held = () => { timeOf(0); return holds; };
   const notes = [];
   const linVel = dynamics(score, 0);
+  const lines = score.staves.map((_, si) => staffLines(score, si)); // octave lines and pedal marks (DESIGN §37)
   score.staves.forEach((st, si) => allLayers(st).forEach((bars) => {
     const open = new Map(); // midi -> note awaiting a tie continuation, per layer
     let slide = null; // the notes a slide starts from (DESIGN §31): {from: [note per pitch], t0, end}
@@ -67,10 +68,11 @@ export function schedule(score, from = 0) {
         if (ev.marks?.includes("fermata")) fermatas.set(at, Math.min(fermatas.get(at) ?? Infinity, len));
         // a drum staff plays its drum numbers on the kit, program -1 (DESIGN §27)
         const perc = isPerc(st), nextOpen = new Map(), tr = st.transpose?.[0] || 0, base = { vel: velAt(si, at), program: perc ? -1 : st.program ?? 0, staff: si, ...(st.sound && !perc ? { sound: st.sound } : {}) };
-        const midi = (p) => (perc ? p.drum - tr : midiOf(p));
+        const lin0 = lin[bar] - tick, oct = perc ? 0 : ottAt(lines[si], at + lin0);
+        const midi = (p) => (perc ? p.drum - tr : midiOf(p) + 12 * oct);
         // grace notes (DESIGN §26) take a 32nd each, at most half the note, from the start of the beat
         const g = ev.grace ? Math.min(60, Math.floor(len / 2 / ev.grace.length)) : 0;
-        (ev.grace || []).forEach((p, k) => notes.push({ start: at + k * g, end: at + (k + 1) * g, midi: midi(p) + tr, ...base }));
+        (ev.grace || []).forEach((p, k) => notes.push({ start: at + k * g, end: at + (k + 1) * g, midi: midi(p) + tr, lin0, ...base }));
         const on = at + g * (ev.grace?.length || 0);
         const from = slide && slide.end === at && !g && !perc ? slide.from : null, made = [];
         ev.pitches.forEach((p, k) => {
@@ -78,7 +80,7 @@ export function schedule(score, from = 0) {
           let n = open.get(m);
           if (n && n.end === at && !g) n.end = at + len;
           else {
-            n = { start: on, end: at + len, midi: m, ...base };
+            n = { start: on, end: at + len, midi: m, lin0, ...base };
             notes.push(n);
             const r = from?.[k]?.root || from?.[k];
             // a slide: the first note's voice glides here and keeps sounding; this one is for MIDI only
@@ -92,7 +94,7 @@ export function schedule(score, from = 0) {
           else if (ev.marks?.includes("staccato")) n.end = (Math.max(n.start, at) + at + len) / 2; // sounds half its length (after any grace notes)
         });
         if (ev.marks) perform(ev, made.map((n, k) => ({ n, p: ev.pitches[k] })).filter(({ n }) => n.start === on && !n.root && !n.glide), notes,
-          { at, len, perc, tied: !!ev.tie || !!ev.gliss, top: ev.pitches[ev.pitches.length - 1], key: keyAt(score, si, bar), tr });
+          { at, len, perc, tied: !!ev.tie || !!ev.gliss, top: ev.pitches[ev.pitches.length - 1], key: keyAt(score, si, bar), tr: tr + 12 * oct });
         // a slide takes the last half of its note, at most a beat
         slide = ev.gliss && !perc ? { from: made, t0: Math.max(at + len / 2, at + len - PPQ), end: at + len } : null;
         open.clear();
@@ -101,7 +103,27 @@ export function schedule(score, from = 0) {
       }
     });
   }));
-  return { notes, barStart, total, timeOf, held };
+  // the pedal lets every note struck under it ring to the pedal's end (lin0: written minus unrolled
+  // ticks). ring is for audio; MIDI writes the pedal itself.
+  for (const n of notes) {
+    const r = lines[n.staff].ped.find((q) => n.start + n.lin0 >= q.a && n.start + n.lin0 < q.z);
+    if (r && r.z - n.lin0 > n.end) n.ring = r.z - n.lin0;
+    delete n.lin0;
+  }
+  const pedals = lines.map(({ ped }) => { // unrolled: [down, up] per staff
+    const out = [];
+    for (const r of ped) {
+      let last = null; // one pedal's pieces join up; two pedals side by side stay apart (a change)
+      for (const { bar, tick } of barStart) {
+        const a = Math.max(r.a, lin[bar]), z = Math.min(r.z, lin[bar] + barLen(score, bar));
+        if (a >= z) continue;
+        const u = [tick + a - lin[bar], tick + z - lin[bar]];
+        if (last && last[1] === u[0]) last[1] = u[1]; else out.push((last = u));
+      }
+    }
+    return out.sort((p, q) => p[0] - q[0]);
+  });
+  return { notes, barStart, total, timeOf, held, pedals };
 }
 
 // How marks sound (DESIGN §34). `fresh`: this event's newly struck notes, low to high (not tied
@@ -435,7 +457,7 @@ async function prepare(all, waitMs, onStatus = () => {}) {
 function scheduleNotes(c, dest, notes, t0, timeOf) {
   for (const n of notes) {
     if (n.root) continue; // sounded by the note its slide starts from
-    const end = Math.max(n.end, ...(n.glide || []).map((s) => s.note.end));
+    const end = Math.max(n.end, n.ring || 0, ...(n.glide || []).map((s) => s.note.end));
     const len = Math.max(0.06, timeOf(end) - timeOf(n.start));
     note(c, dest, n.midi, n.program, t0 + timeOf(n.start), len, n.sound, n.vel, bendOf(n, len, timeOf));
   }

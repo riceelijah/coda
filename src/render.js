@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, barLen, barCapacity, barNumber, partGroups, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
+import { attrsAt, barLen, barCapacity, barNumber, partGroups, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, ONE_NOTE, melismas, OTT_SHIFT, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
 import { DRUMS } from "./drums.js";
 
 const VF = () => Vex.Flow;
@@ -277,11 +277,12 @@ export function render(score, container, sel, opts = {}) {
   // Lyrics: a line per verse for each staff and system, below its notes and dynamics (DESIGN §24).
   // lyricY["sys:staff"] = verse 1's baseline, for the app's lyric box.
   // floor["sys:staff"] = lowest thing drawn so far below the staff; hairpins go under it.
-  const floor = {}, lyricY = {};
+  const floor = {}, lyricY = {}, mel = melismas(score), refOf = new Map();
   score.staves.forEach((st, s) => {
     const rows = {}, nv = verses(st); // sys -> [{ev, note}] in order
     allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
       const ref = noteRef[s][v][b]?.[i];
+      if (ref) refOf.set(ev, ref);
       if (ev.lyrics && ref) (rows[ref.sys] ||= []).push({ ev, note: ref.note, v, b, i });
     })));
     for (const si in rows) {
@@ -300,6 +301,10 @@ export function render(score, container, sel, opts = {}) {
             const spans = row.filter(({ ev }) => ev.lyrics[vn]).map(({ ev, note }) => {
               const l = ev.lyrics[vn], w = ctx.measureText(l.text).width, x = note.getAbsoluteX() + 6 - w / 2;
               ctx.fillText(l.text, x, vy);
+              if (l.ext) { // an extender to the last note held, or the line's end (DESIGN §37)
+                const last = refOf.get(mel.get(ev)?.[vn]?.last), x2 = last?.sys === +si ? last.note.getAbsoluteX() + 12 : SHEET_W - 12;
+                if (x2 > x + w + 6) ctx.fillRect(x + w + 2, vy + 1, x2 - x - w - 2, 1);
+              }
               return { x, w, hyph: l.hyph };
             });
             spans.forEach((a, k) => { // hyphen halfway to the next syllable, or just after at a line end
@@ -315,18 +320,28 @@ export function render(score, container, sel, opts = {}) {
       lyricY[si + ":" + s] = y;
     }
   });
+  const slurs = [];
   for (const [kind, end] of SPAN_KINDS) score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => {
     let open = null;
+    const first = ONE_NOTE.has(kind);
     bars.forEach((bar, b) => bar.forEach((ev, i) => {
       const ref = noteRef[s][v][b]?.[i];
+      const start = () => { if (ev[kind] && ref) open = { kind, type: ev[kind], refs: [], evs: [], s, v, multi: allLayers(st).filter((L) => L[b].length).length > 1 }; };
+      if (first) start();
       if (open && ref) { open.refs.push(ref); open.evs.push(ev); }
       if (ev[end] && open) {
-        try { tintedAll(ctxs, opts.dim && v !== (opts.layer || 0), () => drawSpan(ctxs, kind, open, s, floor)); } catch (e) { console.error(e); }
+        if (kind.startsWith("slur")) slurs.push(open);
+        else try { tintedAll(ctxs, opts.dim && v !== (opts.layer || 0), () => (first ? drawLine : drawSpan)(ctxs, kind, open, s, floor)); } catch (e) { console.error(e); }
         open = null;
       }
-      if (ev[kind] && ref) open = { type: ev[kind], refs: [ref], evs: [ev], multi: allLayers(st).filter((L) => L[b].length).length > 1 };
+      if (!first) { start(); if (open && !open.refs.length && ref) { open.refs.push(ref); open.evs.push(ev); } }
     }));
   }));
+  // slurs inside out: one around another clears it (DESIGN §37)
+  slurs.sort((p, q) => p.evs.length - q.evs.length).forEach((sl, k) => {
+    const out = slurs.slice(0, k).filter((o) => o.s === sl.s && o.v === sl.v && sl.evs.includes(o.evs[0]) && sl.evs.includes(o.evs[o.evs.length - 1])).length;
+    try { tintedAll(ctxs, opts.dim && sl.v !== (opts.layer || 0), () => drawSpan(ctxs, "slur", sl, sl.s, floor, out ? 10 : 0)); } catch (e) { console.error(e); }
+  });
 
   systems.forEach((sys) => sys.svg && grow(sys.svg, sys));
   return { cells, systems, errors, lyricY };
@@ -339,7 +354,7 @@ function tintedAll(ctxs, on, draw) {
 }
 
 // One slur or hairpin over refs ({note, sys}, in order), split where the line breaks.
-function drawSpan(ctxs, kind, { type, refs, evs, multi }, s, floor) {
+function drawSpan(ctxs, kind, { type, refs, evs, multi }, s, floor, lift = 0) {
   const segs = [];
   for (const r of refs) {
     if (!segs.length || segs[segs.length - 1].sys !== r.sys) segs.push({ sys: r.sys, notes: [] });
@@ -362,7 +377,7 @@ function drawSpan(ctxs, kind, { type, refs, evs, multi }, s, floor) {
       const y1 = ya ?? yz ?? ext(boxes.map(edge)), y2 = yz ?? y1;
       const inner = boxes.length > 2 ? ext(boxes.slice(1, -1).map(edge)) + dir * 6 : null;
       const h = Math.min(22, 6 + Math.abs(x2 - x1) * 0.06);
-      const mid = inner === null ? (y1 + y2) / 2 + dir * h : ext([(y1 + y2) / 2 + dir * h, inner]);
+      const mid = (inner === null ? (y1 + y2) / 2 + dir * h : ext([(y1 + y2) / 2 + dir * h, inner])) + dir * lift;
       const c = 2 * mid - (y1 + y2) / 2, cx = (x1 + x2) / 2;
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.quadraticCurveTo(cx, c, x2, y2);
       ctx.quadraticCurveTo(cx, c - dir * 3, x1, y1); ctx.closePath(); ctx.fill();
@@ -376,7 +391,45 @@ function drawSpan(ctxs, kind, { type, refs, evs, multi }, s, floor) {
       ctx.beginPath();
       ctx.moveTo(xz, y - hz); ctx.lineTo(xa, y - ha); ctx.moveTo(xa, y + ha); ctx.lineTo(xz, y + hz);
       ctx.stroke();
+      floor[seg.sys + ":" + s] = Math.max(floor[seg.sys + ":" + s] || 0, y + 8);
     }
+  });
+}
+
+// An octave line or pedal mark (DESIGN §37), split where the line breaks: "8va" and a dashed line
+// with a hook at the end, above the staff (below for 8vb and 15mb); "Ped." and a line under it,
+// up at the end, where the pedal lifts.
+function drawLine(ctxs, kind, { type, refs }, s, floor) {
+  const segs = [];
+  for (const r of refs) {
+    if (!segs.length || segs[segs.length - 1].sys !== r.sys) segs.push({ sys: r.sys, notes: [] });
+    segs[segs.length - 1].notes.push(r.note);
+  }
+  const below = kind === "ped" || OTT_SHIFT[type] < 0;
+  const label = kind === "ped" ? "Ped." : type === "8va" || type === "8vb" ? "8" : "15", sup = kind === "ped" ? "" : { "8va": "va", "8vb": "vb", "15ma": "ma", "15mb": "mb" }[type];
+  segs.forEach((seg, k) => {
+    const ctx = ctxs[seg.sys], stave = seg.notes[0].checkStave(), lastSeg = k === segs.length - 1;
+    const boxes = seg.notes.map((n) => n.getBoundingBox()).filter(Boolean);
+    const x1 = k === 0 ? seg.notes[0].getAbsoluteX() - 2 : stave.getTieStartX() - 4;
+    const x2 = lastSeg ? seg.notes[seg.notes.length - 1].getAbsoluteX() + 16 : seg.notes[seg.notes.length - 1].checkStave().getTieEndX();
+    // ponytail: below the notes, not under lyrics elsewhere on the line; a pedal under lyrics in the same bars overlaps them
+    const y = below ? Math.max(stave.getYForLine(4) + 30, ...boxes.map((bb) => bb.y + bb.h + 16))
+      : Math.min(stave.getYForLine(0) - 16, ...boxes.map((bb) => bb.y - 10));
+    ctx.save();
+    ctx.setFont("Georgia", kind === "ped" ? 14 : 13, kind === "ped" ? "bold italic" : "italic");
+    const text = k === 0 ? label : kind === "ped" ? "" : `(${label})`;
+    ctx.fillText(text, x1, y);
+    let tx = x1 + (text ? ctx.measureText(text).width : 0);
+    if (k === 0 && sup) { ctx.setFont("Georgia", 9, "italic"); ctx.fillText(sup, tx, y - 5); tx += ctx.measureText(sup).width; }
+    const ly = kind === "ped" ? y + 2 : below ? y - 4 : y - 4; // the line at the text's middle (ped: just under)
+    ctx.beginPath();
+    if (kind !== "ped") ctx.setLineDash([4, 3]);
+    const xe = Math.max(x2, tx + 10); // past the text, however short the note
+    ctx.moveTo(tx + 3, ly); ctx.lineTo(xe, ly);
+    if (lastSeg) ctx.lineTo(xe, kind === "ped" ? ly - 10 : below ? ly - 8 : ly + 8);
+    ctx.stroke();
+    ctx.restore();
+    if (below) floor[seg.sys + ":" + s] = Math.max(floor[seg.sys + ":" + s] || 0, y + 6);
   });
 }
 
