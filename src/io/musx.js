@@ -59,7 +59,9 @@ const SMUFL_MARKS = {
   0xe4a0: ["accent"], 0xe4a2: ["staccato"], 0xe4a4: ["tenuto"], 0xe4ac: ["marcato"], 0xe4ae: ["marcato", "staccato"],
   0xe4b0: ["accent", "staccato"], 0xe4b2: ["tenuto", "staccato"], 0xe4b4: ["tenuto", "accent"],
 };
-const smuflMarks = (c) => (c >= 0xe4c0 && c <= 0xe4cb ? ["fermata"] : SMUFL_MARKS[c & ~1] || null); // even = above, odd = below
+// Brass (DESIGN §29): U+E5D0 scoop, E5D1–E5D6 lifts and doits, E5D7–E5DF falls; plops (E5E0) are counted.
+const brass = (c) => (c === 0xe5d0 ? ["scoop"] : c >= 0xe5d1 && c <= 0xe5d6 ? ["doit"] : c >= 0xe5d7 && c <= 0xe5df ? ["fall"] : null);
+const smuflMarks = (c) => (c >= 0xe4c0 && c <= 0xe4cb ? ["fermata"] : brass(c) || SMUFL_MARKS[c & ~1] || null); // even = above, odd = below
 // The codes all five fonts share, checked against openmusx/smufl-mapping's legacy glyph tables
 // (46 and 62 also seen in a real file). Font-specific codes (tenuto+accent) are counted.
 const LEGACY_MARKS = {

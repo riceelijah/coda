@@ -21,6 +21,7 @@ export function schedule(score, from = 0) {
   const velAt = dynamics(score, from);
   score.staves.forEach((st, si) => allLayers(st).forEach((bars) => {
     const open = new Map(); // midi -> note awaiting a tie continuation, per layer
+    let slide = null; // the notes a slide starts from (DESIGN §29): {from: [note per pitch], t0, end}
     barStart.forEach(({ bar, tick }) => {
       let at = tick;
       for (const ev of bars[bar]) {
@@ -32,14 +33,27 @@ export function schedule(score, from = 0) {
         const g = ev.grace ? Math.min(60, Math.floor(len / 2 / ev.grace.length)) : 0;
         (ev.grace || []).forEach((p, k) => notes.push({ start: at + k * g, end: at + (k + 1) * g, midi: midi(p) + tr, ...base }));
         const on = at + g * (ev.grace?.length || 0);
-        for (const p of ev.pitches) {
+        const from = slide && slide.end === at && !g && !perc ? slide.from : null, made = [];
+        ev.pitches.forEach((p, k) => {
           const m = midi(p) + tr; // sounding pitch (DESIGN §21)
           let n = open.get(m);
           if (n && n.end === at && !g) n.end = at + len;
-          else { n = { start: on, end: at + len, midi: m, ...base }; notes.push(n); }
+          else {
+            n = { start: on, end: at + len, midi: m, ...base };
+            notes.push(n);
+            const r = from?.[k]?.root || from?.[k];
+            // a slide: the first note's voice glides here and keeps sounding; this one is for MIDI only
+            if (r) { n.root = r; (r.glide ||= []).push({ t0: slide.t0, t1: at, to: m - r.midi, note: n }); }
+            else if (ev.marks?.includes("scoop") && !perc) n.scoop = true;
+          }
+          if (!perc && ev.marks?.includes("fall")) (n.root || n).fall = -1;
+          if (!perc && ev.marks?.includes("doit")) (n.root || n).fall = 1;
+          made.push(n);
           if (ev.tie) nextOpen.set(m, n);
           else if (ev.marks?.includes("staccato")) n.end = (Math.max(n.start, at) + at + len) / 2; // sounds half its length (after any grace notes)
-        }
+        });
+        // a slide takes the last half of its note, at most a beat
+        slide = ev.gliss && !perc ? { from: made, t0: Math.max(at + len / 2, at + len - PPQ), end: at + len } : null;
         open.clear();
         nextOpen.forEach((v, k) => open.set(k, v));
         at += len;
@@ -200,16 +214,17 @@ export function output(c) {
 }
 
 // One sampled note into `dest` on context `c`.
-export function sampledVoice(c, dest, buf, m, root, start, len, hold, level = 1) {
+export function sampledVoice(c, dest, buf, m, root, start, len, hold, level = 1, fx = null) {
   const src = c.createBufferSource();
   src.buffer = buf;
   src.playbackRate.value = Math.pow(2, (m - root) / 12);
+  bend(src.playbackRate, src.playbackRate.value, start, fx);
   // ponytail: fixed 0.8–2.4 s loop with no crossfade; may click on some sounds. Per-instrument loop points if it bothers anyone.
   if (hold && buf.duration > 2.4) { src.loop = true; src.loopStart = 0.8; src.loopEnd = 2.4; }
   const g = c.createGain(), rel = hold ? 0.12 : 0.3;
   g.gain.setValueAtTime(0.4 * level, start);
-  g.gain.setValueAtTime(0.4 * level, start + len);
-  g.gain.linearRampToValueAtTime(0, start + len + rel);
+  if (fx?.fade != null) { g.gain.setValueAtTime(0.4 * level, start + fx.fade); g.gain.linearRampToValueAtTime(0, start + len); } // a fall dies away
+  else { g.gain.setValueAtTime(0.4 * level, start + len); g.gain.linearRampToValueAtTime(0, start + len + rel); }
   src.connect(g).connect(dest);
   src.start(start);
   src.stop(start + len + rel + 0.02);
@@ -239,24 +254,26 @@ function userFor(sound, m) {
 
 // A note with whatever is available now: your sound, the sample if loaded, else the triangle voice.
 // vel: MIDI velocity, 80 (mf) plays at the usual level.
-function note(c, dest, m, program, start, len, sound, vel = 80) {
+// fx: pitch bends from bendOf (DESIGN §29), or null.
+function note(c, dest, m, program, start, len, sound, vel = 80, fx = null) {
   if (program < 0) { drumHit(c, dest, m, start, vel / 80); return; }
   const u = userFor(sound, m), level = vel / 80;
-  if (u) { sampledVoice(c, dest, u.buf, m, u.root, start, len, false, level); return; }
+  if (u) { sampledVoice(c, dest, u.buf, m, u.root, start, len, false, level, fx); return; }
   const buf = buffers.get(keyOf(program, m));
-  if (buf) sampledVoice(c, dest, buf, m, rootFor(m), start, len, sustained(program), level);
-  else voice(c, dest, m, start, len, level);
+  if (buf) sampledVoice(c, dest, buf, m, rootFor(m), start, len, sustained(program), level, fx);
+  else voice(c, dest, m, start, len, level, fx);
 }
 
 // One triangle-wave note into `dest`.
-function voice(c, dest, m, start, len, level = 1) {
+function voice(c, dest, m, start, len, level = 1, fx = null) {
   const osc = c.createOscillator();
   const g = c.createGain();
   osc.type = "triangle";
   osc.frequency.value = 440 * Math.pow(2, (m - 69) / 12);
+  bend(osc.frequency, osc.frequency.value, start, fx);
   g.gain.setValueAtTime(0, start);
   g.gain.linearRampToValueAtTime(0.15 * level, start + 0.01);
-  g.gain.setValueAtTime(0.15 * level, start + len - 0.05);
+  g.gain.setValueAtTime(0.15 * level, start + Math.max(0.01, fx?.fade ?? len - 0.05));
   g.gain.linearRampToValueAtTime(0, start + len);
   osc.connect(g).connect(dest);
   osc.start(start);
@@ -304,8 +321,33 @@ async function prepare(notes, waitMs, onStatus = () => {}) {
 // look-ahead scheduler if long scores stutter.
 function scheduleNotes(c, dest, notes, t0, secPerTick) {
   for (const n of notes) {
-    const len = Math.max(0.06, (n.end - n.start) * secPerTick);
-    note(c, dest, n.midi, n.program, t0 + n.start * secPerTick, len, n.sound, n.vel);
+    if (n.root) continue; // sounded by the note its slide starts from
+    const end = Math.max(n.end, ...(n.glide || []).map((s) => s.note.end));
+    const len = Math.max(0.06, (end - n.start) * secPerTick);
+    note(c, dest, n.midi, n.program, t0 + n.start * secPerTick, len, n.sound, n.vel, bendOf(n, len, secPerTick));
+  }
+}
+
+// Pitch moves within one sounding note (DESIGN §29): {segs: [[t0, semis, t1, semis]…] in seconds
+// from its start, in order, fade: when a fall or doit starts fading}, or null.
+export function bendOf(n, len, secPerTick) {
+  const segs = [];
+  let at = 0, cur = 0;
+  if (n.scoop) { at = Math.min(0.12, len / 3); segs.push([0, -3, at, 0]); } // up from a minor third below
+  for (const s of n.glide || []) {
+    const a = Math.max(at, (s.t0 - n.start) * secPerTick), z = Math.max(a + 0.02, (s.t1 - n.start) * secPerTick);
+    segs.push([a, cur, z, s.to]);
+    at = z; cur = s.to;
+  }
+  let fade = null;
+  if (n.fall) { fade = Math.max(at, len - Math.min(0.3, len / 2)); segs.push([fade, cur, len, cur + 7 * n.fall]); } // a fifth away
+  return segs.length ? { segs, fade } : null;
+}
+// Apply bend segments to a rate or frequency param whose steady value is `base`.
+function bend(param, base, start, fx) {
+  for (const [a, s0, z, s1] of fx?.segs || []) {
+    param.setValueAtTime(base * 2 ** (s0 / 12), start + a);
+    param.exponentialRampToValueAtTime(base * 2 ** (s1 / 12), start + z);
   }
 }
 

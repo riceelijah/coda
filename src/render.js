@@ -11,6 +11,7 @@ const SYS_BOTTOM = 50;
 const LEFT_PAD = 20;
 const RIGHT_PAD = 4;     // keeps the closing barline inside the drawing, which print clips to
 const KEY_NAMES = ["Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#"];
+const BRASS = new Set(["scoop", "fall", "doit"]); // VexFlow jazz ornaments of the same names
 const MARK_VF = { fermata: "a@", staccato: "a.", accent: "a>", tenuto: "a-", marcato: "a^" };
 const REST_KEY = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3", percussion: "b/4" };
 // rests above / below the middle when two layers share a bar
@@ -113,6 +114,7 @@ function makeNote(ev, clef, stem = 0) {
     const down = note.getStemDirection() < 0, P = VFl.ModifierPosition;
     for (const m of ev.marks) {
       if (rest && m !== "fermata") continue;
+      if (BRASS.has(m)) { keys.forEach((_, k) => note.addModifier(new VFl.Ornament(m), k)); continue; } // beside each notehead (DESIGN §29)
       const above = stem ? stem > 0 : m === "fermata" || down;
       note.addModifier(new VFl.Articulation(MARK_VF[m]).setPosition(above ? P.ABOVE : P.BELOW), 0);
     }
@@ -205,6 +207,24 @@ export function render(score, container, sel, opts = {}) {
       })); } catch (e) { console.error(e); }
     }));
   }));
+
+  // Slides (DESIGN §29): a straight line from each notehead to its partner in the next note,
+  // or to the system's end and on from the next system's start.
+  score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
+    if (!ev.gliss) return;
+    const n = nextEventPos(score, s, b, i, v), a = noteRef[s][v][b]?.[i], z = n && noteRef[s][v][n.bar]?.[n.idx];
+    if (!a || !z) return;
+    const ya = a.note.getYs(), yz = z.note.getYs(), x0 = a.note.getNoteHeadEndX() + 4, x1 = z.note.getNoteHeadBeginX() - 4;
+    const line = (ctx, pts) => { ctx.beginPath(); for (const [x, y, x2, y2] of pts) { ctx.moveTo(x, y); ctx.lineTo(x2, y2); } ctx.stroke(); };
+    try { tinted(ctxs[a.sys], opts.dim && v !== (opts.layer || 0), () => tinted(ctxs[z.sys], opts.dim && v !== (opts.layer || 0) && a.sys !== z.sys, () => {
+      if (a.sys === z.sys) line(ctxs[a.sys], ya.map((y, k) => [x0, y, x1, yz[k] ?? y]));
+      else {
+        const xe = a.note.checkStave().getNoteEndX(), xs = z.note.checkStave().getNoteStartX();
+        line(ctxs[a.sys], ya.map((y, k) => [x0, y, xe, (y + (yz[k] ?? y)) / 2]));
+        line(ctxs[z.sys], yz.map((y, k) => [xs, (y + (ya[k] ?? y)) / 2, x1, y]));
+      }
+    })); } catch (e) { console.error(e); }
+  }))));
 
   // Slurs and hairpins (DESIGN §23)
   // Lyrics: a line per verse for each staff and system, below its notes and dynamics (DESIGN §24).

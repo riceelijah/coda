@@ -57,6 +57,7 @@ only says what to build in what order and how to know each phase is finished.
 | 30 | Grace notes (DESIGN §26) | done |
 | 31 | .musx: dynamics, slurs and hairpins, lyric verses, clef changes, grace notes (DESIGN §9.5) | done |
 | 32 | Unpitched percussion: drum staves, synthesized kit, MusicXML/MuseScore/MIDI (DESIGN §27) | done (`.musx` drum maps not read yet) |
+| 34 | Brass effects and slides: scoop, fall, doit, gliss with pitch bends (DESIGN §29) | done (no MIDI pitch bends) |
 
 ---
 

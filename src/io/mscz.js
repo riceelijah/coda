@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
@@ -11,6 +11,7 @@ const LONGER = new Set(["breve", "long"]);
 const SHORTER = new Set(["64th", "128th", "256th", "512th", "1024th"]);
 // MuseScore articulation subtype -> Coda marks (DESIGN §16). Combined ones ("articAccentStaccatoAbove")
 // give two; MuseScore 2 calls an accent "sforzato". Staccatissimo and the rest give none.
+const CHORDLINE_IN = { 1: "fall", 2: "doit", 4: "scoop" }, CHORDLINE_OUT = { fall: 1, doit: 2, scoop: 4 };
 export function markOf(sub) {
   if (/staccatissimo/i.test(sub)) return [];
   if (/^fermata/i.test(sub)) return ["fermata"];
@@ -217,6 +218,10 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               const got = markOf(txt(a, "subtype") || "");
               if (got.length) marks.push(...got); else report.count("Other articulations (not imported)");
             }
+            for (const cl of kids(el, "ChordLine")) { // brass effects (DESIGN §29): 1 fall, 2 doit, 3 plop, 4 scoop
+              const m = CHORDLINE_IN[txt(cl, "subtype")];
+              if (m) marks.push(m); else report.count("Plops and other chord lines (not imported)");
+            }
             if (dt === "measure") { // whole-bar rest = empty bar
               if (marks.length) report.count("Fermatas on whole-bar rests (not imported)");
               cur += barCapacity(time); break;
@@ -239,6 +244,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
                 if (!ev.pitches.some((q) => q.step === p.step && q.oct === p.oct && q.drum === p.drum)) ev.pitches.push(p);
                 const tieSp = kids(n, "Spanner").find((s) => s.getAttribute("type") === "Tie" && kid(s, "next"));
                 if (tieSp || kid(n, "Tie")) ev.tie = true;
+                if (kids(n, "Spanner").some((sp) => sp.getAttribute("type") === "Glissando" && kid(sp, "next"))) ev.gliss = true;
               }
               if (!ev.pitches.length) break;
               ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
@@ -299,8 +305,9 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   if (!score.staves.length) throw new Error("This MuseScore file has no staves.");
 
   score.measures.push(...measuresFrom(firstAttrs[score.staves.findIndex((st) => st.clef !== "percussion")] || firstAttrs[0])); // the key from the first staff that isn't drums
-  const broken = clearBrokenSpans(score);
+  const broken = clearBrokenSpans(score), slides = clearBrokenSlides(score);
   if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
+  if (slides) report.count("Slides not to the very next note, or between chords of different sizes (not imported)", slides);
   score.tempo = Math.max(20, Math.min(400, score.tempo || 100));
   padBars(score);
   const lostClefs = finishClefs(score);
@@ -395,10 +402,15 @@ function tieMap(bars) {
   const pos = [];
   bars.forEach((bar, b) => { let t = 0; bar.forEach((e, i) => { pos.push({ b, i, t, e }); t += eventTicks(e); }); });
   const map = {};
-  const at = (p) => (map[p.b + ":" + p.i] ||= { next: {}, prev: {} });
+  const at = (p) => (map[p.b + ":" + p.i] ||= { next: {}, prev: {}, gnext: {}, gprev: {} });
   pos.forEach((p, k) => {
     const q = pos[k + 1];
-    if (!p.e.tie || !q || q.b > p.b + 1) return;
+    if (!q || q.b > p.b + 1) return;
+    if (p.e.gliss) p.e.pitches.forEach((_, n) => { // slides (DESIGN §29), chord note n to note n
+      at(p).gnext[n] = loc(q.b - p.b, q.t - p.t);
+      at(q).gprev[n] = loc(p.b - q.b, p.t - q.t);
+    });
+    if (!p.e.tie) return;
     for (const pi of p.e.pitches) {
       const mm = pi.drum ?? midi(pi); // a drum by its number: two drums can share a line
       if (!q.e.pitches.some((r) => (r.drum ?? midi(r)) === mm)) continue;
@@ -448,14 +460,16 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
     const head = `${e.dots ? `<dots>${e.dots}</dots>` : ""}<durationType>${TYPE_NAME[e.dur]}</durationType>`;
     if (!e.pitches.length) x.push(`<Rest>${head}</Rest>`);
     else {
-      const t = ties[b + ":" + i] || { next: {}, prev: {} };
+      const t = ties[b + ":" + i] || { next: {}, prev: {}, gnext: {}, gprev: {} };
       const arts = (e.marks || []).filter((m) => ARTIC_OUT[m]).map((m) => `<Articulation><subtype>${ARTIC_OUT[m]}</subtype></Articulation>`).join("");
       const [tc, td] = st.transpose || [0, 0]; // pitch and tpc concert, tpc2 written
       const pitchXml = (p) => p.drum ? `<pitch>${p.drum}</pitch><tpc>${tpcOf(spellMidi(p.drum, 0))}</tpc>${HEAD_MS[DRUMS.get(p.drum).head] ? `<head>${HEAD_MS[DRUMS.get(p.drum).head]}</head>` : ""}` : `<pitch>${midi(p) + tc}</pitch><tpc>${tpcOf(tc || td ? shiftPitch(p, tc, td) : p)}</tpc>${tc || td ? `<tpc2>${tpcOf(p)}</tpc2>` : ""}`;
-      const notes = e.pitches.map((p) => {
+      const notes = e.pitches.map((p, n) => {
         const mm = p.drum ?? midi(p);
         const sp = (t.next[mm] ? `<Spanner type="Tie"><Tie/><next>${t.next[mm]}</next></Spanner>` : "") +
-          (t.prev[mm] ? `<Spanner type="Tie"><prev>${t.prev[mm]}</prev></Spanner>` : "");
+          (t.prev[mm] ? `<Spanner type="Tie"><prev>${t.prev[mm]}</prev></Spanner>` : "") +
+          (t.gnext[n] ? `<Spanner type="Glissando"><Glissando><subtype>0</subtype></Glissando><next>${t.gnext[n]}</next></Spanner>` : "") +
+          (t.gprev[n] ? `<Spanner type="Glissando"><prev>${t.gprev[n]}</prev></Spanner>` : "");
         return `<Note>${sp}${pitchXml(p)}</Note>`;
       }).join("");
       // grace notes (DESIGN §26), as MuseScore writes them: one acciaccatura, or grace16s
@@ -465,7 +479,8 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
       const slurs = (sp.slurNext ? `<Spanner type="Slur"><Slur/><next>${sp.slurNext}</next></Spanner>` : "") +
         (sp.slurPrev ? `<Spanner type="Slur"><prev>${sp.slurPrev}</prev></Spanner>` : "");
       const lyr = (syl.get(e) || []).map((s, v) => s ? `<Lyrics>${v ? `<no>${v}</no>` : ""}${s === "single" ? "" : `<syllabic>${s}</syllabic>`}<text>${esc(e.lyrics[v].text)}</text></Lyrics>` : "").join("");
-      x.push(`<Chord>${head}${lyr}${arts}${slurs}${notes}</Chord>`);
+      const lines = (e.marks || []).filter((m) => CHORDLINE_OUT[m]).map((m) => `<ChordLine><subtype>${CHORDLINE_OUT[m]}</subtype></ChordLine>`).join("");
+      x.push(`<Chord>${head}${lyr}${arts}${slurs}${notes}${lines}</Chord>`);
     }
     if (sp.hpPrev) x.push(`<Spanner type="HairPin"><prev>${sp.hpPrev}</prev></Spanner>`);
     if (open) { open.left -= eventTicks(e); if (open.left <= 0) { x.push("<endTuplet/>"); open = null; } }

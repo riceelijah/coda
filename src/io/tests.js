@@ -2,7 +2,7 @@
 import { exportMusicXML, importMusicXML, exportMXL, importMXL } from "./musicxml.js";
 import { exportMIDI, importMIDI } from "./midi.js";
 import { importBytes, sniff, LEGACY_MUS } from "./open.js";
-import { renderAudio, wavBytes, schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES } from "../play.js";
+import { renderAudio, wavBytes, schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES, bendOf } from "../play.js";
 import { GM, gmByName } from "../gm.js";
 import * as M from "../model.js";
 import { drumPitch } from "../drums.js";
@@ -427,6 +427,33 @@ export async function run({ check, eq }) {
     return (/inside a bar moved to its start: 1/.test(r) && /after the last bar \(not imported\): 1/.test(r)) || r;
   });
 
+  await check("brass effects and slides: rules, playback bends, MusicXML and MuseScore round trips (DESIGN §29)", () => {
+    const s = M.newScore({ preset: "treble", bars: 2 });
+    Object.assign(s.staves[0], { name: "Trombone", program: 57 });
+    s.staves[0].bars[0] = [ev("q", "C5"), ev("q", "C5"), ev("q"), ev("q", "C5 E5")];
+    s.staves[0].bars[1] = [ev("h", "G4"), ev("h", "D5", { marks: ["fall"] })];
+    const at = (b, i) => s.staves[0].bars[b][i];
+    if (!M.toggleGliss(s, 0, 0, 0) || !M.toggleGliss(s, 0, 0, 1) || !M.toggleGliss(s, 0, 0, 3)) return "same note, before a rest, chord to one note: refused";
+    if (M.toggleGliss(s, 0, 1, 0) || !at(1, 0).gliss) return "slide G4 to D5";
+    M.setMark(at(1, 1), "doit", true);
+    if (!eq(at(1, 1).marks, ["doit"])) return "fall and doit exclusive: " + at(1, 1).marks;
+    M.setMark(at(1, 1), "fall", true); M.setMark(at(0, 0), "scoop", true);
+    if (!M.isValidScore(s)) return "valid";
+    // playback: the G4 voice glides to D5 over the last beat and falls; D5 itself is for MIDI only
+    const sn = schedule(s).notes, g = sn.find((n) => n.midi === 67), d = sn.find((n) => n.midi === 74);
+    if (!g.glide || g.glide[0].to !== 7 || d.root !== g || g.fall !== -1 || !sn.find((n) => n.midi === 72).scoop) return "schedule " + JSON.stringify(g, (k, v) => (k === "note" || k === "root" ? undefined : v));
+    const fx = bendOf(g, 2, 0.5 / 480); // 2 s: G4 0–1, D5 1–2; the slide over 0.5–1, then down a fifth
+    if (!eq(fx.segs, [[0.5, 0, 1, 7], [1.7, 7, 2, 0]]) || fx.fade !== 1.7) return "bend " + JSON.stringify(fx);
+    // editing the next note away drops the slide
+    const cut = JSON.parse(JSON.stringify(s)); cut.staves[0].bars[1][1].pitches = [P("G4")];
+    if (M.clearBrokenSlides(cut) !== 1) return "broken slide";
+    for (const [k, b] of [["MusicXML", importMusicXML(exportMusicXML(s), "x.musicxml")], ["MuseScore", importMSCX(exportMSCX(s), "x.mscx")]]) {
+      if (b.report.warnings.length) return k + ": " + b.report.warnings.join("; ");
+      const bars = b.score.staves[0].bars;
+      if (!bars[1][0].gliss || !eq(bars[1][1].marks, ["fall"]) || !eq(bars[0][0].marks, ["scoop"])) return k + ": " + brief(b.score.staves[0]);
+    }
+    return true;
+  });
   await check("grace notes: add, limit, rest refused, transposition, play on the beat, import counts (DESIGN §26)", () => {
     const s = M.newScore({ preset: "treble", bars: 1 });
     s.staves[0].bars[0] = [ev("q", "C5"), ev("q"), ev("h", "E5")];

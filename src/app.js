@@ -485,6 +485,26 @@ function onLyricKey(e) {
   else if (k === "Escape") { e.preventDefault(); closeLyrics(); }
 }
 
+// Slide each selected note into the next (DESIGN §29); over a range, the whole phrase glides.
+// If they all already slide, the slides come off.
+function glide() {
+  const s = state.sel;
+  if (!s) { message("Select a note first", true); return; }
+  const r = range();
+  if (r.length === 1) { edit((sc) => M.toggleGliss(sc, s.staff, s.bar, s.idx)); return; }
+  const body = r.slice(0, -1), bars = lb(s.staff);
+  const all = body.every((p) => bars[p.bar][p.idx].gliss || !bars[p.bar][p.idx].pitches.length);
+  let n = 0, why = null;
+  edit((sc) => {
+    for (const p of body) {
+      const ev = sc.staves[s.staff].bars[p.bar][p.idx];
+      if (all) delete ev.gliss;
+      else if (!ev.gliss && ev.pitches.length) { const e = M.toggleGliss(sc, s.staff, p.bar, p.idx); if (e) why = e; else n++; }
+    }
+    return all || n ? null : why || "Nothing to slide to";
+  });
+}
+
 function tie() {
   const s = state.sel;
   if (!s) { message("Select a note first", true); return; }
@@ -1313,6 +1333,7 @@ const CMD = {
   "n-octup": { run: () => transposeSel(7), on: hasSel },
   "n-octdown": { run: () => transposeSel(-7), on: hasSel },
   "n-tie": { run: () => tie(), on: hasSel },
+  "n-gliss": { run: () => glide(), on: hasSel },
   ...Object.fromEntries(M.MARKS.map((m) => ["n-" + m, { run: () => mark(m), on: hasSel }])),
   ...Object.fromEntries(M.DYNS.map((d) => ["d-" + d, { run: () => dynamic(d), on: hasSel }])),
   "d-none": { run: () => dynamic(null), on: hasSel },

@@ -10,7 +10,7 @@ export const DURS = ["w", "h", "q", "8", "16", "32"];
 export const BASE = { w: 1920, h: 960, q: 480, 8: 240, 16: 120, 32: 60 };
 export const CLEFS = ["treble", "bass", "alto", "tenor"];
 // Marks a note or rest can carry, in drawing and file order (DESIGN §16). Only a fermata goes on a rest.
-export const MARKS = ["fermata", "staccato", "accent", "tenuto", "marcato"];
+export const MARKS = ["fermata", "staccato", "accent", "tenuto", "marcato", "scoop", "fall", "doit"];
 export const STEP_NAMES = "CDEFGAB";
 const STEP_SEMIS = [0, 2, 4, 5, 7, 9, 11];
 const SHARP_ORDER = [3, 0, 4, 1, 5, 2, 6];
@@ -427,6 +427,8 @@ export function toggleMark(events, mark) {
 export function setMark(ev, mark, on) {
   const m = new Set(ev.marks || []);
   if (on) m.add(mark); else m.delete(mark);
+  if (on && mark === "fall") m.delete("doit"); // a note ends one way (DESIGN §29)
+  if (on && mark === "doit") m.delete("fall");
   if (m.size) ev.marks = MARKS.filter((x) => m.has(x)); else delete ev.marks;
 }
 
@@ -549,14 +551,43 @@ export function toggleTie(score, s, b, i) {
   return null;
 }
 
-// Drop ties whose next note no longer shares a pitch (after inserts, pastes, edits).
+// Slides (DESIGN §29): ev.gliss = true, a straight line to the next note in the layer that plays
+// as one smooth glide. The next note must follow at once and differ; not on tied notes or drums.
+const slideTarget = (ev, ne) => ne && ne.pitches.length && !ev.tie && !ne.pitches.every((q, k) => ev.pitches[k] && midi(q) === midi(ev.pitches[k])) && ne.pitches.length === ev.pitches.length;
+export function toggleGliss(score, s, b, i) {
+  const ev = score.staves[s].bars[b][i];
+  if (ev.gliss) { delete ev.gliss; return null; }
+  if (!ev.pitches.length) return "Rests can't slide";
+  if (isPerc(score.staves[s])) return "Drums don't slide";
+  if (ev.tie) return "Untie the note first";
+  const ne = nextAfter(score, s, b, i, 0, score.staves[s].bars);
+  if (!ne?.pitches.length) return "A slide needs a note right after it";
+  if (!slideTarget(ev, ne)) return ne.pitches.length !== ev.pitches.length ? "A slide needs the same number of notes at each end" : "A slide needs a different note to go to";
+  ev.gliss = true;
+  return null;
+}
+
+// Drop ties whose next note no longer shares a pitch, and slides with nowhere to go (after inserts, pastes, edits).
 export function clearBrokenTies(score) {
   score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
     if (!ev.tie) return;
-    const n = nextEventPos(score, s, b, i, v);
-    const ne = n && (n.bar === b || n.bar === b + 1) ? bars[n.bar][n.idx] : null;
+    const ne = nextAfter(score, s, b, i, v, bars);
     if (!ne || !ev.pitches.some((p) => ne.pitches.some((q) => samePitch(p, q) && p.alter === q.alter))) ev.tie = false;
   }))));
+  clearBrokenSlides(score);
+}
+// The event right after event i (same bar or the next one), or null.
+function nextAfter(score, s, b, i, v, bars) {
+  const n = nextEventPos(score, s, b, i, v);
+  return n && (n.bar === b || n.bar === b + 1) ? bars[n.bar][n.idx] : null;
+}
+// Drop slides with nowhere to go. Returns how many went (importers count them).
+export function clearBrokenSlides(score) {
+  let n = 0;
+  score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
+    if (ev.gliss && (isPerc(st) || !slideTarget(ev, nextAfter(score, s, b, i, v, bars)))) { delete ev.gliss; n++; }
+  }))));
+  return n;
 }
 
 // ---------- clef changes (DESIGN §25) ----------
@@ -780,6 +811,7 @@ export function isValidScore(sc) {
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m)))) &&
       (e.dyn === undefined || DYNS.includes(e.dyn)) &&
       (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&
+      (e.gliss === undefined || (e.gliss === true && e.pitches.length > 0)) &&
       (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true) &&
       (e.lyrics === undefined || (Array.isArray(e.lyrics) && e.lyrics.length > 0 && e.lyrics.length <= MAX_VERSES &&
         e.pitches.length > 0 && e.lyrics[e.lyrics.length - 1] !== null && e.lyrics.every((l) => l === null ||

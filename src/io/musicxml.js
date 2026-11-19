@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides,
 } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
@@ -13,8 +13,8 @@ const SHORTER = new Set(["64th", "128th", "256th", "512th", "1024th"]);
 const CLEF_OUT = { treble: ["G", 2], bass: ["F", 4], alto: ["C", 3], tenor: ["C", 4], percussion: ["percussion", 0] };
 
 // Marks (DESIGN §16): MusicXML <articulations> children <-> Coda mark names.
-const ARTIC_OUT = { staccato: "<staccato/>", accent: "<accent/>", tenuto: "<tenuto/>", marcato: '<strong-accent type="up"/>' };
-const ARTIC_IN = { staccato: "staccato", accent: "accent", tenuto: "tenuto", "strong-accent": "marcato" };
+const ARTIC_OUT = { staccato: "<staccato/>", accent: "<accent/>", tenuto: "<tenuto/>", marcato: '<strong-accent type="up"/>', scoop: "<scoop/>", fall: "<falloff/>", doit: "<doit/>" };
+const ARTIC_IN = { staccato: "staccato", accent: "accent", tenuto: "tenuto", "strong-accent": "marcato", scoop: "scoop", falloff: "fall", doit: "doit" };
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -29,7 +29,7 @@ const HEAD_OUT = { x: "x", cx: "circle-x", d: "diamond", t: "triangle" };
 const drumInst = (pid, n) => `<instrument id="${pid}-I${n}"/>`;
 const headXml = (p) => (p.drum && HEAD_OUT[DRUMS.get(p.drum)?.head] ? `<notehead>${HEAD_OUT[DRUMS.get(p.drum).head]}</notehead>` : "");
 
-function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl, pid }) {
+function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl, pid, slideStop, k = 0 }) {
   const x = ["<note>"];
   if (chord) x.push("<chord/>");
   if (p) {
@@ -48,6 +48,8 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl
   const nots = [];
   if (tieStop) nots.push('<tied type="stop"/>');
   if (tieStart) nots.push('<tied type="start"/>');
+  if (slideStop) nots.push(`<slide type="stop" line-type="solid" number="${k + 1}"/>`); // DESIGN §29, numbered per chord note
+  if (p && ev.gliss) nots.push(`<slide type="start" line-type="solid" number="${k + 1}"/>`);
   if (!chord && tupStart) nots.push('<tuplet type="start" bracket="yes"/>');
   if (!chord && tupStop) nots.push('<tuplet type="stop"/>');
   if (!chord && ev.slurEnd) nots.push(`<slur type="stop" number="${voice}"/>`); // DESIGN §23
@@ -110,7 +112,7 @@ function barXml(score, s, b, staffNo, voice, v, syl, pid) {
     if (ev.hp) out.push(dir(`<wedge type="${ev.hp === "<" ? "crescendo" : "diminuendo"}" number="${voice}"/>`));
     if (ev.grace) out.push(graceXml(ev.grace, staffNo, voice, pid));
     if (!ev.pitches.length) out.push(noteXml(ev, null, flags));
-    else ev.pitches.forEach((p, k) => out.push(noteXml(ev, p, { ...flags, chord: k > 0, tieStop: tied(p) })));
+    else ev.pitches.forEach((p, k) => out.push(noteXml(ev, p, { ...flags, chord: k > 0, tieStop: tied(p), slideStop: !!before?.gliss, k })));
     if (ev.hpEnd) out.push(dir(`<wedge type="stop" number="${voice}"/>`)); // after the note it ends on
   });
   let ticks = barTicks(bar);
@@ -378,8 +380,9 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   if (!score.staves.length) throw new Error("This MusicXML file has no parts.");
 
   score.measures.push(...measuresFrom((partAttrs.find((a) => !a.perc) || partAttrs[0]).attrs));
-  const broken = clearBrokenSpans(score);
+  const broken = clearBrokenSpans(score), slides = clearBrokenSlides(score);
   if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
+  if (slides) report.count("Slides not to the very next note, or between chords of different sizes (not imported)", slides);
 
   score.title = (root.querySelector("work > work-title")?.textContent || txt(root, "movement-title") ||
     fileName.replace(/\.[^.]+$/, "") || "Untitled").trim();
@@ -405,7 +408,7 @@ const DIRECTIONS = {
 const MARKS = {
   articulations: "Other articulations (not imported)",
   ornaments: "Ornaments (not imported)", technical: "Technical markings (not imported)", arpeggiate: "Arpeggios (not imported)",
-  glissando: "Glissandos (not imported)", slide: "Glissandos (not imported)",
+  glissando: "Slides on rests (not imported)", slide: "Slides on rests (not imported)",
 };
 
 // A staff with the percussion clef or drum notes becomes a drum staff (DESIGN §27); notes with no
@@ -430,6 +433,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   const lk = staffNo + ":" + layer;
   // fermatas and the articulations Coda holds are kept; other markings are counted, not dropped silently
   const marks = [], slur = {};
+  let glide = false; // a slide or glissando starts here (DESIGN §29); its stop is the next note
   for (const n of kids(el, "notations")) {
     for (const c of n.children) {
       if (c.localName === "fermata") marks.push("fermata");
@@ -448,10 +452,11 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
         else if (t === "start") report.count("Slurs inside other slurs (not imported)");
         else if (t === "stop" && openSlur[lk] === num) { delete openSlur[lk]; slur.stop = true; }
       }
+      else if ((c.localName === "slide" || c.localName === "glissando") && !isRest) { if (c.getAttribute("type") === "start") glide = true; }
       else if (MARKS[c.localName] && c.getAttribute("type") !== "stop") report.count(MARKS[c.localName]);
     }
   }
-  const addMarks = (ev) => { for (const m of marks) setMark(ev, m, true); };
+  const addMarks = (ev) => { for (const m of marks) setMark(ev, m, true); if (glide) ev.gliss = true; };
   const tieStart = kids(el, "tie").some((t) => t.getAttribute("type") === "start");
 
   let pitch = null;
@@ -477,7 +482,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   if (grace) { // held until the note it comes before; before the chord branch so it can't join the last note
     if (!pitch) return;
     if (kid(el, "chord")) { report.count("Grace-note chords reduced to their first note"); return; }
-    if (marks.length || slur.start || slur.stop || tieStart || kids(el, "lyric").length) report.count("Marks, slurs, ties and lyrics on grace notes (not imported)");
+    if (marks.length || glide || slur.start || slur.stop || tieStart || kids(el, "lyric").length) report.count("Marks, slurs, ties and lyrics on grace notes (not imported)");
     const g = (pendGrace[lk] ||= { notes: [], types: [] });
     g.notes.push(pitch);
     g.types.push((grace.getAttribute("slash") === "yes" ? "/" : "") + (txt(el, "type") || ""));

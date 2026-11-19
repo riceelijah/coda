@@ -1240,8 +1240,10 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   C5 snare, D5/E5 toms, F5 ride, G5 closed hi-hat, A5 crash, B5 crash 2, C6 splash.
 - **Entry:** a click or typed letter snaps to the nearest entry position and takes its drum;
   ↑/↓ move to the next one. Notes ▸ Drum sound (and the context menu) sets any kit drum on the
-  selected notes, which also moves them to that drum's position. Accidentals, transposition
-  and ties don't apply. Copy/paste between drum and pitched staves is refused.
+  selected notes, which also moves them to that drum's position. Accidentals and transposition
+  don't apply; ties match by drum, not position. A Shift+letter or chord click that snaps to a
+  drum already in the chord is refused rather than taking it out. Copy/paste between drum and
+  pitched staves is refused.
 - **Sound:** synthesized (no samples needed, works offline and in audio export): a few families
   (kick, snare, tom, hi-hat, cymbal, hand drum, wood/metal hit, shaker) shaped by the drum number.
   Dynamics apply. A sampled kit would need a new sound source.
@@ -1250,5 +1252,30 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   each note, `<notehead>` for non-normal heads, `<clef><sign>percussion</sign>`. MuseScore:
   `useDrumset` with a `<Drum>` per kit drum, note `<pitch>` = drum, clef `PERC`. MIDI: channel 10
   imports as one drum staff (keys outside 35–81 counted); drum staves export on channel 10.
-  `.musx` percussion maps are not read yet: those staves import at their staff positions as
-  pitched notes, and the report says so.
+  `.musx` percussion maps are not read yet: those staves become drum staves with drums chosen by
+  staff position, and the report says so. Importers share `toDrumStaff`: drums snapped by
+  position that land twice in one chord are merged, and dropped clef changes and transpositions
+  are counted.
+
+## 29. Brass effects and slides (Phase 34)
+
+- **Marks:** `scoop`, `fall` and `doit` join `MARKS` (notes only; a fall and a doit replace each
+  other). Drawn with VexFlow's jazz ornaments beside each notehead: a scoop before, a fall or doit
+  after. Plops have no glyph in the vendored VexFlow, so they aren't in the model; importers
+  count them.
+- **Slides:** `ev.gliss = true` slides from this note to the next event in its layer, which must
+  follow at once (same bar or the next), be a note, differ, and have as many notes (chord note
+  *n* goes to note *n*). Not on tied notes or drum staves. Drawn as a straight line from each
+  notehead to its partner; across a line break, to the system's end and on from the next start.
+  Notes ▸ Slide to next: over a range, every note slides into the next, so a phrase glides.
+  Edits that break a slide drop it (`clearBrokenSlides`, with the broken ties).
+- **Sound:** pitch bends on the note's own voice (sample `playbackRate` or the tone's frequency):
+  a scoop rises from a minor third below over 0.12 s; a fall or doit moves a fifth down or up
+  over the last 0.3 s (half the note at most) and fades out; a slide glides over the last half of
+  its note, a beat at most, and the same voice holds through the next note with no new attack.
+  Drums ignore all of these. MIDI export plays slides as separate notes and leaves out the bends.
+- **Files:** MusicXML `<articulations>` `<scoop/>`, `<falloff/>`, `<doit/>` (plop counted);
+  `<slide>` and `<glissando>` both import, and export is `<slide line-type="solid">`, numbered per
+  chord note. MuseScore `<ChordLine>` subtype 1 fall, 2 doit, 3 plop (counted), 4 scoop, and a
+  `Glissando` spanner per note. `.musx` SMuFL brass symbols: U+E5D0 scoop, E5D1–E5D6 lifts and
+  doits, E5D7–E5DF falls. Slides that break the rules above are counted.
