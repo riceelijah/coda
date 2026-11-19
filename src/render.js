@@ -188,7 +188,7 @@ export function render(score, container, sel, opts = {}) {
       if (!a || !z) return;
       const fi = [], li = [];
       ev.pitches.forEach((p, pi) => {
-        const qi = ne.pitches.findIndex((q) => q.step === p.step && q.oct === p.oct);
+        const qi = ne.pitches.findIndex((q) => q.step === p.step && q.oct === p.oct && q.drum === p.drum);
         if (qi >= 0) { fi.push(pi); li.push(qi); }
       });
       if (!fi.length) return;

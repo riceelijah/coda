@@ -5,6 +5,7 @@ import { importBytes, sniff, LEGACY_MUS } from "./open.js";
 import { renderAudio, wavBytes, schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES } from "../play.js";
 import { GM, gmByName } from "../gm.js";
 import * as M from "../model.js";
+import { drumPitch } from "../drums.js";
 import * as store from "../store.js";
 import { markOf, importMSCX, exportMSCX } from "./mscz.js";
 import * as usnd from "../usersounds.js";
@@ -98,7 +99,17 @@ export async function run({ check, eq }) {
     if (!M.isValidScore(sc) || st.program !== undefined) return "valid drum score";
     const bad = JSON.parse(JSON.stringify(sc)); bad.staves[0].clef = "treble";
     const bad2 = JSON.parse(JSON.stringify(sc)); delete bad2.staves[0].bars[0][0].pitches[0].drum;
-    return (!M.isValidScore(bad) && !M.isValidScore(bad2)) || "drum on a pitched staff, or a drum note without a drum, passed";
+    if (M.isValidScore(bad) || M.isValidScore(bad2)) return "drum on a pitched staff, or a drum note without a drum, passed";
+    // a chord at the end of the kit doesn't move, rather than losing a note
+    st.bars[0][0].pitches = [drumPitch(44), drumPitch(35)];
+    if (!M.transpose(sc, 0, 0, 0, -1) || st.bars[0][0].pitches.length !== 2) return "chord at the bottom: " + JSON.stringify(st.bars[0][0].pitches);
+    const braced = M.newScore({ preset: "piano", bars: 2 });
+    braced.staves.splice(1, 1, sc.staves[0]);
+    if (M.isValidScore(braced)) return "a brace onto a drum staff passed";
+    // importers: drums snapped by position merge in a chord and are counted, with the staff's clef changes and transposition
+    const im = { clef: "treble", transpose: [-2, -1], clefs: { 1: "bass" }, bars: [[{ dur: "w", dots: 0, tie: false, pitches: [{ step: 0, oct: 4, alter: 0 }, { step: 1, oct: 4, alter: 0 }] }], []] };
+    const r = M.toDrumStaff(im, null, true);
+    return (eq(r, { guessed: 2, merged: 1, clefs: 1, transposed: true }) && im.bars[0][0].pitches.length === 1 && M.isPerc(im) && !im.clefs && !im.transpose) || JSON.stringify([r, im]);
   });
   await check("instrument sound from a part name", () => {
     const got = ["Trumpet in B♭ 2", "Alto Saxophone", "Horn in F", "Violin I", "Piano", "Kazoo"].map((n) => gmByName(n)?.name ?? null);

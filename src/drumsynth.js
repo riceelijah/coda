@@ -48,13 +48,15 @@ export function drumHit(c, dest, n, start, level = 1) {
     g.gain.setValueAtTime(0.0001, start);
     g.gain.exponentialRampToValueAtTime(peak, start + 0.002);
     g.gain.exponentialRampToValueAtTime(0.0001, start + decay);
-    if (k.am) { // a rattle: the level wobbles
-      const lfo = c.createOscillator(), depth = c.createGain();
-      lfo.frequency.value = k.am; depth.gain.value = peak * 0.6;
-      lfo.connect(depth).connect(g.gain);
+    let src = node;
+    if (k.am) { // a rattle: a wobbling stage before the envelope, so the wobble fades with it
+      const lfo = c.createOscillator(), depth = c.createGain(), wob = c.createGain();
+      lfo.frequency.value = k.am; depth.gain.value = 0.7; wob.gain.value = 0.7; // 0.7 ± 0.7: from silent to a little louder
+      lfo.connect(depth).connect(wob.gain);
       lfo.start(start); lfo.stop(start + decay + 0.05);
+      src = node.connect(wob);
     }
-    node.connect(g).connect(out);
+    src.connect(g).connect(out);
     return decay;
   };
   if (k.tone) {

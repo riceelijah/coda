@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
@@ -291,13 +291,8 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     if (pendHp.some(Boolean)) report.count("Hairpins with no notes (not imported)");
     if (!staff.clef) staff.clef = "treble";
     if (d.drums || staff.clef === "percussion") { // DESIGN §27
-      if (!d.drums) { // a percussion clef without a drum set: drums by position
-        let n = 0;
-        for (const e of allLayers(staff).flat(2)) for (const ps of [e.pitches, e.grace || []]) ps.forEach((p, i) => { ps[i] = drumNear(p); n++; });
-        if (n) report.count("Drum notes with no instrument (sound from their position)", n);
-      }
-      staff.clef = "percussion"; delete staff.clefs; delete staff.program; delete staff.transpose; staff.brace = false;
-      if (si > 0 && score.staves[si - 1]?.brace) score.staves[si - 1].brace = false;
+      // a percussion clef without a drum set: drums by position
+      drumReport(report, toDrumStaff(staff, score.staves[score.staves.length - 1], !d.drums), "Drum notes with no instrument (sound from their position)");
     }
     score.staves.push(staff);
   });
@@ -366,7 +361,7 @@ export function exportMSCX(score) {
     if (s === 0) x.push(`<VBox><height>10</height><Text><style>title</style><text>${esc(score.title || "")}</text></Text>` +
       (score.composer ? `<Text><style>composer</style><text>${esc(score.composer)}</text></Text>` : "") + "</VBox>");
     const layers = allLayers(st);
-    const ties = layers.map((bars) => tieMap(bars)); // per layer: "b:i" -> {next, prev} locations by midi
+    const ties = layers.map((bars) => tieMap(bars)); // per layer: "b:i" -> {next, prev} locations by midi (drum number on drum staves)
     const spans = layers.map((bars) => spanMap(bars));
     score.measures.forEach((m, b) => {
       const a = attrsAt(score, b), cap = barCapacity(a.time);
@@ -405,8 +400,8 @@ function tieMap(bars) {
     const q = pos[k + 1];
     if (!p.e.tie || !q || q.b > p.b + 1) return;
     for (const pi of p.e.pitches) {
-      const mm = midi(pi);
-      if (!q.e.pitches.some((r) => midi(r) === mm)) continue;
+      const mm = pi.drum ?? midi(pi); // a drum by its number: two drums can share a line
+      if (!q.e.pitches.some((r) => (r.drum ?? midi(r)) === mm)) continue;
       at(p).next[mm] = loc(q.b - p.b, q.t - p.t);
       at(q).prev[mm] = loc(p.b - q.b, p.t - q.t);
     }
@@ -458,7 +453,7 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
       const [tc, td] = st.transpose || [0, 0]; // pitch and tpc concert, tpc2 written
       const pitchXml = (p) => p.drum ? `<pitch>${p.drum}</pitch><tpc>${tpcOf(spellMidi(p.drum, 0))}</tpc>${HEAD_MS[DRUMS.get(p.drum).head] ? `<head>${HEAD_MS[DRUMS.get(p.drum).head]}</head>` : ""}` : `<pitch>${midi(p) + tc}</pitch><tpc>${tpcOf(tc || td ? shiftPitch(p, tc, td) : p)}</tpc>${tc || td ? `<tpc2>${tpcOf(p)}</tpc2>` : ""}`;
       const notes = e.pitches.map((p) => {
-        const mm = midi(p);
+        const mm = p.drum ?? midi(p);
         const sp = (t.next[mm] ? `<Spanner type="Tie"><Tie/><next>${t.next[mm]}</next></Spanner>` : "") +
           (t.prev[mm] ? `<Spanner type="Tie"><prev>${t.prev[mm]}</prev></Spanner>` : "");
         return `<Note>${sp}${pitchXml(p)}</Note>`;

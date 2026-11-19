@@ -344,11 +344,13 @@ export function transpose(score, s, b, i, steps) {
   const ev = score.staves[s].bars[b][i];
   if (!ev.pitches.length) return "Rests have no pitch";
   if (isPerc(score.staves[s])) { // ↑/↓ move to the next drum position (DESIGN §27)
-    const move = (p) => drumStep(p, Math.sign(steps)) || p;
-    const np = ev.pitches.map(move);
-    if (np.every((p, k) => p === ev.pitches[k])) return steps > 0 ? "No drum higher up" : "No drum lower down";
-    ev.pitches = sortPitches(np).filter((p, k, a) => k === 0 || !samePitch(p, a[k - 1]));
-    if (ev.grace) ev.grace = ev.grace.map(move);
+    // the whole chord moves, or nothing does: a drum at the end of the kit would swallow its neighbour
+    const move = (p) => drumStep(p, Math.sign(steps));
+    const np = ev.pitches.map(move), ng = (ev.grace || []).map(move);
+    if ([...np, ...ng].some((p) => !p)) return steps > 0 ? "No drum higher up" : "No drum lower down";
+    if (np.some((p, k) => np.findIndex((q) => samePitch(p, q)) !== k)) return "Two drums in the chord would become the same drum";
+    ev.pitches = sortPitches(np);
+    if (ev.grace) ev.grace = ng;
     return null;
   }
   const key = keyAt(score, s, b);
@@ -359,6 +361,31 @@ export function transpose(score, s, b, i, steps) {
   // drop duplicates created by collisions
   ev.pitches = ev.pitches.filter((p, k, a) => k === 0 || !samePitch(p, a[k - 1]));
   return null;
+}
+
+// Importers (DESIGN §27): make st a drum staff (prev: the staff above it, which loses its brace). Notes with no drum (every note when `all`)
+// take the kit drum nearest their position; drums that land twice in one chord are merged. Returns
+// counts for the report: {guessed, merged, clefs, transposed}.
+export function toDrumStaff(st, prev, all = false) {
+  const r = { guessed: 0, merged: 0, clefs: Object.keys(st.clefs || {}).length, transposed: !!st.transpose?.some(Boolean) };
+  const snap = (p) => { if (!all && p.drum) return p; r.guessed++; return drumNear(p); };
+  for (const e of allLayers(st).flat(2)) {
+    const ps = sortPitches(e.pitches.map(snap)), n = ps.length;
+    e.pitches = ps.filter((p, i) => ps.findIndex((q) => samePitch(p, q)) === i);
+    r.merged += n - e.pitches.length;
+    if (e.grace) e.grace = e.grace.map(snap);
+  }
+  st.clef = "percussion"; st.brace = false;
+  delete st.clefs; delete st.program; delete st.transpose;
+  if (prev) prev.brace = false;
+  return r;
+}
+// The import report lines for toDrumStaff's counts; `guessed` names why drums came from position.
+export function drumReport(report, r, guessed) {
+  if (r.guessed) report.count(guessed, r.guessed);
+  if (r.merged) report.count("Notes that became the same drum in a chord (merged)", r.merged);
+  if (r.clefs) report.count("Clef changes on drum staves (not imported)", r.clefs);
+  if (r.transposed) report.count("Transpositions on drum staves (not imported)");
 }
 
 // Drum staves (DESIGN §27): the top note of event i becomes drum n, at that drum's position.
@@ -759,8 +786,9 @@ export function isValidScore(sc) {
         (typeof l.text === "string" && l.text.length > 0 && l.text.length <= MAX_LYRIC && (l.hyph === undefined || l.hyph === true)))))));
     const okClefs = (c) => c === undefined || (c && typeof c === "object" && Object.keys(c).length > 0 &&
       Object.entries(c).every(([k, v]) => /^[1-9]\d*$/.test(k) && +k < n && CLEFS.includes(v)));
-    return sc.staves.every((st) => (okPitch = isPerc(st) ? drum : pitched) && (CLEFS.includes(st.clef) || isPerc(st)) && okBars(st.bars) && okClefs(st.clefs) &&
+    return sc.staves.every((st, k) => (okPitch = isPerc(st) ? drum : pitched) && (CLEFS.includes(st.clef) || isPerc(st)) && okBars(st.bars) && okClefs(st.clefs) &&
       (!isPerc(st) || (st.clefs === undefined && st.program === undefined && st.transpose === undefined && !st.brace)) &&
+      !(st.brace && sc.staves[k + 1] && isPerc(sc.staves[k + 1])) && // a drum staff is never in a braced pair
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
       (st.transpose === undefined || okTranspose(st.transpose)) &&
       (st.sound === undefined || (typeof st.sound === "string" && st.sound.length > 0 && st.sound.length <= 64)) &&

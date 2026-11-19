@@ -1,9 +1,9 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport,
 } from "../model.js";
-import { DRUMS, drumName, drumNear, isDrum } from "../drums.js";
+import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
 const TYPE_OF = { w: "whole", h: "half", q: "quarter", 8: "eighth", 16: "16th", 32: "32nd" };
@@ -103,7 +103,7 @@ function barXml(score, s, b, staffNo, voice, v, syl, pid) {
   const out = [];
   bar.forEach((ev, i) => {
     const before = i > 0 ? bar[i - 1] : prev;
-    const tied = (p) => !!(before && before.tie && before.pitches.some((q) => q.step === p.step && q.oct === p.oct));
+    const tied = (p) => !!(before && before.tie && before.pitches.some((q) => q.step === p.step && q.oct === p.oct && q.drum === p.drum));
     const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev), pid };
     const dir = (body) => `<direction placement="below"><direction-type>${body}</direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`;
     if (ev.dyn) out.push(dir(`<dynamics><${ev.dyn}/></dynamics>`));
@@ -414,13 +414,7 @@ function finishDrums(staves, report) {
   staves.forEach((st, k) => {
     const all = allLayers(st).flat(2).flatMap((e) => [e.pitches, e.grace || []]);
     if (st.clef !== "percussion" && !all.flat().some((p) => p.drum !== undefined)) return;
-    let guessed = 0;
-    for (const ps of all) ps.forEach((p, i) => { if (!p.drum) { ps[i] = drumNear(p); guessed++; } });
-    if (guessed) report.count("Drum notes with no instrument (sound from their position)", guessed);
-    st.clef = "percussion";
-    delete st.program; delete st.transpose; delete st.clefs;
-    st.brace = false;
-    if (k > 0) staves[k - 1].brace = false;
+    drumReport(report, toDrumStaff(st, staves[k - 1]), "Drum notes with no instrument (sound from their position)");
   });
 }
 
@@ -463,8 +457,12 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   let pitch = null;
   const p = kid(el, "pitch") || kid(el, "unpitched");
   if (p && !isRest) {
-    const step = "CDEFGAB".indexOf(txt(p, "step") || txt(p, "display-step"));
-    const oct = parseInt(txt(p, "octave") ?? txt(p, "display-octave"), 10);
+    let step = "CDEFGAB".indexOf(txt(p, "step") || txt(p, "display-step"));
+    let oct = parseInt(txt(p, "octave") ?? txt(p, "display-octave"), 10);
+    if (p.localName === "unpitched" && (step < 0 || !Number.isFinite(oct))) { // the position is optional: the drum's own, else the middle line
+      const n = drums?.[kid(el, "instrument")?.getAttribute("id")], at = isDrum(n) ? drumPitch(n) : { step: 6, oct: 4 };
+      ({ step, oct } = at);
+    }
     let alter = parseFloat(txt(p, "alter") || "0");
     if (!Number.isInteger(alter)) { report.count("Microtonal alterations rounded"); alter = Math.round(alter); }
     if (step < 0 || !Number.isFinite(oct)) return;

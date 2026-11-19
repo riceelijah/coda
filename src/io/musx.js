@@ -4,10 +4,9 @@
 // EnigmaXML structure as checked against real files and the MIT-licensed musxdom library
 // (key/pitch rules ported from its KeySignature::calcPitch).
 import { padBars, noteCount, tupletOk, durFromTicks, nearestDur, measuresFrom, setMark, splitTicks, barTicks, barCapacity, allLayers, shiftPitch, midi, MAX_LAYERS,
-  eventTicks, clearBrokenSpans, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, DYNS } from "../model.js";
+  eventTicks, clearBrokenSpans, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, DYNS, toDrumStaff, drumReport, isPerc } from "../model.js";
 import { DYN_IN } from "./musicxml.js";
 import { gmByName } from "../gm.js";
-import { drumNear } from "../drums.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
 // Symmetric XOR keystream used for score.dat. Ported from the CC0 routine in
@@ -330,7 +329,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     let clefId = num(spec, "defaultClef", 0);
     const staff = { name: textOf(num(spec, "fullName", -1)), clef: null, brace: braces.has(si), bars: [] };
     const gm = gmByName(staff.name);
-    const upper = si > 0 && braces.has(si - 1) ? score.staves[si - 1] : null; // lower staff of a braced pair
+    const upper = si > 0 && braces.has(si - 1) && !isPerc(score.staves[si - 1]) ? score.staves[si - 1] : null; // lower staff of a braced pair (a drum staff above has no brace)
     if (upper) { if (upper.program !== undefined) staff.program = upper.program; }
     else if (gm) staff.program = gm.program;
     else if (staff.name && !/piano/i.test(staff.name) && str(spec, "notationStyle") !== "percussion") report.count("Parts with no instrument sound found (played as piano)"); // an unnamed staff has nothing to go on
@@ -506,19 +505,14 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     // a Finale drum staff (DESIGN §27): its percussion map isn't read yet, so drums come from staff position
     const perc = str(spec, "notationStyle") === "percussion";
     if (perc) {
-      let n = 0;
-      for (const e of allLayers(staff).flat(2)) for (const ps of [e.pitches, e.grace || []]) ps.forEach((p, i) => { ps[i] = drumNear(p); n++; });
-      if (n) report.count("Finale drum maps aren't read yet: drums chosen by staff position", n);
-      Object.assign(staff, { clef: "percussion", brace: false });
-      delete staff.program; delete staff.clefs;
-      if (si > 0 && score.staves[si - 1]?.brace) score.staves[si - 1].brace = false;
+      drumReport(report, toDrumStaff(staff, score.staves[si - 1], true), "Finale drum maps aren't read yet: drums chosen by staff position");
     } else if (!staff.clef) { staff.clef = "treble"; report.count("Unsupported clefs shown as treble"); }
 
     // a tie needs the same pitch next in its layer; ties into another voice are dropped
     for (const bars of allLayers(staff)) {
       const seq = bars.flat();
       seq.forEach((ev, i) => {
-        if (ev.tie && !seq[i + 1]?.pitches.some((q) => ev.pitches.some((p) => midi(p) === midi(q)))) {
+        if (ev.tie && !seq[i + 1]?.pitches.some((q) => ev.pitches.some((p) => (p.drum ?? midi(p)) === (q.drum ?? midi(q))))) {
           delete ev.tie; report.count("Ties with no matching next note dropped");
         }
       });

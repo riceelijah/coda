@@ -600,7 +600,16 @@ function chordLetter(letter) {
   const p = M.chordAbove(base, step);
   const key = M.keyAt(state.score, s.staff, s.bar);
   const pitch = M.fitPitch(state.score.staves[s.staff], { ...p, alter: state.armed.alter ?? M.keyAlter(key, p.step) });
+  if (inChordAlready(ev, p, pitch)) return;
   if (edit((sc) => M.toggleChordPitch(sc, s.staff, s.bar, s.idx, pitch))) { hear(selEvent()); message(M.pitchName(pitch) + " added"); }
+}
+
+// On a drum staff a position with no drum of its own snaps to one that may already be in the
+// chord: say so rather than toggling it off (DESIGN §27). The drum's own position still toggles.
+function inChordAlready(ev, at, pitch) {
+  if (!pitch.drum || (at.step === pitch.step && at.oct === pitch.oct) || !ev.pitches.some((p) => p.drum === pitch.drum)) return false;
+  message(M.pitchName(pitch) + " is already in the chord", true);
+  return true;
 }
 
 function lastPitchBefore() {
@@ -759,6 +768,7 @@ function onClick(e) {
     if (chord) {
       const key = M.keyAt(state.score, L.staff, L.bar);
       const pitch = M.fitPitch(state.score.staves[L.staff], { ...L.pitch, alter: state.armed.alter ?? M.keyAlter(key, L.pitch.step) });
+      if (inChordAlready(selEvent(), L.pitch, pitch)) return;
       if (edit((sc) => M.toggleChordPitch(sc, L.staff, L.bar, target, pitch))) hear(selEvent());
     } else {
       refresh();
