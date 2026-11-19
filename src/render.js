@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel } from "./model.js";
+import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
 import { DRUMS } from "./drums.js";
 
 const VF = () => Vex.Flow;
@@ -114,7 +114,7 @@ function makeNote(ev, clef, stem = 0) {
     const down = note.getStemDirection() < 0, P = VFl.ModifierPosition;
     for (const m of ev.marks) {
       if (rest && m !== "fermata") continue;
-      if (BRASS.has(m)) { keys.forEach((_, k) => note.addModifier(new VFl.Ornament(m), k)); continue; } // beside each notehead (DESIGN §29)
+      if (BRASS.has(m)) { keys.forEach((_, k) => note.addModifier(new VFl.Ornament(m), k)); continue; } // beside each notehead (DESIGN §31)
       const above = stem ? stem > 0 : m === "fermata" || down;
       note.addModifier(new VFl.Articulation(MARK_VF[m]).setPosition(above ? P.ABOVE : P.BELOW), 0);
     }
@@ -208,7 +208,7 @@ export function render(score, container, sel, opts = {}) {
     }));
   }));
 
-  // Slides (DESIGN §29): a straight line from each notehead to its partner in the next note,
+  // Slides (DESIGN §31): a straight line from each notehead to its partner in the next note,
   // or to the system's end and on from the next system's start.
   score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
     if (!ev.gliss) return;
@@ -224,6 +224,23 @@ export function render(score, container, sel, opts = {}) {
         line(ctxs[z.sys], yz.map((y, k) => [xs, (y + (ya[k] ?? y)) / 2, x1, y]));
       }
     })); } catch (e) { console.error(e); }
+  }))));
+
+  // Text above notes (DESIGN §30): drawn after layout so it takes no room between notes; it starts
+  // at the note and sits above the staff, or above the note when that's higher.
+  score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
+    const ref = noteRef[s][v][b]?.[i];
+    if (!ev.text || !ref) return;
+    const ctx = ctxs[ref.sys], note = ref.note, bb = note.getBoundingBox();
+    const y = Math.min(note.checkStave().getYForLine(0) - 10, bb ? bb.y - 8 : Infinity) - (ev.marks?.some((m) => !BRASS.has(m)) ? 18 : 0); // over a fermata or accent (brass effects sit beside the note)
+    try {
+      tintedAll([ctx], opts.dim && v !== (opts.layer || 0), () => {
+        ctx.save(); ctx.setFont("Georgia", 13, "normal", "italic");
+        const w = ctx.measureText(ev.text).width; // kept inside the system's right edge
+        ctx.fillText(ev.text, Math.max(0, Math.min(note.getAbsoluteX() - 4, SHEET_W - 10 - w)), y);
+        ctx.restore();
+      });
+    } catch (e) { console.error(e); }
   }))));
 
   // Slurs and hairpins (DESIGN §23)
@@ -351,13 +368,36 @@ function repeatMarks(VFl, score, b, s, stave) {
   if (m.repStart) stave.setBegBarType(VFl.Barline.type.REPEAT_BEGIN);
   if (m.repEnd) stave.setEndBarType(VFl.Barline.type.REPEAT_END);
   if (s !== 0) return;
+  // above the bar's highest note: 5 units per step past two steps over the top line
+  const st = score.staves[0];
+  const upOf = (i) => {
+    const top = BOTTOM_LINE[clefAt(st, i)] + 8;
+    const hi = Math.max(top, ...allLayers(st).flatMap((bars) => bars[i].flatMap((e) => [...e.pitches, ...(e.grace || [])].map(diatonic))));
+    const text = allLayers(st).some((bars) => bars[i].some((e) => e.text)) ? 18 : 0; // above text on its notes (DESIGN §30)
+    return -Math.max(0, (hi - top - 2) * 5) - text;
+  };
+  const up = upOf(b);
   if (m.volta) {
     // a bracket carried onto a new line goes on as a plain line, without its number
     const T = VFl.Volta.type, begins = !sameVolta(ms[b - 1]?.volta, m.volta), ends = !sameVolta(ms[b + 1]?.volta, m.volta);
-    stave.setVoltaType(begins && ends ? T.BEGIN_END : begins ? T.BEGIN : ends ? T.END : T.MID, begins ? voltaLabel(m.volta) : "", 0);
+    let a = b, z = b; // one bracket, one height
+    while (sameVolta(ms[a - 1]?.volta, m.volta)) a--;
+    while (sameVolta(ms[z + 1]?.volta, m.volta)) z++;
+    const vUp = Math.min(...ms.slice(a, z + 1).map((_, k) => upOf(a + k)));
+    stave.setVoltaType(begins && ends ? T.BEGIN_END : begins ? T.BEGIN : ends ? T.END : T.MID, begins ? voltaLabel(m.volta) : "", vUp);
   }
-  for (const key of ["segno", "coda", "toCoda", "fine"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]]);
-  if (m.jump) stave.setRepetitionType(VFl.Repetition.type[REP_VF[m.jump]]);
+  // signs at the bar's start go above an ending's number, the tempo beside them
+  const lift = m.volta ? 25 : 0;
+  // left to right at the bar's start: rehearsal mark, segno or coda, tempo
+  const dx = m.rehearsal ? 18 + 8 * m.rehearsal.length : 0;
+  for (const key of ["segno", "coda"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]], up - lift).getModifiers().at(-1).setShiftX(dx);
+  for (const key of ["toCoda", "fine"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]], up);
+  if (m.jump) stave.setRepetitionType(VFl.Repetition.type[REP_VF[m.jump]], up);
+  // tempo changes (DESIGN §29); bar 1's tempo is shown only when the score has changes
+  const bpm = b ? m.tempo : ms.some((x) => x.tempo) && score.tempo;
+  if (bpm) stave.setTempo({ duration: "q", bpm }, up - (m.volta ? 42 : 0)).getModifiers().at(-1).setShiftX(dx + (m.segno ? 35 : m.coda ? 60 : 10));
+  // a rehearsal mark (DESIGN §30): boxed, at the barline, above all of these
+  if (m.rehearsal) stave.setSection(m.rehearsal, up - lift - (m.segno || m.coda || bpm ? 26 : m.volta ? 6 : 0), -6, 13);
 }
 
 // Is (b, i) selected? sel may carry `end` for a range (DESIGN §11.7).

@@ -1,9 +1,9 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
 import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides } from "../model.js";
-import { parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS } from "../model.js";
+import { parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
-import { completeTuplet, DYN_IN } from "./musicxml.js";
+import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 import { gmByName } from "../gm.js";
 
@@ -102,6 +102,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   const firstAttrs = [];
   const rep = []; // per bar: repeats and navigation, from the first staff (DESIGN §28)
   const mark = (b, k, v) => { (rep[b] ||= {})[k] = v; };
+  const tempi = []; // per bar: tempo from its start (DESIGN §29)
   kids(sc, "Staff").forEach((stEl, si) => {
     const d = decl[si] || { name: "", brace: false };
     const staff = { name: d.name, clef: null, brace: d.brace, bars: [], ...(d.program !== undefined ? { program: d.program } : {}),
@@ -110,6 +111,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     let key = 0, time = [4, 4], sym;
     const tuplets = {}; // MuseScore 3: id -> ratio
     const pendDyn = []; // per voice: dynamic waiting for its chord or rest (DESIGN §22)
+    const pendText = []; // per voice: text waiting for its chord or rest (DESIGN §30)
     const pendHp = [], lastEv = []; // per voice: hairpin waiting for its first note; last event (DESIGN §23)
     // a <Note>'s written pitch: pitch and tpc are concert; Coda keeps the written note (tpc2)
     const notePitch = (n) => {
@@ -182,7 +184,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             break;
           }
           case "Tempo":
-            if (!score.tempo) score.tempo = Math.round(parseFloat(txt(el, "tempo")) * 60) || 0;
+            readTempo(tempi, mi, cur, parseFloat(txt(el, "tempo")) * 60, report); // beats per second
             break;
           case "Tuplet": {
             const ratio = [+txt(el, "actualNotes"), +txt(el, "normalNotes")];
@@ -219,6 +221,20 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             else report.count("Jumps to a named place (not imported)");
             break;
           }
+          case "StaffText": case "SystemText": case "Expression": case "PlayTechAnnotation": { // text above the next note (DESIGN §30)
+            const t = cleanText(kid(el, "text")?.textContent, 1e4);
+            if (t) pendText[vi] = cleanText([pendText[vi], t].filter(Boolean).join(" "), 1e4);
+            break;
+          }
+          case "RehearsalMark": { // on the bar, from the first staff
+            const t = cleanText(kid(el, "text")?.textContent, 1e4);
+            if (si > 0) { if (t && t !== rep[mi]?.rehearsal) report.count("Rehearsal marks in later staves (not imported)"); break; }
+            if (cur > 0) report.count("Rehearsal marks inside a bar moved to its start");
+            const r = { measures: [{}] };
+            if (t.length > MAX_REHEARSAL || setRehearsal(r, 0, t)) report.count("Rehearsal marks Coda can't show (not imported)");
+            else if (r.measures[0].rehearsal) mark(mi, "rehearsal", r.measures[0].rehearsal);
+            break;
+          }
           case "Dynamic": {
             const d = DYN_IN[txt(el, "subtype")];
             if (d) pendDyn[vi] = d; else report.count("Unusual dynamics (not imported)");
@@ -247,12 +263,13 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               const got = markOf(txt(a, "subtype") || "");
               if (got.length) marks.push(...got); else report.count("Other articulations (not imported)");
             }
-            for (const cl of kids(el, "ChordLine")) { // brass effects (DESIGN §29): 1 fall, 2 doit, 3 plop, 4 scoop
+            for (const cl of kids(el, "ChordLine")) { // brass effects (DESIGN §31): 1 fall, 2 doit, 3 plop, 4 scoop
               const m = CHORDLINE_IN[txt(cl, "subtype")];
               if (m) marks.push(m); else report.count("Plops and other chord lines (not imported)");
             }
             if (dt === "measure") { // whole-bar rest = empty bar
               if (marks.length) report.count("Fermatas on whole-bar rests (not imported)");
+              if (pendText[vi]) report.count("Text over a bar with no notes moved to the next note");
               cur += barCapacity(time); break;
             }
             let dur = DUR[dt];
@@ -280,6 +297,11 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             }
             for (const m of marks) if (!isRest || m === "fermata") setMark(ev, m, true);
             if (pendDyn[vi]) { ev.dyn = pendDyn[vi]; pendDyn[vi] = null; }
+            if (pendText[vi]) {
+              if (pendText[vi].length > MAX_TEXT) report.count(`Text cut to ${MAX_TEXT} characters`);
+              if (setText(ev, pendText[vi])) report.count("Text directions (not imported)");
+              pendText[vi] = null;
+            }
             if (pendHp[vi]) { ev.hp = pendHp[vi]; pendHp[vi] = null; }
             let graceSlurs = pendG.slurs; // a grace note's slur ends here too; that end isn't this note's
             pendG.slurs = 0;
@@ -323,6 +345,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       (firstAttrs[si] ||= []).push({ key, time: [...time], sym });
     });
     if (pendDyn.some(Boolean)) report.count("Dynamics after the last note (not imported)");
+    if (pendText.some(Boolean)) report.count("Text after the last note (not imported)");
     if (pendHp.some(Boolean)) report.count("Hairpins with no notes (not imported)");
     if (!staff.clef) staff.clef = "treble";
     if (d.drums || staff.clef === "percussion") { // DESIGN §27
@@ -337,8 +360,8 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   const broken = clearBrokenSpans(score), slides = clearBrokenSlides(score);
   if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
   if (slides) report.count("Slides not to the very next note, or between chords of different sizes (not imported)", slides);
-  score.tempo = Math.max(20, Math.min(400, score.tempo || 100));
   padBars(score);
+  applyTempi(score, tempi, report);
   rep.forEach((r, b) => { if (b < score.measures.length) Object.assign(score.measures[b], r); else report.count("Repeat marks after the last bar (not imported)"); });
   const lostClefs = finishClefs(score);
   if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
@@ -412,8 +435,10 @@ export function exportMSCX(score) {
           if (b === 0) x.push(`<Clef><concertClefType>${CLEF_OUT[st.clef]}</concertClefType><transposingClefType>${CLEF_OUT[st.clef]}</transposingClefType><isHeader>1</isHeader></Clef>`);
           if (b === 0 || m.key !== undefined) x.push(`<KeySig><concertKey>${a.key}</concertKey>${st.transpose ? `<actualKey>${keyAt(score, s, b)}</actualKey>` : ""}</KeySig>`);
           if (b === 0 || m.time) x.push(`<TimeSig>${a.sym ? `<subtype>${a.sym === "common" ? 1 : 2}</subtype>` : ""}<sigN>${a.time[0]}</sigN><sigD>${a.time[1]}</sigD></TimeSig>`);
+          if (s === 0 && m.rehearsal) x.push(`<RehearsalMark><text>${esc(m.rehearsal)}</text></RehearsalMark>`); // DESIGN §30
           if (s === 0) x.push(...navStart(score.measures, b));
-          if (b === 0 && s === 0) x.push(`<Tempo><tempo>${score.tempo / 60}</tempo><followText>1</followText><text><sym>metNoteQuarterUp</sym> = ${score.tempo}</text></Tempo>`);
+          const bpm = b === 0 ? score.tempo : m.tempo; // tempo changes (DESIGN §29)
+          if (bpm && s === 0) x.push(`<Tempo><tempo>${bpm / 60}</tempo><followText>1</followText><text><sym>metNoteQuarterUp</sym> = ${bpm}</text></Tempo>`);
         }
         const bar = layers[v][b];
         if (v === 0 && !bar.length) x.push(`<Rest><durationType>measure</durationType><duration>${frac(cap)}</duration></Rest>`);
@@ -470,7 +495,7 @@ function tieMap(bars) {
   pos.forEach((p, k) => {
     const q = pos[k + 1];
     if (!q || q.b > p.b + 1) return;
-    if (p.e.gliss) p.e.pitches.forEach((_, n) => { // slides (DESIGN §29), chord note n to note n
+    if (p.e.gliss) p.e.pitches.forEach((_, n) => { // slides (DESIGN §31), chord note n to note n
       at(p).gnext[n] = loc(q.b - p.b, q.t - p.t);
       at(q).gprev[n] = loc(p.b - q.b, p.t - q.t);
     });
@@ -518,6 +543,7 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
         `<Number><style>tuplet</style><text>${e.tup[0]}</text></Number></Tuplet>`);
     }
     if (e.marks?.includes("fermata")) x.push("<Fermata><subtype>fermataAbove</subtype></Fermata>");
+    if (e.text) x.push(`<StaffText><text>${esc(e.text)}</text></StaffText>`); // DESIGN §30
     if (e.dyn) x.push(`<Dynamic><subtype>${e.dyn}</subtype><velocity>${DYN_VEL[e.dyn] || ACCENT_VEL[e.dyn]}</velocity></Dynamic>`);
     const sp = spans[b + ":" + i] || {};
     if (sp.hpNext) x.push(`<Spanner type="HairPin"><HairPin><subtype>${e.hp === ">" ? 1 : 0}</subtype></HairPin><next>${sp.hpNext}</next></Spanner>`);

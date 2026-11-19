@@ -1,6 +1,6 @@
 // Coda playback: sampled General MIDI sounds fetched on demand, with a triangle-wave fallback.
 // See docs/DESIGN.md §7 and §13.3.
-import { attrsAt, barCapacity, eventTicks, midi as midiOf, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder } from "./model.js";
+import { attrsAt, barCapacity, eventTicks, midi as midiOf, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder, tempoAt } from "./model.js";
 import { drumHit } from "./drumsynth.js";
 import { GM } from "./gm.js";
 import { getSound } from "./usersounds.js";
@@ -23,11 +23,20 @@ export function schedule(score, from = 0) {
     t += barCapacity(attrsAt(score, b).time);
   }
   const total = t;
+  // seconds at an unrolled tick, each bar at its own tempo (DESIGN §29)
+  const secs = [0];
+  barStart.forEach(({ bar, tick }, k) => secs.push(secs[k] + ((barStart[k + 1]?.tick ?? total) - tick) * 60 / tempoAt(score, bar) / PPQ));
+  const timeOf = (x) => {
+    let k = 0;
+    while (k + 1 < barStart.length && barStart[k + 1].tick <= x) k++;
+    if (!barStart.length) return x * 60 / (score.tempo || 100) / PPQ;
+    return secs[k] + (x - barStart[k].tick) * 60 / tempoAt(score, barStart[k].bar) / PPQ;
+  };
   const notes = [];
   const linVel = dynamics(score, 0);
   score.staves.forEach((st, si) => allLayers(st).forEach((bars) => {
     const open = new Map(); // midi -> note awaiting a tie continuation, per layer
-    let slide = null; // the notes a slide starts from (DESIGN §29): {from: [note per pitch], t0, end}
+    let slide = null; // the notes a slide starts from (DESIGN §31): {from: [note per pitch], t0, end}
     barStart.forEach(({ bar, tick }, k) => {
       let at = tick;
       if (k && barStart[k - 1].bar !== bar - 1) { open.clear(); slide = null; } // after a repeat or jump: a tie or slide doesn't carry over
@@ -68,7 +77,7 @@ export function schedule(score, from = 0) {
       }
     });
   }));
-  return { notes, barStart, total };
+  return { notes, barStart, total, timeOf };
 }
 
 // Velocity at a tick (relative to bar `from`) for staff si (DESIGN §22). A part's dynamics, from
@@ -262,7 +271,7 @@ function userFor(sound, m) {
 
 // A note with whatever is available now: your sound, the sample if loaded, else the triangle voice.
 // vel: MIDI velocity, 80 (mf) plays at the usual level.
-// fx: pitch bends from bendOf (DESIGN §29), or null.
+// fx: pitch bends from bendOf (DESIGN §31), or null.
 function note(c, dest, m, program, start, len, sound, vel = 80, fx = null) {
   if (program < 0) { drumHit(c, dest, m, start, vel / 80); return; }
   const u = userFor(sound, m), level = vel / 80;
@@ -308,7 +317,7 @@ export function audition(midis, program = 0, sound) {
 // Load what `notes` need: your sounds, then GM samples (giving up after `waitMs`).
 // Returns a status line about notes that won't sound as chosen, or "" when all is well.
 async function prepare(all, waitMs, onStatus = () => {}) {
-  const notes = all.filter((n) => !n.root); // a slide's target sounds on its first note's voice (DESIGN §29)
+  const notes = all.filter((n) => !n.root); // a slide's target sounds on its first note's voice (DESIGN §31)
   const ids = [...new Set(notes.filter((n) => n.sound).map((n) => n.sound))];
   if (ids.length) await Promise.all(ids.map(loadUser));
   // notes your sound can't play (missing, or outside its range) use the part's instrument instead
@@ -328,23 +337,24 @@ async function prepare(all, waitMs, onStatus = () => {}) {
 // Every note into context `c` from time t0. Play and the audio export share this.
 // ponytail: schedules every note up front; fine for a few thousand notes. Switch to a
 // look-ahead scheduler if long scores stutter.
-function scheduleNotes(c, dest, notes, t0, secPerTick) {
+function scheduleNotes(c, dest, notes, t0, timeOf) {
   for (const n of notes) {
     if (n.root) continue; // sounded by the note its slide starts from
     const end = Math.max(n.end, ...(n.glide || []).map((s) => s.note.end));
-    const len = Math.max(0.06, (end - n.start) * secPerTick);
-    note(c, dest, n.midi, n.program, t0 + n.start * secPerTick, len, n.sound, n.vel, bendOf(n, len, secPerTick));
+    const len = Math.max(0.06, timeOf(end) - timeOf(n.start));
+    note(c, dest, n.midi, n.program, t0 + timeOf(n.start), len, n.sound, n.vel, bendOf(n, len, timeOf));
   }
 }
 
-// Pitch moves within one sounding note (DESIGN §29): {segs: [[t0, semis, t1, semis]…] in seconds
+// Pitch moves within one sounding note (DESIGN §31): {segs: [[t0, semis, t1, semis]…] in seconds
 // from its start, in order, fade: when a fall or doit starts fading}, or null.
-export function bendOf(n, len, secPerTick) {
+export function bendOf(n, len, timeOf) {
+  const sec = (t) => timeOf(t) - timeOf(n.start); // tick -> seconds from the note's start, at each bar's tempo
   const segs = [];
   let at = 0, cur = 0;
   if (n.scoop) { at = Math.min(0.12, len / 3); segs.push([0, -3, at, 0]); } // up from a minor third below
   for (const s of n.glide || []) {
-    const a = Math.max(at, (s.t0 - n.start) * secPerTick), z = Math.max(a + 0.02, (s.t1 - n.start) * secPerTick);
+    const a = Math.max(at, sec(s.t0)), z = Math.max(a + 0.02, sec(s.t1));
     segs.push([a, cur, z, s.to]);
     at = z; cur = s.to;
   }
@@ -362,12 +372,11 @@ function bend(param, base, start, fx) {
 
 // The whole score rendered offline (DESIGN §19): {buffer, status}. Waits for every sound.
 export async function renderAudio(score, onStatus = () => {}, rate = 44100, waitMs = Infinity) {
-  const { notes, total } = schedule(score);
+  const { notes, total, timeOf } = schedule(score);
   audio(); // decoding uses the live context
   const status = await prepare(notes, waitMs, onStatus);
-  const secPerTick = 60 / (score.tempo || 100) / PPQ;
-  const c = new OfflineAudioContext(2, Math.ceil((total * secPerTick + 2.5) * rate), rate);
-  scheduleNotes(c, output(c), notes, 0.05, secPerTick);
+  const c = new OfflineAudioContext(2, Math.ceil((timeOf(total) + 2.5) * rate), rate);
+  scheduleNotes(c, output(c), notes, 0.05, timeOf);
   onStatus("Rendering audio…");
   return { buffer: await c.startRendering(), status };
 }
@@ -429,21 +438,21 @@ async function start(me, score, from, onBar, onStatus) {
   audio();
   if (ctx.state === "suspended") await ctx.resume();
   if (current !== me) return;
-  const { notes, barStart, total } = schedule(score, from);
+  const { notes, barStart, total, timeOf } = schedule(score, from);
   const msgs = await prepare(notes, 8000, onStatus);
   if (current !== me) return;
   if (msgs) onStatus(msgs);
-  const secPerTick = 60 / (score.tempo || 100) / PPQ;
   const master = output(ctx);
   me.master = master;
   const t0 = ctx.currentTime + 0.1;
-  scheduleNotes(ctx, master, notes, t0, secPerTick);
+  scheduleNotes(ctx, master, notes, t0, timeOf);
+  const end = timeOf(total), at = barStart.map((b) => timeOf(b.tick));
   const tick = () => {
     if (current !== me) return;
-    const now = (ctx.currentTime - t0) / secPerTick;
-    if (now >= total) { stop(); onBar(null); return; }
+    const now = ctx.currentTime - t0;
+    if (now >= end) { stop(); onBar(null); return; }
     let bar = barStart[0].bar;
-    for (const b of barStart) if (b.tick <= now) bar = b.bar;
+    barStart.forEach((b, k) => { if (at[k] <= now) bar = b.bar; });
     if (bar !== me.lastBar) { me.lastBar = bar; onBar(bar); }
     me.raf = requestAnimationFrame(tick);
   };

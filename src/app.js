@@ -485,7 +485,7 @@ function onLyricKey(e) {
   else if (k === "Escape") { e.preventDefault(); closeLyrics(); }
 }
 
-// Slide each selected note into the next (DESIGN §29); over a range, the whole phrase glides.
+// Slide each selected note into the next (DESIGN §31); over a range, the whole phrase glides.
 // If they all already slide, the slides come off.
 function glide() {
   const s = state.sel;
@@ -943,6 +943,13 @@ function onKey(e) {
   if (handled) e.preventDefault();
 }
 
+// Drum notes up or down a line or space, same drum (DESIGN §28).
+function moveDrums(steps) {
+  const s = state.sel, r = range().filter((p) => lb(s.staff)[p.bar][p.idx].pitches.length);
+  if (!r.length) { message("Rests have no drum", true); return; }
+  edit((sc) => { for (const p of r) { const e = M.moveDrumNote(sc, s.staff, p.bar, p.idx, steps); if (e) return e; } return null; });
+}
+
 function transposeSel(steps) {
   const s = state.sel;
   if (!s) { message("Select a note first", true); return; }
@@ -1008,7 +1015,7 @@ function closeSetup() {
   if (d.returnValue !== "ok") return;
   const title = $("f-title").value.trim() || "Untitled";
   const composer = $("f-composer").value.trim();
-  const tempo = Math.max(20, Math.min(400, +$("f-tempo").value || 100));
+  const tempo = M.clampBpm(+$("f-tempo").value);
   if (d.dataset.mode === "new") {
     const t = M.parseTime($("f-time").value);
     if (!t) { message(`"${$("f-time").value}" isn't a time signature (try 7/8, 5/4, C or C|)`, true); return; }
@@ -1017,7 +1024,7 @@ function closeSetup() {
       ...t, bars: +$("f-bars").value || 16, program: +$("f-sound").value,
     }), { save: false });
   } else {
-    edit((sc) => { sc.title = title; sc.composer = composer; sc.tempo = tempo; return null; });
+    edit((sc) => { sc.title = title; sc.composer = composer; return M.setTempo(sc, 0, tempo); });
   }
 }
 
@@ -1076,9 +1083,9 @@ function partRow({ from, kind, name, value, tr = "0,0" }) {
   trs.value = tr;
   trs.dataset.was = tr;
   // any interval a file can carry can be typed here too (DESIGN §21)
-  trs.onchange = () => {
+  trs.onchange = async () => {
     if (trs.value !== "?") { trs.dataset.was = trs.value; return; }
-    const t = M.parseTranspose(prompt("Transposition from written to sounding: semitones, letter steps (B♭ is -2, -1; F is -7, -4)", trs.dataset.was.replace(",", ", ")) ?? "");
+    const t = M.parseTranspose(await ask("Transposition", "Semitones, letter steps from written to sounding (B♭: -2, -1; F: -7, -4)", trs.dataset.was.replace(",", ", ")) ?? "");
     const v = t ? t.join(",") : trs.dataset.was;
     if (t && ![...trs.options].some((o) => o.value === v)) trs.insertBefore(other(v), trs.lastChild);
     trs.value = trs.dataset.was = v;
@@ -1306,24 +1313,60 @@ function closeAttrs() {
   }
 }
 
-// ---------- repeats and navigation (DESIGN §28) ----------
-// Marks go on the caret bar; an ending covers the selected bars (or the caret bar).
+// A one-line question in a dialog (window.prompt is blocked in some embedded browsers).
+// Resolves to the text, or null when cancelled.
+function ask(head, label, value) {
+  const d = $("ask");
+  if (d.open) return Promise.resolve(null); // one question at a time
+  $("ask-head").textContent = head; $("ask-label").textContent = label; $("ask-in").value = value;
+  d.returnValue = "";
+  d.showModal();
+  $("ask-in").select();
+  return new Promise((res) => d.addEventListener("close", () => res(d.returnValue === "ok" ? $("ask-in").value : null), { once: true }));
+}
 
-const repBar = () => (state.sel ? state.sel.bar : state.caret.bar);
+// ---------- repeats and navigation (DESIGN §28) ----------
+// Marks go on the caret bar, like the rest of the Score menu; an ending covers the selected range
+// of bars (or the caret bar).
+
+const repBar = () => state.caret.bar;
 function barMark(k, val) {
   const b = repBar(), m = state.score.measures[b], on = val === true ? !m[k] : m[k] !== val;
   if (edit((sc) => M.setBarMark(sc, b, k, on && val))) message(`${on ? "" : "Removed: "}${k === "jump" ? M.JUMPS[val] : document.getElementById("r-" + k).textContent} at bar ${b + 1}`);
 }
-function repeatTimes() {
-  const b = repBar(), v = prompt(`Bar ${b + 1} ends a repeat. How many times does the section play? (2–${M.MAX_REPEAT})`, state.score.measures[b].repEnd || 3);
+// text above a note and rehearsal marks (DESIGN §30): empty removes
+async function noteText() {
+  const s = state.sel, ev = selEvent();
+  if (!ev) { message("Select a note or rest first", true); return; }
+  const v = await ask(`Text above bar ${s.bar + 1}`, "Text, such as dolce or pizz. (empty to remove)", ev.text || "");
+  if (v === null) return;
+  edit((sc) => M.setText(sc.staves[s.staff].bars[s.bar][s.idx], v)); // inside edit, bars is the current layer
+}
+async function rehearsal() {
+  const b = repBar(), sc = state.score;
+  const v = await ask(`Rehearsal mark at bar ${b + 1}`, `Up to ${M.MAX_REHEARSAL} letters or digits (empty to remove)`, sc.measures[b].rehearsal || M.nextRehearsal(sc, b));
+  if (v === null) return;
+  edit((x) => M.setRehearsal(x, b, v));
+}
+// tempo changes (DESIGN §29): empty, or the tempo before, removes the change
+async function tempoFrom() {
+  const b = repBar(), sc = state.score;
+  const v = await ask(`Tempo from bar ${b + 1}`, "Quarter notes a minute (20–400)" + (b ? "; empty for no change" : ""), M.tempoAt(sc, b));
+  if (v === null) return;
+  const bpm = v.trim() === "" && b ? M.tempoAt(sc, b - 1) : +v;
+  if (!M.okBpm(bpm)) { message("A tempo is a whole number from 20 to 400", true); return; }
+  if (edit((s) => M.setTempo(s, b, bpm))) message(`Tempo ${bpm} from bar ${b + 1}`);
+}
+async function repeatTimes() {
+  const b = repBar(), v = await ask(`End repeat at bar ${b + 1}`, `Times the section plays (2–${M.MAX_REPEAT})`, state.score.measures[b].repEnd || 3);
   if (v === null) return;
   if (!(+v >= 2 && +v <= M.MAX_REPEAT && Number.isInteger(+v))) { message(`Play a section 2 to ${M.MAX_REPEAT} times`, true); return; }
   edit((sc) => M.setBarMark(sc, b, "repEnd", +v));
 }
-function ending(nums) {
-  const a = repBar(), z = state.sel && state.selEnd ? state.selEnd.bar : a;
+async function ending(nums) {
+  const a = state.sel && state.selEnd ? state.sel.bar : repBar(), z = state.sel && state.selEnd ? state.selEnd.bar : a;
   if (nums === "?") {
-    const v = prompt("Ending numbers, such as 1, 2 or 1-3", state.score.measures[a].volta?.join(", ") || "1, 2");
+    const v = await ask("Ending", "Numbers, such as 1, 2 or 1-3", state.score.measures[a].volta?.join(", ") || "1, 2");
     if (v === null) return;
     nums = M.parseVolta(v);
     if (!nums) { message(`Type ending numbers from 1 to ${M.MAX_REPEAT}, such as 1, 2`, true); return; }
@@ -1377,6 +1420,7 @@ const CMD = {
   "n-layer4": { run: () => setLayer(3) },
   "n-tuplet": { run: () => openTuplet() },
   "n-drum": { run: () => openDrum(), on: () => hasSel() && M.isPerc(state.score.staves[state.sel.staff]) },
+  ...Object.fromEntries([["n-drumup", 1], ["n-drumdown", -1]].map(([id, d]) => [id, { run: () => moveDrums(d), on: () => hasSel() && M.isPerc(state.score.staves[state.sel.staff]) }])),
   "n-untup": { run: () => tupletSel(null), on: () => range().some((p) => lb(state.sel.staff)[p.bar][p.idx].tup) },
   ...Object.fromEntries(M.CLEFS.map((c) => ["c-" + c, { run: () => edit((sc) => M.setClef(sc, state.caret.staff, state.caret.bar, c)) }])),
   "b-addbar": { run: () => edit((sc) => { M.addMeasure(sc, state.caret.bar); state.caret.bar++; return null; }) },
@@ -1390,6 +1434,9 @@ const CMD = {
   ...Object.fromEntries(M.BAR_FLAGS.map((k) => ["r-" + k, { run: () => barMark(k, true) }])),
   "r-repEnd": { run: () => barMark("repEnd", 2) },
   "r-times": { run: () => repeatTimes() },
+  "b-tempo": { run: () => tempoFrom() },
+  "b-rehearsal": { run: () => rehearsal() },
+  "n-text": { run: () => noteText(), on: hasSel },
   ...Object.fromEntries(Object.keys(M.JUMPS).map((j) => ["r-" + j, { run: () => barMark("jump", j) }])),
   "r-volta1": { run: () => ending([1]) },
   "r-volta2": { run: () => ending([2]) },
@@ -1777,6 +1824,7 @@ function init() {
   $("tuplet-cancel").onclick = () => $("tuplet").close("cancel");
   $("drum").addEventListener("close", closeDrum);
   $("drum-cancel").onclick = () => $("drum").close("cancel");
+  $("ask-cancel").onclick = () => $("ask").close("cancel");
   setupMenus();
   { // compressed audio: whatever this browser can record, or no item at all
     const t = recordType();
@@ -1785,8 +1833,8 @@ function init() {
   }
   $("report-close").onclick = () => ($("report").style.display = "none");
   $("tempo").onchange = (e) => {
-    const v = Math.max(20, Math.min(400, Math.round(+e.target.value) || 100));
-    edit((sc) => { sc.tempo = v; return null; });
+    const v = M.clampBpm(+e.target.value);
+    edit((sc) => M.setTempo(sc, 0, v));
   };
   const systems = $("systems");
   systems.addEventListener("click", onClick);

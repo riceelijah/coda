@@ -109,11 +109,12 @@ export function parseTime(v) {
   const m = /^(\d{1,2})\s*\/\s*(\d{1,2})$/.exec(v);
   return m && +m[1] >= 1 && [1, 2, 4, 8, 16, 32].includes(+m[2]) ? { time: [+m[1], +m[2]] } : null;
 }
-// A tuplet typed as "7:4" (or "7,4"): [actual, normal], 2–16 each and not equal, else null.
+// A tuplet typed as "5:3" (or "5,3"): [actual, normal], 1–99 each and not equal, else null.
+// Whether it fits a note value is tupletOk's call, as on import.
 export function parseTuplet(v) {
   const m = /^\s*(\d{1,2})\s*[:,]\s*(\d{1,2})\s*$/.exec(String(v));
   const t = m && [+m[1], +m[2]];
-  return t && t.every((x) => x >= 2 && x <= 16) && t[0] !== t[1] ? t : null;
+  return t && t.every((x) => x >= 1) && t[0] !== t[1] ? t : null;
 }
 // A transposition typed as "-2, -1" (semitones, letter steps, written -> sounding), else null.
 export function parseTranspose(v) {
@@ -388,6 +389,18 @@ export function drumReport(report, r, guessed) {
   if (r.transposed) report.count("Transpositions on drum staves (not imported)");
 }
 
+// Drum staves (DESIGN §28): move every note of event i a line or space, keeping its drum, as a
+// file's own drum map places them. Stays within the ledger range entry allows.
+export function moveDrumNote(score, s, b, i, steps) {
+  const ev = score.staves[s].bars[b][i];
+  if (!isPerc(score.staves[s])) return "Only drum notes move without changing sound";
+  if (!ev.pitches.length) return "Rests have no drum";
+  const np = ev.pitches.map((p) => ({ ...fromDiatonic(diatonic(p) + steps), alter: 0, drum: p.drum }));
+  if (np.some((p) => diatonic(p) < BOTTOM_LINE.percussion - 10 || diatonic(p) > BOTTOM_LINE.percussion + 18)) return "No room further that way";
+  ev.pitches = sortPitches(np);
+  return null;
+}
+
 // Drum staves (DESIGN §27): the top note of event i becomes drum n, at that drum's position.
 export function setDrum(score, s, b, i, n) {
   const ev = score.staves[s].bars[b][i];
@@ -427,7 +440,7 @@ export function toggleMark(events, mark) {
 export function setMark(ev, mark, on) {
   const m = new Set(ev.marks || []);
   if (on) m.add(mark); else m.delete(mark);
-  if (on && mark === "fall") m.delete("doit"); // a note ends one way (DESIGN §29)
+  if (on && mark === "fall") m.delete("doit"); // a note ends one way (DESIGN §31)
   if (on && mark === "doit") m.delete("fall");
   if (m.size) ev.marks = MARKS.filter((x) => m.has(x)); else delete ev.marks;
 }
@@ -440,6 +453,37 @@ export const ACCENT_VEL = { fp: 100, sf: 112, sfz: 112, fz: 112 };
 // Set (or, when it's already that, remove) the dynamic on one event.
 export function toggleDyn(ev, dyn) {
   if (ev.dyn === dyn || !dyn) delete ev.dyn; else ev.dyn = dyn;
+}
+
+// ---------- text above notes and rehearsal marks (DESIGN §30) ----------
+// ev.text: a short line of text above the note or rest (dolce, pizz., a tempo word); measures[b].rehearsal:
+// a boxed mark at the bar's start (A, B, 12). Words that mean a jump or sign are kept for Repeats and endings.
+export const MAX_TEXT = 60, MAX_REHEARSAL = 8;
+export const NAV_WORDS = /^(d\.\s?c\.?|da capo|d\.\s?s\.?|dal segno|to coda|fine)(\s|$)/i;
+export const cleanText = (s, max) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+const okText = (t, max) => typeof t === "string" && t.length > 0 && t.length <= max && t === cleanText(t, max) && !NAV_WORDS.test(t);
+// Set (or with empty text, remove) one event's text.
+export function setText(ev, s) {
+  const t = cleanText(s, MAX_TEXT);
+  if (NAV_WORDS.test(t)) return `Use Score ▸ Repeats and endings for "${t}"`;
+  if (t) ev.text = t; else delete ev.text;
+  return null;
+}
+export function setRehearsal(score, b, s) {
+  const m = score.measures[b], t = cleanText(s, MAX_REHEARSAL);
+  if (!m) return "No such bar";
+  if (NAV_WORDS.test(t)) return `Use Score ▸ Repeats and endings for "${t}"`;
+  if (t) m.rehearsal = t; else delete m.rehearsal;
+  return null;
+}
+// The next rehearsal letter after the last one before bar b: A, B, … Z, AA, BB, …
+export function nextRehearsal(score, b) {
+  let last = null;
+  for (let i = b - 1; i >= 0 && !last; i--) last = score.measures[i].rehearsal;
+  const m = /^([A-Z])\1*$/.exec(last || "");
+  if (!last) return "A";
+  if (!m) return /^\d+$/.test(last) ? String(+last + 1) : "";
+  return m[1] === "Z" ? "A".repeat(last.length + 1) : String.fromCharCode(m[1].charCodeAt(0) + 1).repeat(last.length);
 }
 
 // ---------- slurs and hairpins (DESIGN §23) ----------
@@ -551,7 +595,7 @@ export function toggleTie(score, s, b, i) {
   return null;
 }
 
-// Slides (DESIGN §29): ev.gliss = true, a straight line to the next note in the layer that plays
+// Slides (DESIGN §31): ev.gliss = true, a straight line to the next note in the layer that plays
 // as one smooth glide. The next note must follow at once and differ; not on tied notes or drums.
 const slideTarget = (ev, ne) => ne && ne.pitches.length && !ev.tie && !ne.pitches.every((q, k) => ev.pitches[k] && midi(q) === midi(ev.pitches[k])) && ne.pitches.length === ev.pitches.length;
 export function toggleGliss(score, s, b, i) {
@@ -640,8 +684,12 @@ export function addMeasure(score, after) {
 
 export function deleteMeasure(score, idx) {
   if (score.measures.length <= 1) return "A score needs at least one bar";
-  const a0 = attrsAt(score, 0);
+  const a0 = attrsAt(score, 0), tm = score.measures[idx].tempo;
   score.measures.splice(idx, 1);
+  // a tempo change on the deleted bar moves to the bar after it, like a clef change
+  const nx = score.measures[idx];
+  if (tm && nx && !nx.tempo) nx.tempo = tm;
+  if (nx?.tempo && idx && nx.tempo === tempoAt(score, idx - 1)) delete nx.tempo; // no longer a change
   for (const st of score.staves) for (const bars of allLayers(st)) bars.splice(idx, 1);
   // a clef change on the deleted bar moves to the bar after it, so that bar keeps its clef
   for (const st of score.staves) if (st.clefs) {
@@ -655,6 +703,7 @@ export function deleteMeasure(score, idx) {
   }
   if (idx === 0) {
     const m = score.measures[0];
+    if (m.tempo) { score.tempo = m.tempo; delete m.tempo; }
     if (m.key === undefined) m.key = a0.key;
     if (!m.time) { m.time = a0.time; if (a0.sym) m.sym = a0.sym; }
   }
@@ -740,8 +789,8 @@ export function parseVolta(s) {
 export const voltaLabel = (v) => v.join(", ") + ".";
 
 // The bars in the order they play (DESIGN §28). A section runs from the last |: (or the bar
-// after the last :| or ending, or bar 1) to :|, and plays repEnd times; on pass n only the
-// endings holding n play. D.C./D.S. are taken once, go to bar 1 / the first segno (bar 1 if
+// after the last :| or ending, or bar 1) to :|, and plays repEnd times, or, at a :| inside an
+// ending, until the highest ending number has come; on pass n only the endings holding n play. D.C./D.S. are taken once, go to bar 1 / the first segno (bar 1 if
 // there is none), and repeats are not taken again after them: each run of endings plays only its
 // last one. "al Fine" then stops at the end of a Fine bar; "al Coda" goes from a To Coda bar to
 // the next coda sign (ignored when there is none). Capped, so a broken file can't loop forever.
@@ -750,6 +799,8 @@ export function playOrder(score) {
   const maxV = (m) => m.volta[m.volta.length - 1];
   // after a jump: is bar i in the last ending of its run of endings?
   const lastEnding = (i) => { let j = i; while (j + 1 < n && ms[j + 1].volta) j++; return ms.slice(i, j + 1).every((m) => maxV(m) <= maxV(ms[i])); };
+  // the highest ending number in the run of endings around bar i
+  const runMax = (i) => { let a = i, z = i; while (a > 0 && ms[a - 1].volta) a--; while (z + 1 < n && ms[z + 1].volta) z++; return Math.max(...ms.slice(a, z + 1).map(maxV)); };
   let b = 0, start = 0, pass = 1, back = false, jumped = null;
   while (b < n && out.length < cap) {
     const m = ms[b];
@@ -767,7 +818,8 @@ export function playOrder(score) {
       if (c >= 0) { b = c; continue; }
     }
     if (m.repEnd && !jumped) {
-      if (pass < m.repEnd) { pass++; b = start; back = true; continue; }
+      // an ending's :| goes back while a later ending is still to come ([1. :|] [2. :|] [3.])
+      if (pass < m.repEnd || (m.volta && pass < runMax(b))) { pass++; b = start; back = true; continue; }
       start = b + 1; pass = 1;
     }
     if (m.jump && !jumped) {
@@ -874,6 +926,27 @@ export function noteCount(score) {
   return n;
 }
 
+// ---------- tempo changes (DESIGN §29) ----------
+// score.tempo is bar 1's (quarter notes per minute); measures[b].tempo (b ≥ 1) changes it from bar b on.
+export const okBpm = (v) => Number.isInteger(v) && v >= 20 && v <= 400;
+export const clampBpm = (v) => Math.max(20, Math.min(400, Math.round(v) || 100));
+export function tempoAt(score, b) {
+  for (let i = b; i > 0; i--) if (score.measures[i]?.tempo) return score.measures[i].tempo;
+  return score.tempo || 100;
+}
+// Set the tempo from bar b on. At bar 1 this is the score's tempo; a change equal to the tempo
+// already in effect is stored as "no change", and a later bar left equal to it loses its change.
+export function setTempo(score, b, bpm) {
+  if (!okBpm(bpm)) return "Tempo must be 20–400";
+  if (!score.measures[b]) return "No such bar";
+  if (b === 0) score.tempo = bpm;
+  else if (tempoAt(score, b - 1) === bpm) delete score.measures[b].tempo;
+  else score.measures[b].tempo = bpm;
+  const n = score.measures.findIndex((m, i) => i > b && m.tempo);
+  if (n > 0 && score.measures[n].tempo === tempoAt(score, n - 1)) delete score.measures[n].tempo;
+  return null;
+}
+
 // Make every staff have the same bar count as score.measures (importers call this).
 export function padBars(score) {
   const n = Math.max(1, score.measures.length, ...score.staves.map((s) => s.bars.length));
@@ -892,6 +965,8 @@ export function isValidScore(sc) {
     if (!n || !sc.measures[0].time) return false;
     if (!sc.measures.every((m) => m.sym === undefined || (m.time && TIME_SYMS[m.sym] && symOk(m.sym, m.time)))) return false;
     if (!sc.measures.every(okRepeats)) return false;
+    if (!sc.measures.every((m, b) => m.tempo === undefined || (b > 0 && okBpm(m.tempo)))) return false;
+    if (!sc.measures.every((m) => m.rehearsal === undefined || okText(m.rehearsal, MAX_REHEARSAL))) return false;
     let okPitch;
     const pitched = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2 && p.drum === undefined;
     const drum = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && p.alter === 0 && Number.isInteger(p.drum) && p.drum >= 35 && p.drum <= 81;
@@ -899,7 +974,7 @@ export function isValidScore(sc) {
       DURS.includes(e.dur) && Array.isArray(e.pitches) && e.pitches.every(okPitch) &&
       (e.grace === undefined || (Array.isArray(e.grace) && e.grace.length > 0 && e.grace.length <= MAX_GRACE && e.pitches.length > 0 && e.grace.every(okPitch))) &&
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m)))) &&
-      (e.dyn === undefined || DYNS.includes(e.dyn)) &&
+      (e.dyn === undefined || DYNS.includes(e.dyn)) && (e.text === undefined || okText(e.text, MAX_TEXT)) &&
       (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&
       (e.gliss === undefined || (e.gliss === true && e.pitches.length > 0)) &&
       (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true) &&

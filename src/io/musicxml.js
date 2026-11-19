@@ -3,7 +3,7 @@ import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
   tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides,
 } from "../model.js";
-import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT } from "../model.js";
+import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -49,7 +49,7 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl
   const nots = [];
   if (tieStop) nots.push('<tied type="stop"/>');
   if (tieStart) nots.push('<tied type="start"/>');
-  if (slideStop) nots.push(`<slide type="stop" line-type="solid" number="${k + 1}"/>`); // DESIGN §29, numbered per chord note
+  if (slideStop) nots.push(`<slide type="stop" line-type="solid" number="${k + 1}"/>`); // DESIGN §31, numbered per chord note
   if (p && ev.gliss) nots.push(`<slide type="start" line-type="solid" number="${k + 1}"/>`);
   if (!chord && tupStart) nots.push('<tuplet type="start" bracket="yes"/>');
   if (!chord && tupStop) nots.push('<tuplet type="stop"/>');
@@ -110,6 +110,7 @@ function barXml(score, s, b, staffNo, voice, v, syl, pid) {
     const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev), pid };
     const dir = (body) => `<direction placement="below"><direction-type>${body}</direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`;
     if (ev.dyn) out.push(dir(`<dynamics><${ev.dyn}/></dynamics>`));
+    if (ev.text) out.push(dir(`<words>${esc(ev.text)}</words>`).replace('placement="below"', 'placement="above"')); // DESIGN §30
     if (ev.hp) out.push(dir(`<wedge type="${ev.hp === "<" ? "crescendo" : "diminuendo"}" number="${voice}"/>`));
     if (ev.grace) out.push(graceXml(ev.grace, staffNo, voice, pid));
     if (!ev.pitches.length) out.push(noteXml(ev, null, flags));
@@ -178,9 +179,11 @@ export function exportMusicXML(score) {
         }
       }
       if (attrs.length) x.push(`<attributes>${attrs.join("")}</attributes>`);
-      if (b === 0 && gi === 0) {
-        x.push(`<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${score.tempo}</per-minute></metronome></direction-type><sound tempo="${score.tempo}"/></direction>`);
+      const bpm = b === 0 ? score.tempo : score.measures[b].tempo; // tempo changes (DESIGN §29)
+      if (bpm && gi === 0) {
+        x.push(`<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${bpm}</per-minute></metronome></direction-type><sound tempo="${bpm}"/></direction>`);
       }
+      if (gi === 0 && score.measures[b].rehearsal) x.push(`<direction placement="above"><direction-type><rehearsal>${esc(score.measures[b].rehearsal)}</rehearsal></direction-type></direction>`);
       if (gi === 0) x.push(...navXml(score.measures[b], true));
       // every layer bar with notes, as voice staff×4 + layer + 1, separated by <backup> (DESIGN §15)
       const chunks = [];
@@ -287,6 +290,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   const score = { title: "", composer: "", tempo: 0, measures: [], staves: [] };
   const partAttrs = []; // per part, per bar: {key, time}; the key comes from the first part that isn't drums
   const rep = []; // per bar: repeat and navigation marks (DESIGN §28)
+  const tempi = []; // per bar: the tempo from its start, in quarters per minute (DESIGN §29)
   let ending = null; // numbers of the ending open in the first part
   kids(root, "part").forEach((part, pi) => {
     const measures = kids(part, "measure");
@@ -301,6 +305,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     let divisions = 1, key = 0, time = [4, 4], sym, tr = null;
     const attrs = [], drums = drumMaps[part.getAttribute("id")] || null;
     const pend = {}; // staff -> dynamic waiting for its note
+    const pendText = {}; // staff -> text waiting for its note (DESIGN §30)
     const pendHp = {}, lastAny = {}; // staff -> hairpin waiting for its note; last event read
     const openHp = {}, openSlur = {}; // staff -> {ev: where the open hairpin starts, prev: one still open before it}; staff:layer -> open slur number
     // staff -> MusicXML voice ids in layer order: numeric order, so voice 1 is always layer 1
@@ -397,6 +402,21 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           for (const dt of tag === "direction" ? kids(el, "direction-type") : []) {
             for (const c of dt.children) {
               if (nav && ["words", "segno", "coda"].includes(c.localName)) continue;
+              if (c.localName === "words") { // text above the staff's next note or rest (DESIGN §30)
+                const sn = +(txt(el, "staff") || 1), t = cleanText(c.textContent, 1e4);
+                if (t) pendText[sn] = { text: cleanText([pendText[sn]?.text, t].filter(Boolean).join(" "), 1e4), at: pos.t, mi };
+                continue;
+              }
+              if (c.localName === "rehearsal") { // on the bar, from the first part (DESIGN §30)
+                const t = cleanText(c.textContent, 1e4);
+                if (pi > 0) { if (t && t !== rep[mi]?.rehearsal) report.count("Rehearsal marks in later parts (not imported)"); continue; }
+                const at = pos.t >= barCapacity(time) ? mi + 1 : mi;
+                if (at === mi && pos.t > 0) report.count("Rehearsal marks inside a bar moved to its start");
+                const r = { measures: [{}] };
+                if (t.length > MAX_REHEARSAL || setRehearsal(r, 0, t)) report.count("Rehearsal marks Coda can't show (not imported)");
+                else if (r.measures[0].rehearsal) (rep[at] ||= {}).rehearsal = r.measures[0].rehearsal;
+                continue;
+              }
               if (c.localName === "wedge") { // hairpins (DESIGN §23): start on the next note, stop on the last one
                 const t = c.getAttribute("type"), sn = +(txt(el, "staff") || 1);
                 if (t === "crescendo" || t === "diminuendo") pendHp[sn] = { hp: t === "crescendo" ? "<" : ">", at: pos.t, mi };
@@ -423,15 +443,20 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
             }
           }
           const snd = tag === "sound" ? el : kid(el, "sound");
-          if (!score.tempo && snd && snd.getAttribute("tempo")) score.tempo = Math.round(+snd.getAttribute("tempo")) || 0;
-          const pm = el.querySelector && el.querySelector("metronome > per-minute");
-          if (!score.tempo && pm) score.tempo = Math.round(parseFloat(pm.textContent)) || 0;
+          let bpm = parseFloat(snd?.getAttribute("tempo")); // <sound tempo> is in quarters already
+          const mt = !(bpm > 0) && tag === "direction" && el.querySelector("metronome");
+          if (mt) { // a metronome mark in its own beat unit
+            const pm = parseFloat(txt(mt, "per-minute")), u = BEAT_Q[txt(mt, "beat-unit")];
+            if (pm > 0 && u) bpm = pm * u * (kid(mt, "beat-unit-dot") ? 1.5 : 1);
+            else report.count("Metronome marks Coda can't read (not imported)");
+          }
+          readTempo(tempi, mi, pos.t, bpm, report);
         } else if (tag === "backup" || tag === "forward") {
           const d = Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
           pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
         } else if (tag === "note") {
           const start = pos.t;
-          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums });
+          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums });
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
@@ -440,6 +465,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
       attrs.push({ key: tr ? wrapKey(key + fifthsOf(tr[0], tr[1])) : key, time: [...time], sym });
     });
     for (const k in pend) if (pend[k]) report.count("Dynamics after the last note (not imported)");
+    for (const k in pendText) if (pendText[k]) report.count("Text after the last note (not imported)");
     for (const k in pendHp) if (pendHp[k]) report.count("Hairpins with no notes (not imported)");
     staves.forEach((st) => { if (!st.clef) st.clef = "treble"; });
     finishDrums(staves, report);
@@ -457,9 +483,8 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     fileName.replace(/\.[^.]+$/, "") || "Untitled").trim();
   const comp = [...root.querySelectorAll("identification > creator")].find((c) => c.getAttribute("type") === "composer");
   score.composer = comp ? comp.textContent.trim() : "";
-  if (!score.tempo) score.tempo = 100;
-  score.tempo = Math.max(20, Math.min(400, score.tempo));
   padBars(score);
+  applyTempi(score, tempi, report);
   rep.forEach((r, b) => { if (b < score.measures.length) Object.assign(score.measures[b], r); else report.count("Repeat marks after the last bar (not imported)"); });
   const lostClefs = finishClefs(score);
   if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
@@ -467,12 +492,30 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   return { score, report: report.done() };
 }
 
+// A tempo read at tick `at` of bar b into tempi[] (quarters per minute): one per bar, at its start.
+export function readTempo(tempi, b, at, bpm, report) {
+  if (!(bpm > 0)) return;
+  if (tempi[b] === undefined) { tempi[b] = bpm; if (at) report.count("Tempo changes inside a bar moved to the bar's start"); }
+  else if (Math.round(bpm) !== Math.round(tempi[b])) report.count("Tempo changes skipped (one per bar is kept)");
+}
+// tempi[] into the score (after padBars). No tempo at bar 1: the first one found.
+export function applyTempi(score, tempi, report) {
+  score.tempo = clampBpm(tempi.find((t) => t) || 100);
+  tempi.forEach((t, b) => {
+    if (b >= score.measures.length) report.count("Tempo changes after the last bar (not imported)");
+    else if (b) setTempo(score, b, clampBpm(t));
+    if (Math.round(t) !== clampBpm(t)) report.count("Tempos outside 20–400 set to the nearest");
+  });
+}
+
+// a metronome beat unit in quarter notes
+const BEAT_Q = { whole: 4, half: 2, quarter: 1, eighth: 0.5, "16th": 0.25, "32nd": 0.125 };
+
 // MusicXML dynamics -> Coda's set; rarer ones go to the nearest (DESIGN §22)
 export const DYN_IN = { ppp: "ppp", pp: "pp", p: "p", mp: "mp", mf: "mf", f: "f", ff: "ff", fff: "fff", fp: "fp", sf: "sf", sfz: "sfz", fz: "fz",
   pppp: "ppp", ppppp: "ppp", pppppp: "ppp", ffff: "fff", fffff: "fff", ffffff: "fff", sfp: "fp", sfpp: "fp", sffz: "sfz", rfz: "sfz", rf: "sf", sfzp: "fp" };
 const DIRECTIONS = {
-  words: "Text directions (not imported)",
-  rehearsal: "Rehearsal marks (not imported)", segno: "Segno and coda signs (not imported)", coda: "Segno and coda signs (not imported)",
+  segno: "Segno and coda signs (not imported)", coda: "Segno and coda signs (not imported)",
   pedal: "Pedal marks (not imported)", "octave-shift": "Octave lines (not imported)",
 };
 const MARKS = {
@@ -491,7 +534,7 @@ function finishDrums(staves, report) {
   });
 }
 
-function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums }) {
+function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums }) {
   const isRest = !!kid(el, "rest");
   const grace = kid(el, "grace");
   if (grace && isRest) { report.count("Grace rests (not imported)"); return; }
@@ -503,7 +546,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   const lk = staffNo + ":" + layer;
   // fermatas and the articulations Coda holds are kept; other markings are counted, not dropped silently
   const marks = [], slur = {};
-  let glide = false; // a slide or glissando starts here (DESIGN §29); its stop is the next note
+  let glide = false; // a slide or glissando starts here (DESIGN §31); its stop is the next note
   for (const n of kids(el, "notations")) {
     for (const c of n.children) {
       if (c.localName === "fermata") marks.push("fermata");
@@ -616,6 +659,13 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   addMarks(ev);
   const pd = pend[staffNo];
   if (pd && (pd.mi < mi || start >= pd.at)) { ev.dyn = pd.dyn; pend[staffNo] = null; }
+  const pt = pendText[staffNo];
+  if (pt && (pt.mi < mi || start >= pt.at)) {
+    if (pt.text.length > MAX_TEXT) report.count(`Text cut to ${MAX_TEXT} characters`);
+    if (pt.mi < mi) report.count("Text over a bar with no notes moved to the next note");
+    if (setText(ev, pt.text)) report.count("Text directions (not imported)");
+    pendText[staffNo] = null;
+  }
   const ph = pendHp[staffNo];
   if (ph && (ph.mi < mi || start >= ph.at)) { ev.hp = ph.hp; pendHp[staffNo] = null; openHp[staffNo] = { ev, prev: openHp[staffNo] || null }; }
   if (slur.start) ev.slur = true;

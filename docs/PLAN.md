@@ -58,7 +58,9 @@ only says what to build in what order and how to know each phase is finished.
 | 31 | .musx: dynamics, slurs and hairpins, lyric verses, clef changes, grace notes (DESIGN §9.5) | done |
 | 32 | Unpitched percussion: drum staves, synthesized kit, MusicXML/MuseScore/MIDI (DESIGN §27) | done (`.musx` drum maps not read yet) |
 | 33 | Repeats, endings, segno/coda/D.C./D.S./Fine; nothing import-only (DESIGN §28) | done (`.musx` endings and text repeats counted, not read) |
-| 34 | Brass effects and slides: scoop, fall, doit, gliss with pitch bends (DESIGN §29) | done (no MIDI pitch bends) |
+| 34 | Tempo changes from any bar (DESIGN §29) | done (no accel./rit.) |
+| 35 | Text above notes and rehearsal marks (DESIGN §30) | done (`.musx` text not read) |
+| 36 | Brass effects and slides: scoop, fall, doit, gliss with pitch bends (DESIGN §31) | done (no MIDI pitch bends) |
 
 ---
 
@@ -314,6 +316,6 @@ DESIGN.md before work starts.
 - **MuseScore repeat tags are written from the format as MuseScore saves it** (Volta spanners,
   Marker labels, Jump fields, start/endRepeat); no sample with repeats exists here, so only our own
   round trip is tested. A real MuseScore 3/4 file with endings and D.S. al Coda would confirm them.
+- **`.musx` text expressions and rehearsal marks** are counted, not read (Phase 35).
 - **`.musx` repeats:** only the measure's forward/backward repeat flags are read (unverified, no
   sample has them); endings and text repeats are counted.
-- **Drum notes away from their kit position** (from a file's own drum map) can't be placed by hand.

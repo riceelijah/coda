@@ -5,7 +5,7 @@
 // (key/pitch rules ported from its KeySignature::calcPitch).
 import { padBars, noteCount, tupletOk, durFromTicks, nearestDur, measuresFrom, setMark, splitTicks, barTicks, barCapacity, allLayers, shiftPitch, midi, MAX_LAYERS,
   eventTicks, clearBrokenSpans, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, DYNS, toDrumStaff, drumReport, isPerc } from "../model.js";
-import { DYN_IN } from "./musicxml.js";
+import { DYN_IN, readTempo, applyTempi } from "./musicxml.js";
 import { gmByName } from "../gm.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -59,7 +59,7 @@ const SMUFL_MARKS = {
   0xe4a0: ["accent"], 0xe4a2: ["staccato"], 0xe4a4: ["tenuto"], 0xe4ac: ["marcato"], 0xe4ae: ["marcato", "staccato"],
   0xe4b0: ["accent", "staccato"], 0xe4b2: ["tenuto", "staccato"], 0xe4b4: ["tenuto", "accent"],
 };
-// Brass (DESIGN §29): U+E5D0 scoop, E5D1–E5D6 lifts and doits, E5D7–E5DF falls; plops (E5E0) are counted.
+// Brass (DESIGN §31): U+E5D0 scoop, E5D1–E5D6 lifts and doits, E5D7–E5DF falls; plops (E5E0) are counted.
 const brass = (c) => (c === 0xe5d0 ? ["scoop"] : c >= 0xe5d1 && c <= 0xe5d6 ? ["doit"] : c >= 0xe5d7 && c <= 0xe5df ? ["fall"] : null);
 const smuflMarks = (c) => (c >= 0xe4c0 && c <= 0xe4cb ? ["fermata"] : brass(c) || SMUFL_MARKS[c & ~1] || null); // even = above, odd = below
 // The codes all five fonts share, checked against openmusx/smufl-mapping's legacy glyph tables
@@ -219,8 +219,9 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
       if (!shown || shown[0] !== time[0] || shown[1] !== time[1]) report.count("Time signatures shown differently from the real meter (real meter used)");
       else sym = symFor(time, { cut: has(m, "abbrvTime"), common: has(m, "abbrvTime") });
     } else sym = symFor(time, { cut: has(tso, "timeSigDoAbrvCut"), common: has(tso, "timeSigDoAbrvCommon") });
-    // repeat barlines (DESIGN §28): the measure's own flags. ponytail: written from musxdom's field
-    // names, no sample file has repeats yet; endings and repeat text are only counted for now.
+    // repeat barlines (DESIGN §28): the measure's own flags, named as in musxdom's field populators
+    // (no sample here has repeats). ponytail: endings (repeatEndingStart) and text repeats
+    // (textRepeatAssign) are only counted; read them when a real file with them turns up.
     if (has(m, "barEnding")) report.count("Repeat endings (not read from .musx yet)");
     if (has(m, "txtRepeats")) report.count("D.C., D.S., segno and coda (not read from .musx yet)");
     return { cmper: m.getAttribute("cmper"), rep: { ...(has(m, "forRepBar") ? { repStart: true } : {}), ...(has(m, "bacRepBar") ? { repEnd: 2 } : {}) },
@@ -549,18 +550,19 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     score.staves.push(staff);
   });
 
-  // tempo: a tempo mark at the very start of bar 1
+  // tempo marks (DESIGN §29): expressions that set the playback tempo, value × auxdata1/1024 quarters a minute
   const exprDefs = byCmper(others("textExprDef"));
   const assigns = others("measExprAssign");
-  const t0 = assigns.find((a) => a.getAttribute("cmper") === measures[0].cmper && !num(a, "horzEduOff", 0) &&
-    str(exprDefs.get(String(num(a, "textExprID", -1))), "playType") === "time" && has(exprDefs.get(String(num(a, "textExprID", -1))), "useAuxData"));
-  if (t0) {
-    const d = exprDefs.get(String(num(t0, "textExprID", -1)));
-    const bpm = Math.round((num(d, "value", 0) * num(d, "auxdata1", 1024)) / 1024);
-    if (bpm > 0) score.tempo = Math.max(20, Math.min(400, bpm));
+  const tempoDef = (a) => { const d = exprDefs.get(String(num(a, "textExprID", -1))); return str(d, "playType") === "time" && has(d, "useAuxData") ? d : null; };
+  const tempi = [], tempoMarks = new Set(), mIndex = new Map(measures.map((m, i) => [m.cmper, i]));
+  for (const a of assigns) {
+    const d = tempoDef(a), mi = mIndex.get(a.getAttribute("cmper"));
+    const bpm = d && (num(d, "value", 0) * num(d, "auxdata1", 1024)) / 1024;
+    if (!(bpm > 0) || mi === undefined) continue; // not a tempo: counted with the text expressions
+    tempoMarks.add(a);
+    readTempo(tempi, mi, num(a, "horzEduOff", 0), bpm, report);
   }
   // the event at file time t (ticks) in a layer's bar: one starting within ~4 EDU, else the one covering t
-  const mIndex = new Map(measures.map((m, i) => [m.cmper, i]));
   const bar = (si, L, mi) => (L === 1 ? score.staves[si]?.bars[mi] : score.staves[si]?.layers?.[L - 2]?.[mi]) || [];
   const eventAt = (evs, t) => evs.find((ev) => Math.abs(startOf.get(ev) - t) <= 2) ||
     evs.find((ev) => startOf.get(ev) <= t && t < startOf.get(ev) + eventTicks(ev)) || null;
@@ -587,7 +589,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
   const dynCache = new Map();
   let expr = 0;
   for (const a of assigns) {
-    if (a === t0) continue;
+    if (tempoMarks.has(a)) continue;
     const defId = String(num(a, "textExprID", -1));
     if (!dynCache.has(defId)) dynCache.set(defId, dynOf(exprDefs.get(defId)));
     const d = dynCache.get(defId), mi = mIndex.get(a.getAttribute("cmper"));
@@ -611,7 +613,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     else if (ev.dyn) report.count("Two dynamics on one note (the first kept)");
     else ev.dyn = d.dyn;
   }
-  if (expr) report.count("Expressions (tempo and text marks) skipped", expr);
+  if (expr) report.count("Text expressions (not imported)", expr);
 
   // slurs and hairpins (DESIGN §23) from smart shapes; the rest are counted
   const SLURS = /^(slur|dashSlur|dashContourSlur)(Up|Down|Auto)$|^$/;
@@ -654,6 +656,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     }
   }
   padBars(score);
+  applyTempi(score, tempi, report);
   const broken = clearBrokenSpans(score);
   if (broken) report.count("Unfinished or overlapping slurs and hairpins (not imported)", broken);
   const lateClefs = finishClefs(score);

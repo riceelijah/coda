@@ -427,7 +427,7 @@ export async function run({ check, eq }) {
     return (/inside a bar moved to its start: 1/.test(r) && /after the last bar \(not imported\): 1/.test(r)) || r;
   });
 
-  await check("brass effects and slides: rules, playback bends, MusicXML and MuseScore round trips (DESIGN §29)", () => {
+  await check("brass effects and slides: rules, playback bends, MusicXML and MuseScore round trips (DESIGN §31)", () => {
     const s = M.newScore({ preset: "treble", bars: 2 });
     Object.assign(s.staves[0], { name: "Trombone", program: 57 });
     s.staves[0].bars[0] = [ev("q", "C5"), ev("q", "C5"), ev("q"), ev("q", "C5 E5")];
@@ -442,7 +442,7 @@ export async function run({ check, eq }) {
     // playback: the G4 voice glides to D5 over the last beat and falls; D5 itself is for MIDI only
     const sn = schedule(s).notes, g = sn.find((n) => n.midi === 67), d = sn.find((n) => n.midi === 74);
     if (!g.glide || g.glide[0].to !== 7 || d.root !== g || g.fall !== -1 || !sn.find((n) => n.midi === 72).scoop) return "schedule " + JSON.stringify(g, (k, v) => (k === "note" || k === "root" ? undefined : v));
-    const fx = bendOf(g, 2, 0.5 / 480); // 2 s: G4 0–1, D5 1–2; the slide over 0.5–1, then down a fifth
+    const fx = bendOf(g, 2, (t) => t * 0.5 / 480); // 2 s: G4 0–1, D5 1–2; the slide over 0.5–1, then down a fifth
     if (!eq(fx.segs, [[0.5, 0, 1, 7], [1.7, 7, 2, 0]]) || fx.fade !== 1.7) return "bend " + JSON.stringify(fx);
     // played twice through a repeat: the slide glides the first time into bar 2, and not into bar 1 on the jump back
     const rep = JSON.parse(JSON.stringify(s)); rep.measures[1].repEnd = 2;
@@ -719,7 +719,7 @@ export async function run({ check, eq }) {
       if (!eq(M.parseTime(v)?.time, want)) bad.push(v);
     for (const v of ["7/6", "0/4", "4/", "x", "100/4"]) if (M.parseTime(v)) bad.push("accepted " + v);
     if (!eq(M.parseTuplet("7:4"), [7, 4]) || !eq(M.parseTuplet("9,8"), [9, 8])) bad.push("tuplet");
-    for (const v of ["3:3", "1:2", "7", "20:4"]) if (M.parseTuplet(v)) bad.push("accepted tuplet " + v);
+    for (const v of ["3:3", "0:2", "7", "100:4"]) if (M.parseTuplet(v)) bad.push("accepted tuplet " + v);
     if (!eq(M.parseTranspose("-2, -1"), [-2, -1]) || !eq(M.parseTranspose("+5,3"), [5, 3]) || M.parseTranspose("40,1")) bad.push("transpose");
     // a 7/8 bar takes seven eighths
     const s = M.newScore({ bars: 1, ...M.parseTime("7/8") });
@@ -758,6 +758,10 @@ export async function run({ check, eq }) {
     const v = M.newScore({ bars: 4 });
     M.setVolta(v, 1, 1, [1, 2]); M.setBarMark(v, 1, "repEnd", 3); M.setVolta(v, 2, 2, [3]);
     if (order(v) !== "1 2 1 2 1 3 4") bad.push("endings 1,2 / 3: " + order(v));
+    // plain :| in the 1st and 2nd endings still reaches the 3rd
+    const e3 = M.newScore({ bars: 5 });
+    M.setVolta(e3, 1, 1, [1]); M.setBarMark(e3, 1, "repEnd", 2); M.setVolta(e3, 2, 2, [2]); M.setBarMark(e3, 2, "repEnd", 2); M.setVolta(e3, 3, 3, [3]);
+    if (order(e3) !== "1 2 1 3 1 4 5") bad.push("endings 1 / 2 / 3: " + order(e3));
     // D.C. after endings plays only the last ending; a missing coda sign ignores To Coda
     M.setBarMark(v, 3, "jump", "dcCoda"); M.setBarMark(v, 0, "toCoda", true);
     if (order(v) !== "1 2 1 2 1 3 4 1 3 4") bad.push("D.C. al Coda, last ending, no coda: " + order(v));
@@ -800,11 +804,87 @@ export async function run({ check, eq }) {
       <direction><direction-type><segno/></direction-type></direction><note><rest/><duration>4</duration></note></measure>
       <measure number="2"><note><rest/><duration>4</duration></note><direction><direction-type><words>Fine</words></direction-type></direction>
       <direction><direction-type><words>dolce</words></direction-type></direction></measure>
-      <measure number="3"><note><rest/><duration>4</duration></note><direction><direction-type><words>D.S. al Fine</words></direction-type></direction>
+      <measure number="3"><note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration><type>whole</type></note><direction><direction-type><words>D.S. al Fine</words></direction-type></direction>
       <barline location="right"><ending number="1" type="stop"/></barline></measure></part></score-partwise>`;
     const y = importMusicXML(xml, "w.xml");
     if (marks(y.score) !== JSON.stringify([{ segno: true }, { fine: true }, { jump: "dsFine", volta: [1] }].map((r) => Object.fromEntries(Object.entries(r).sort())))) return "words " + marks(y.score);
-    return JSON.stringify(y.report).includes("Text directions") || "unknown words not counted";
+    return y.score.staves[0].bars[2][0].text === "dolce" || "other words become text on the next note: " + JSON.stringify(y.score.staves[0].bars);
+  });
+
+  await check("drum notes move a line keeping their drum, as a file's own drum map has them (DESIGN §28)", () => {
+    const s = M.newScore({ preset: "drums", bars: 1 });
+    s.staves[0].bars[0] = [{ dur: "q", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0, drum: 38 }] }]; // snare, at its kit position
+    const was = s.staves[0].bars[0][0].pitches[0];
+    if (M.moveDrumNote(s, 0, 0, 0, 1)) return "refused";
+    const p = s.staves[0].bars[0][0].pitches[0];
+    if (p.drum !== 38 || M.diatonic(p) !== M.diatonic(was) + 1 || !M.isValidScore(s)) return JSON.stringify(p);
+    if (!M.moveDrumNote(s, 0, 0, 0, 40)) return "moved off the staff";
+    const t = M.newScore({ bars: 1 });
+    t.staves[0].bars[0] = [{ dur: "q", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0 }] }];
+    return !!M.moveDrumNote(t, 0, 0, 0, 1) || "moved a pitched note";
+  });
+
+  await check("tempo changes: model, timing, and MIDI, MusicXML and MuseScore round trips (DESIGN §29)", () => {
+    const s = M.newScore({ bars: 4, tempo: 120 });
+    s.staves[0].bars = s.staves[0].bars.map(() => [ev("w", "C5")]);
+    if (M.setTempo(s, 2, 60) || M.setTempo(s, 3, 60) || s.measures[3].tempo) return "same tempo stored as a change";
+    if (M.tempoAt(s, 1) !== 120 || M.tempoAt(s, 3) !== 60 || !M.isValidScore(s)) return "tempoAt";
+    if (!M.setTempo(s, 1, 500) || M.isValidScore({ ...s, measures: [{ ...s.measures[0], tempo: 90 }, ...s.measures.slice(1)] })) return "bad tempo allowed";
+    const { timeOf, total } = schedule(s); // two bars at 120 (2 s each), two at 60 (4 s each)
+    if (timeOf(1920) !== 2 || timeOf(2 * 1920) !== 4 || timeOf(total) !== 12) return "timeOf " + [timeOf(1920), timeOf(3840), timeOf(total)];
+    const t = (sc) => [sc.tempo, ...sc.measures.map((m) => m.tempo || 0)].join();
+    const want = t(s);
+    const mid = importMIDI(exportMIDI(s), "t.mid").score, xml = importMusicXML(exportMusicXML(s), "t.musicxml").score, ms = importMSCX(exportMSCX(s), "t.mscx").score;
+    for (const [n, sc] of [["MIDI", mid], ["MusicXML", xml], ["MuseScore", ms]]) if (t(sc) !== want) return n + " " + t(sc);
+    // a change on a deleted bar moves on; deleting bar 1 makes bar 2's tempo the score's
+    M.deleteMeasure(s, 2);
+    if (t(s) !== "120,0,0,60") return "delete " + t(s);
+    const u = M.newScore({ bars: 3, tempo: 120 }); M.setTempo(u, 1, 60); M.setTempo(u, 2, 120); M.deleteMeasure(u, 1);
+    if (t(u) !== "120,0,0") return "redundant after delete " + t(u);
+    const rep = [importMusicXML(exportMusicXML(s), "t.musicxml").report, importMSCX(exportMSCX(s), "t.mscx").report];
+    if (/tempo|metronome/i.test(JSON.stringify(rep))) return "tempo reported " + JSON.stringify(rep);
+    M.setTempo(s, 1, 90); M.deleteMeasure(s, 0);
+    if (t(s) !== "90,0,60") return "delete bar 1 " + t(s);
+    // another program's metronome in dotted quarters, mid-bar
+    const x = importMusicXML(`<score-partwise><part-list><score-part id="P1"><part-name>A</part-name></score-part></part-list><part id="P1">
+      <measure number="1"><attributes><divisions>1</divisions><time><beats>6</beats><beat-type>8</beat-type></time></attributes>
+      <note><rest/><duration>3</duration></note></measure>
+      <measure number="2"><note><rest/><duration>1</duration></note><direction><direction-type><metronome><beat-unit>quarter</beat-unit><beat-unit-dot/><per-minute>80</per-minute></metronome></direction-type></direction>
+      <note><rest/><duration>2</duration></note></measure></part></score-partwise>`, "m.xml");
+    if (t(x.score) !== "120,0,0" || !JSON.stringify(x.report).includes("moved to the bar")) return "metronome " + t(x.score) + JSON.stringify(x.report);
+    return true;
+  });
+
+  await check("text above notes and rehearsal marks: model, MusicXML and MuseScore round trips (DESIGN §30)", () => {
+    const s = M.newScore({ bars: 3 });
+    s.staves[0].bars = [[ev("h", "C5"), ev("h", "D5")], [ev("w", "E5")], [ev("w", "F5")]];
+    const e = s.staves[0].bars[0][1];
+    if (M.setText(e, "  a < b \n & \"c\"  ") || e.text !== 'a < b & "c"') return "setText " + e.text;
+    if (!M.setText(e, "D.C. al Fine") || !M.setText(e, "fine") || e.text !== 'a < b & "c"') return "nav words allowed as text";
+    if (M.setText(s.staves[0].bars[1][0], "x".repeat(99)) || s.staves[0].bars[1][0].text.length !== M.MAX_TEXT) return "not cut";
+    if (M.nextRehearsal(s, 1) !== "A") return "first letter";
+    M.setRehearsal(s, 1, "A");
+    if (M.nextRehearsal(s, 2) !== "B" || M.setRehearsal(s, 2, "B") || !M.isValidScore(s)) return "rehearsal";
+    if (M.isValidScore({ ...s, measures: [{ ...s.measures[0], rehearsal: "Fine" }, ...s.measures.slice(1)] })) return "nav rehearsal valid";
+    const sig = (sc) => JSON.stringify([sc.measures.map((m) => m.rehearsal || ""), sc.staves[0].bars.map((b) => b.map((x) => x.text || ""))]);
+    const x = importMusicXML(exportMusicXML(s), "t.musicxml"), ms = importMSCX(exportMSCX(s), "t.mscx");
+    for (const [n, r] of [["MusicXML", x], ["MuseScore", ms]]) {
+      if (sig(r.score) !== sig(s)) return n + " " + sig(r.score);
+      if (/not imported|cut/.test(JSON.stringify(r.report))) return n + " reported " + JSON.stringify(r.report);
+    }
+    // text on a lone rest, and on a whole-bar rest: kept, or moved and counted
+    const r = M.newScore({ bars: 3 });
+    r.staves[0].bars = [[ev("h", "C5"), { dur: "h", dots: 0, tie: false, pitches: [], text: "lunga" }], [{ dur: "w", dots: 0, tie: false, pitches: [], text: "tacet" }], [ev("w", "E5")]];
+    for (const [n, f] of [["MusicXML", (z) => importMusicXML(exportMusicXML(z), "r.musicxml")], ["MuseScore", (z) => importMSCX(exportMSCX(z), "r.mscx")]]) {
+      const o = f(r), b = o.score.staves[0].bars, rep = JSON.stringify(o.report);
+      if (b[0][1]?.text !== "lunga") return n + " rest text " + JSON.stringify(b[0]);
+      if (b[1][0]?.text !== "tacet" && !(b[2][0]?.text === "tacet" && /moved/.test(rep))) return n + " whole-bar rest text " + JSON.stringify(b) + rep;
+    }
+    // MuseScore text with inline markup; a rehearsal mark too long to show is counted
+    const raw = exportMSCX(s).replace("<StaffText><text>a &lt; b", "<StaffText><text><i>a</i> &lt; b").replace("<RehearsalMark><text>B<", "<RehearsalMark><text>Letter B and more<");
+    const y = importMSCX(raw, "u.mscx");
+    if (y.score.staves[0].bars[0][1].text !== 'a < b & "c"' || y.score.measures[2].rehearsal) return "markup " + sig(y.score);
+    return JSON.stringify(y.report).includes("Rehearsal marks Coda can't show") || JSON.stringify(y.report);
   });
 
   // Later phases: MIDI, MuseScore, musx.

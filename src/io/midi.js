@@ -1,6 +1,6 @@
 // Standard MIDI File import. See docs/DESIGN.md §9.4.
 // MIDI holds performance data, not notation, so the result is a transcription.
-import { barCapacity, splitTicks, spellMidi, padBars, noteCount, PPQ, isPerc, attrsAt } from "../model.js";
+import { barCapacity, splitTicks, spellMidi, padBars, noteCount, PPQ, isPerc, attrsAt, tempoAt, setTempo, clampBpm } from "../model.js";
 import { isDrum, drumPitch } from "../drums.js";
 import { Report } from "./util.js";
 import { schedule } from "../play.js";
@@ -85,12 +85,13 @@ export function importMIDI(bytes, fileName = "") {
   // meta: first of each kind wins
   let tempo = null, time = null, key = null;
   let extraMeta = false;
-  const names = [];
+  const names = [], tempos = []; // tempos: [tick, bpm] after the first
+
   tracks.forEach((evs, ti) => evs.forEach((e) => {
     if (e.meta === undefined) return;
     if (e.meta === 0x51 && e.data.length >= 3) {
       const us = (e.data[0] << 16) | (e.data[1] << 8) | e.data[2];
-      if (tempo === null) tempo = Math.round(60e6 / us); else if (e.tick > 0) extraMeta = true;
+      if (tempo === null) tempo = Math.round(60e6 / us); else tempos.push([q(e.tick), 60e6 / us]);
     } else if (e.meta === 0x58 && e.data.length >= 2) {
       const t = [e.data[0], 2 ** e.data[1]];
       if (time === null) time = t; else if (e.tick > 0) extraMeta = true;
@@ -101,7 +102,7 @@ export function importMIDI(bytes, fileName = "") {
       names[ti] = new TextDecoder("latin1").decode(e.data).trim();
     }
   }));
-  if (extraMeta) report.add("Only the first tempo, time signature and key signature were used.");
+  if (extraMeta) report.add("Only the first time signature and key signature were used.");
   if (!time || ![1, 2, 4, 8, 16, 32].includes(time[1]) || time[0] < 1) time = [4, 4];
   key = key ?? 0;
   tempo = Math.max(20, Math.min(400, tempo || 120));
@@ -196,6 +197,17 @@ export function importMIDI(bytes, fileName = "") {
   const bars = Math.max(...score.staves.map((s) => s.bars.length));
   while (score.measures.length < bars) score.measures.push({});
   padBars(score);
+  // tempo changes (DESIGN §29): one per bar, at its start
+  tempos.sort((a, b) => a[0] - b[0]);
+  const seen = new Set([0]); // bar 1 has the first tempo
+  for (const [t, bpm] of tempos) {
+    const b = Math.floor(t / L);
+    if (b < score.measures.length && clampBpm(bpm) === tempoAt(score, b)) continue; // the same again, e.g. in another track
+    if (b >= score.measures.length || seen.has(b)) { report.count("Tempo changes skipped (one per bar is kept)"); continue; }
+    seen.add(b);
+    if (t % L) report.count("Tempo changes inside a bar moved to the bar's start");
+    setTempo(score, b, clampBpm(bpm));
+  }
   report.notes = noteCount(score);
   return { score, report: report.done() };
 }
@@ -217,12 +229,12 @@ export function exportMIDI(score) {
   const meta = (type, data) => [0xff, type, ...vlq(data.length), ...data];
   const text = (s) => [...String(s)].map((c) => (c.charCodeAt(0) < 256 ? c.charCodeAt(0) : 63)); // latin1, else "?"
 
-  const usPerQ = Math.round(60000000 / (score.tempo || 100));
-  const cond = [{ tick: 0, bytes: meta(0x51, [usPerQ >> 16, (usPerQ >> 8) & 255, usPerQ & 255]) }];
-  if (score.title) cond.unshift({ tick: 0, bytes: meta(0x03, text(score.title)) });
-  let was = null; // bars play unrolled (DESIGN §28): after a repeat the key or time may differ with no change marked
+  const cond = [];
+  if (score.title) cond.push({ tick: 0, bytes: meta(0x03, text(score.title)) });
+  let was = null, bpm = 0; // bars play unrolled (DESIGN §28): after a repeat the key, time or tempo may differ with no change marked
   for (const { bar, tick } of barStart) {
-    const a = attrsAt(score, bar);
+    const a = attrsAt(score, bar), tp = tempoAt(score, bar);
+    if (tp !== bpm) { const us = Math.round(60000000 / tp); cond.push({ tick, bytes: meta(0x51, [us >> 16, (us >> 8) & 255, us & 255]) }); bpm = tp; }
     if (!was || a.time.join() !== was.time.join()) cond.push({ tick, bytes: meta(0x58, [a.time[0], Math.log2(a.time[1]), 24, 8]) });
     if (!was || a.key !== was.key) cond.push({ tick, bytes: meta(0x59, [a.key & 255, 0]) });
     was = a;

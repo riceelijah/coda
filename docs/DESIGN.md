@@ -81,7 +81,7 @@ Plain JSON. No classes. This exact shape is used for autosave, undo snapshots, a
 score = {
   title: "Untitled",
   composer: "",
-  tempo: 100,                    // quarter notes per minute
+  tempo: 100,                    // quarter notes per minute, from bar 1 (later changes: §29)
   measures: [                    // one entry per bar, shared by all staves
     { key: 0, time: [4, 4] },    // bar 0 MUST have both
     {},                          // later bars: only set key/time where it CHANGES
@@ -453,7 +453,8 @@ When opened from the title on an existing score, only Title, Composer and Tempo 
   exactly `barCapacity` ticks** regardless of how full it is; within a bar events run from the
   bar start. A tied event extends the previous sounding note of the same MIDI number instead of
   starting a new one.
-- `seconds = ticks / 480 × 60 / tempo`. Schedule everything up front with
+- `seconds = ticks / 480 × 60 / tempo`, each bar at its own tempo (§29: `schedule()` gives
+  `timeOf(tick)`). Schedule everything up front with
   `osc.start(t)` / `osc.stop(t + len)`.
 - Voice: the part's sampled instrument when loaded (§13.3); otherwise one `OscillatorNode`
   (`triangle`) → `GainNode` per note, gain 0 → 0.15 in 10 ms, holds, ramps to 0 over the last
@@ -521,7 +522,8 @@ Do not attempt to reverse-engineer it as part of this plan.
 - First bar of each part: `<attributes>` with `<divisions>`, `<key><fifths>`, `<time>`,
   `<staves>` if 2, and `<clef number="n"><sign>/<line>`: treble G/2, bass F/4, alto C/3, tenor C/4.
   Later bars: `<attributes>` with only the key/time that changed.
-- Tempo: in bar 1, `<direction><sound tempo="…"/></direction>`.
+- Tempo: in bar 1 and each bar with a change (§29), `<direction>` with a quarter `<metronome>`
+  and `<sound tempo="…"/>`.
 - Note: `<pitch><step>` `<alter>` (omit when 0) `<octave>`; `<duration>`; `<type>`
   (`whole half quarter eighth 16th 32nd`); one `<dot/>` per dot; `<chord/>` on every pitch after
   the first; `<time-modification><actual-notes>/<normal-notes>` when `tup` is set.
@@ -561,7 +563,8 @@ Decode UTF-8 (honour a UTF-16 BOM), parse with `DOMParser` (`application/xml`); 
 - `<backup>` / `<forward>` are ignored (voice filtering makes them unnecessary in the common
   case). Known limitation: a kept voice that uses `<forward>` to skip time will produce an
   underfull bar. That is legal in the model.
-- Tempo: first `<sound tempo>`; else first `<metronome><per-minute>` (assume quarter beat); else 100.
+- Tempo (§29): per bar, `<sound tempo>`; else `<metronome>` converted from its beat unit (and dot)
+  to quarters; else 100.
 - Title: `work-title`, else `movement-title`, else the file name. Composer: `creator[type=composer]`.
 - All parts are padded with empty bars to the same bar count.
 
@@ -581,8 +584,9 @@ Parse:
 Convert:
 1. Scale every time to 480 PPQ: `t × 480 / division`.
 2. Quantize starts and ends to a 16th-note grid (120 ticks), round to nearest; minimum length 120.
-3. Use the **first** time signature, key and tempo only (defaults 4/4, 0, 120 → rounded bpm).
-   If there are later changes, say so in the report.
+3. Use the **first** time signature and key only (defaults 4/4, 0). If there are later changes,
+   say so in the report. Tempo: the first sets the score's (default 120); later ones become
+   tempo changes (§29).
 4. Per staff, reduce to one line of chords: group notes by start tick; a group's end is its
    shortest note's end, clipped so it does not run past the next group's start.
 5. Walk the timeline: gaps become rests; any note or rest crossing a barline is split there;
@@ -721,8 +725,9 @@ unless marked otherwise.
   transposed), braced staves that disagree, microtonal keys, non-integer intervals, notes out of
   range, and staff-style changes.
 - Marks: unknown symbols, and articulations other than a fermata on rests, are counted.
-- Tempo: the first tempo mark at the very start of bar 1 sets the score tempo (20–400); other
-  tempo and text expressions and `<ignore/>` entries are counted.
+- Tempo (§29): expressions that set the playback tempo (`playType` time with `useAuxData`;
+  quarters a minute = value × auxdata1 / 1024) become tempo changes; text expressions and
+  `<ignore/>` entries are counted.
 - Dynamics (§22): an expression in the dynamics category, or whose text is a dynamic, goes on the
   note it starts on (within 2 ticks) or covers in its layer (then that layer's voice 2; all layers when 0;
   only voice 2 with `<v2/>`), else the next note, as MusicXML. Rarer marks map as MusicXML's (pppp → ppp, sfp → fp …).
@@ -798,7 +803,7 @@ been tested yet. Findings from the real file that differ from the first draft:
   - `<TimeSig>` → `<sigN>`, `<sigD>`.
   - `<Clef>` → `<concertClefType>`: `G` treble, `F` bass, `C3` alto, `C4` tenor; anything else →
     treble + report. Only the first clef per staff is used.
-  - `<Tempo>` → `<tempo>` is quarter notes per **second**; bpm = value × 60. First one only.
+  - `<Tempo>` → `<tempo>` is quarter notes per **second**; bpm = value × 60. One per bar (§29).
   - `<Chord>` → `<durationType>` (`whole half quarter eighth 16th 32nd`; others clamp + report),
     `<dots>`, and one `<Note>` per pitch. A Chord containing `<acciaccatura>`, `<appoggiatura>`
     or `<grace…>` is a grace note: skip and count.
@@ -1269,7 +1274,9 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   it (the bracket splits); deleting a bar drops its marks.
 - **Playing order** (`playOrder(score)`, pure, shared by playback, audio and MIDI export): a
   section runs from the last ‖: (or the bar after the last :‖ or run of endings, or bar 1) to :‖
-  and plays `repEnd` times; on pass n only endings holding n play. D.C. goes to bar 1, D.S. to the
+  and plays `repEnd` times; a :‖ inside an ending also goes back while a higher-numbered ending in
+  the same run is still to come (so `[1. :‖] [2. :‖] [3.]` reaches the 3rd); on pass n only
+  endings holding n play. D.C. goes to bar 1, D.S. to the
   first segno (bar 1 if none); each jump is taken once, repeats are not taken again after it, and
   each run of endings then plays only its last ending. "al Fine" stops after a Fine bar; "al Coda"
   goes from a To Coda bar to the next coda sign (ignored if there is none). Plain D.C./D.S. play to
@@ -1283,15 +1290,18 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   BEGIN_END; the number only where the bracket begins) and `Repetition` (segno, coda, To Coda,
   Fine, D.C./D.S. variants) on the top staff. A :‖ played more than twice gets "×n" above it.
 - **Editing:** Score ▸ Repeats and endings. Marks go on the caret bar (the selected note's bar);
-  choosing one that's there removes it. An ending covers the selected bars; "Ending with
-  numbers…" takes "1, 2" or "1-3"; "End repeat, play several times…" asks for the count.
+  choosing one that's there removes it. An ending covers the selected range of bars; "Ending with
+  numbers…" takes "1, 2" or "1-3"; "End repeat, play several times…" asks for the count. These and
+  the part transposition's "Other…" ask in a small in-page dialog (`#ask`), not `window.prompt`,
+  which some embedded browsers block. Marks are drawn above the bar's highest note; one ending
+  bracket keeps one height.
 - **MusicXML:** `<barline>` left/right with `<repeat direction times>` and `<ending number type>`
   (start; stop before a repeat or at the end; discontinue otherwise), in every part. Segno and
   coda are `<direction>`s with `<segno/>`/`<coda/>`; To Coda, Fine and jumps are `<words>` with
   `<sound tocoda|fine|dacapo|dalsegno>`, in the first part. Import takes barlines from the first
   part and directions from any; `<sound>` attributes decide, else the words ("D.C.", "Da Capo",
   "D.S.", "al Fine", "al Coda", "To Coda", "Fine"). Signs mid-bar move to its start (counted);
-  other words stay counted as text directions; unreadable ending numbers and counts over 10 are
+  other words become text above the next note (§30); unreadable ending numbers and counts over 10 are
   counted.
 - **MuseScore:** `<startRepeat/>`, `<endRepeat>n</endRepeat>` in each staff's `<Measure>`;
   in the first staff, `<Spanner type="Volta">` (`<endings>`, `<next><location><measures>`),
@@ -1316,13 +1326,50 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   | Part names, order, grand staff, drum staff | Score ▸ Parts and instruments… |
   | Any transposition | Parts dialog ▸ Other… (semitones, steps) |
   | Instrument (GM program), drum per note | Parts dialog; Notes ▸ Drum sound… |
+  | Drum note away from its kit position | Notes ▸ Drum note up / down a line (same sound) |
   | Title, composer, tempo | Score ▸ Title, composer, tempo… |
+  | Tempo change | Score ▸ Tempo from this bar… (§29) |
+  | Text above a note (dolce, pizz.) | Notes ▸ Text above note… (§30) |
+  | Rehearsal mark | Score ▸ Rehearsal mark… (§30) |
 
-  Exception: a drum note away from its kit position (a file's own drum map) can't be placed
-  by hand; Drum sound… always uses the kit position. The model has one tempo per score, so
-  tempo changes are not held at all (importers keep the first and count the rest).
+## 29. Tempo changes (Phase 34)
 
-## 29. Brass effects and slides (Phase 34)
+- **Model:** `score.tempo` is bar 1's tempo; `measures[b].tempo` (b ≥ 1, a whole number 20–400,
+  quarter notes a minute) changes it from bar b on. `tempoAt(score, b)` is the tempo in effect;
+  `setTempo(score, b, bpm)` stores a change only where the tempo differs from the bar before (bar
+  1 sets `score.tempo`), and drops a following change left equal to it. Deleting a bar moves its
+  change to the bar after; deleting bar 1 makes bar 2's tempo the score's. No gradual changes
+  (accel./rit.) yet.
+- **Playback:** bars play at the tempo of the bar as written, also after a repeat or jump.
+  `schedule()` returns `timeOf(tick)` (seconds), used for notes, the audio export and the cursor.
+- **Drawing:** ♩ = n above the top staff at each change, and at bar 1 when the score has changes.
+- **Editing:** Score ▸ Tempo from this bar… (the in-page dialog); empty removes the change. The
+  toolbar tempo and the setup dialog set bar 1's.
+- **Files:** one tempo per bar, at its start. A change inside a bar moves to the bar's start, a
+  second different one in the same bar is skipped, values outside 20–400 are set to the nearest;
+  each is counted. MusicXML reads `<sound tempo>` or a `<metronome>` in any plain or dotted beat
+  unit and writes a quarter metronome with `<sound tempo>`; MuseScore `<Tempo>` (per second);
+  MIDI tempo meta events (export: at each played bar whose tempo differs); `.musx` playback tempo
+  expressions.
+
+## 30. Text above notes and rehearsal marks (Phase 35)
+
+- **Model:** `ev.text` is one line (whitespace collapsed, at most 60 characters) above a note or
+  rest of its staff; `measures[b].rehearsal` (at most 8) is a boxed mark at the bar's start, drawn
+  on the top staff. Words that read as a jump or sign (D.C., D.S., Da Capo, Dal Segno, To Coda,
+  Fine) are refused with a pointer to Repeats and endings, so a file never turns them into a jump.
+- **Editing:** Notes ▸ Text above note… (the first selected note or rest) and Score ▸ Rehearsal
+  mark… (the caret bar; suggests the next letter or number after the last one). Empty removes.
+- **Drawing:** text is drawn after layout, starting at the note, above the staff or the note,
+  in italic; it takes no room between notes. A bar's top-staff marks rise above any text in it.
+  At a bar's start, left to right: rehearsal mark, segno or coda, tempo; all above an ending.
+- **Files:** MusicXML `<words>` (not read as a jump) and MuseScore `<StaffText>`, `<SystemText>`,
+  `<Expression>`, `<PlayTechAnnotation>` go on the staff's next note or rest (several before one
+  note are joined); `<rehearsal>` and `<RehearsalMark>` from the first part or staff (later
+  ones that differ, ones inside a bar, longer than 8 or after the last note are counted). Both
+  are written back. MIDI keeps neither. `.musx` text expressions stay counted.
+
+## 31. Brass effects and slides (Phase 36)
 
 - **Marks:** `scoop`, `fall` and `doit` join `MARKS` (notes only; a fall and a doit replace each
   other). Drawn with VexFlow's jazz ornaments beside each notehead: a scoop before, a fall or doit
