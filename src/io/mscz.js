@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { okDur, padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides, melismas, ONE_NOTE, OTT_SHIFT, MAX_KIND } from "../model.js";
+import { okDur, beamGroups, beamsFromModes, padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides, melismas, ONE_NOTE, OTT_SHIFT, MAX_KIND } from "../model.js";
 import { FINGER, ORNAMENTS, parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, RAMPS, rampOf, swingOf, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
@@ -38,8 +38,8 @@ const MEASURE_ONLY = ["voice", "startRepeat", "endRepeat", "irregular", "LayoutB
 const VOICE_READ = new Set([...LAYOUT, ...MEASURE_ONLY, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "Harmony", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "StaffState", "Breath"]);
 const VOICE_NAMES = { Breath: "Breath marks and caesuras (not imported)", FiguredBass: "Figured bass (not imported)", Tremolo: "Tremolos (not imported)", TremoloTwoChord: "Tremolos (not imported)", FretDiagram: "Fret diagrams (not imported)", InstrumentChange: "Instrument changes (not imported)", tick: "Positions in MuseScore 2 voices (notes may be misplaced)", Image: "Images (not imported)" };
 const MEASURE_READ = new Set([...LAYOUT, ...MEASURE_ONLY]);
-const CHORD_READ = new Set([...LAYOUT, ...GRACE, "durationType", "dots", "Note", "Articulation", "ChordLine", "Lyrics", "Spanner", "Tuplet", "Ornament", "Arpeggio", "TremoloSingleChord", "Tremolo"]);
-const CHORD_NAMES = { Ornament: "Ornaments (trills, mordents, turns) (not imported)", Arpeggio: "Arpeggios (not imported)", TremoloSingleChord: "Tremolos (not imported)", Tremolo: "Tremolos (not imported)", small: "Cue notes (shown and played as normal notes)", staffMove: "Cross-staff notes (shown on their own staff)" };
+const CHORD_READ = new Set([...LAYOUT, ...GRACE, "small", "durationType", "dots", "Note", "Articulation", "ChordLine", "Lyrics", "Spanner", "Tuplet", "Ornament", "Arpeggio", "TremoloSingleChord", "Tremolo"]);
+const CHORD_NAMES = { Ornament: "Ornaments (trills, mordents, turns) (not imported)", Arpeggio: "Arpeggios (not imported)", TremoloSingleChord: "Tremolos (not imported)", Tremolo: "Tremolos (not imported)", staffMove: "Cross-staff notes (shown on their own staff)" };
 const NOTE_READ = new Set([...LAYOUT, "pitch", "tpc", "tpc2", "Spanner", "Tie", "play", "small", "Fingering"]);
 const DRUM_NOTE_READ = new Set([...NOTE_READ, "head"]); // a drum's notehead comes from the kit (DESIGN §27)
 const NOTE_NAMES = { Fingering: "Fingering (not imported)", headGroup: "Special noteheads (shown as normal)", head: "Special noteheads (shown as normal)", Bend: "Bends (not imported)", fret: "Tablature frets and strings (not imported)", string: "Tablature frets and strings (not imported)" };
@@ -161,6 +161,12 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       if (si === 0 && ln > 0 && ld > 0) short[mi] = Math.round((ln / ld) * 1920); // a pickup or a split bar (DESIGN §33)
       const voices = kids(meas, "voice");
       if (si === 0 && kid(meas, "startRepeat")) mark(mi, "repStart", true);
+      const more = kids(meas.parentNode, "Measure").at(-1) !== meas; // a break after the last bar is nothing to keep
+      for (const lb of si === 0 && more ? kids(meas, "LayoutBreak") : []) { // after this bar (DESIGN §41)
+        const t = txt(lb, "subtype");
+        if (t === "line" || t === "page") mark(mi + 1, "brk", t);
+        else if (t === "section") { mark(mi + 1, "brk", "line"); report.count("Section breaks read as line breaks"); }
+      }
       if (si === 0 && kid(meas, "endRepeat")) {
         const n = parseInt(txt(meas, "endRepeat"), 10) || 2;
         if (n > MAX_REPEAT) report.count(`Repeats played more than ${MAX_REPEAT} times (play ${MAX_REPEAT})`);
@@ -356,7 +362,9 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (!dur) { report.count("Notes with unknown lengths skipped"); break; }
             let dots = Math.min(2, +(txt(el, "dots") || 0));
             if (!okDur(dur, dots)) { dots = 1; report.count("Double-dotted 64th notes given one dot"); }
-            const ev = { dur, dots, tie: false, pitches: [] };
+            const ev = { dur, dots, tie: false, pitches: [], ...(+txt(el, "small") ? { cue: true } : {}) }; // cue notes (DESIGN §41)
+            const bmode = txt(el, "BeamMode");
+            if (["begin", "mid", "no"].includes(bmode)) ev._bm = bmode; // beams set by hand (DESIGN §41)
             const ratio = txt(el, "Tuplet") ? tuplets[txt(el, "Tuplet")] : tup;
             if (ratio && ratio[0] > 0 && ratio[1] > 0 && ratio[0] !== ratio[1]) {
               if (tupletOk(dur, dots, ratio)) ev.tup = ratio;
@@ -477,6 +485,10 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   if (!score.staves.length) throw new Error("This MuseScore file has no staves.");
 
   score.measures.push(...measuresFrom(firstAttrs[score.staves.findIndex((st) => st.clef !== "percussion")] || firstAttrs[0])); // the key from the first staff that isn't drums
+  for (const st of score.staves) for (const bars of allLayers(st)) bars.forEach((bar, b) => {
+    if (bar.some((e) => e._bm)) beamsFromModes(bar, attrsAt(score, b).time, bar.map((e) => e._bm));
+    for (const e of bar) delete e._bm;
+  });
   const broken = clearBrokenSpans(score), slides = clearBrokenSlides(score);
   if (broken) report.count("Unfinished or overlapping slurs and lines (not imported)", broken);
   if (slides) report.count("Slides not to the very next note, or between chords of different sizes (not imported)", slides);
@@ -567,12 +579,13 @@ export function exportMSCX(score) {
         }
         const bar = layers[v][b];
         if (v === 0 && !bar.length) x.push(`<Rest><durationType>measure</durationType><duration>${frac(cap)}</duration></Rest>`);
-        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st, spans[v], syl, mel));
+        else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st, spans[v], syl, mel, a.time));
         if (v === 0 && s === 0) x.push(...navEnd(score.measures, b, cap));
         const nc = v === 0 && st.clefs?.[b + 1]; // a clef change goes at the end of the bar before, as MuseScore writes it
         if (nc) x.push(`<Clef><concertClefType>${CLEF_OUT[nc]}</concertClefType><transposingClefType>${CLEF_OUT[nc]}</transposingClefType></Clef>`);
         x.push("</voice>");
       }
+      if (s === 0 && score.measures[b + 1]?.brk) x.push(`<LayoutBreak><subtype>${score.measures[b + 1].brk}</subtype></LayoutBreak>`); // DESIGN §41
       x.push("</Measure>");
     });
     x.push("</Staff>");
@@ -659,8 +672,14 @@ function spanMap(bars) {
 }
 
 // One voice's events; a first voice is padded with rests to `cap`.
-function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map(), mel = new Map()) {
+function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map(), mel = new Map(), time = [4, 4]) {
   const x = [];
+  // beams set by hand (DESIGN §41): every chord of such a bar gets MuseScore's beam mode; others beam as usual
+  const mode = new Map();
+  if (bar.some((e) => e.beam)) {
+    bar.forEach((e, i) => { if (e.pitches.length) mode.set(i, "no"); });
+    for (const g of beamGroups(bar, time)) g.forEach((i, k) => mode.set(i, k ? "mid" : "begin"));
+  }
   let open = null; // {tup, left: ticks still to fill}
   bar.forEach((e, i) => {
     if (open && (!e.tup || e.tup[0] !== open.tup[0] || e.tup[1] !== open.tup[1])) { x.push("<endTuplet/>"); open = null; }
@@ -678,7 +697,7 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map(), mel = new 
     if (sp.hpNext) x.push(`<Spanner type="HairPin"><HairPin><subtype>${e.hp === ">" ? 1 : 0}</subtype></HairPin><next>${sp.hpNext}</next></Spanner>`);
     if (sp.ottNext) x.push(`<Spanner type="Ottava"><Ottava><subtype>${e.ott}</subtype></Ottava><next>${sp.ottNext}</next></Spanner>`);
     if (sp.pedNext) x.push(`<Spanner type="Pedal"><Pedal><beginText>&lt;sym&gt;keyboardPedalPed&lt;/sym&gt;</beginText><endHookType>1</endHookType></Pedal><next>${sp.pedNext}</next></Spanner>`);
-    const head = `${e.dots ? `<dots>${e.dots}</dots>` : ""}<durationType>${TYPE_NAME[e.dur]}</durationType>`;
+    const head = `${mode.has(i) ? `<BeamMode>${mode.get(i)}</BeamMode>` : ""}${e.cue ? "<small>1</small>" : ""}${e.dots ? `<dots>${e.dots}</dots>` : ""}<durationType>${TYPE_NAME[e.dur]}</durationType>`;
     if (!e.pitches.length) x.push(`<Rest>${head}</Rest>`);
     else {
       const t = ties[b + ":" + i] || { next: {}, prev: {}, gnext: {}, gprev: {} };
@@ -691,7 +710,7 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map(), mel = new 
           (t.prev[mm] ? `<Spanner type="Tie"><prev>${t.prev[mm]}</prev></Spanner>` : "") +
           (t.gnext[n] ? `<Spanner type="Glissando"><Glissando><subtype>0</subtype></Glissando><next>${t.gnext[n]}</next></Spanner>` : "") +
           (t.gprev[n] ? `<Spanner type="Glissando"><prev>${t.gprev[n]}</prev></Spanner>` : "");
-        return `<Note>${sp}${pitchXml(p)}${p.finger ? `<Fingering><text>${p.finger}</text></Fingering>` : ""}</Note>`;
+        return `<Note>${sp}${pitchXml(p)}${e.cue ? "<play>0</play>" : ""}${p.finger ? `<Fingering><text>${p.finger}</text></Fingering>` : ""}</Note>`;
       }).join("");
       // grace notes (DESIGN §26), as MuseScore writes them: one acciaccatura, or grace16s
       const one = e.grace?.length === 1;

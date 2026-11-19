@@ -331,6 +331,11 @@ const SVG_ICON = {
   tremolo: '<line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" stroke-width="1.4"/><g stroke="currentColor" stroke-width="2.2"><line x1="7" y1="10" x2="17" y2="7"/><line x1="7" y1="14" x2="17" y2="11"/><line x1="7" y1="18" x2="17" y2="15"/></g>',
   arpeggio: '<path d="M12 2 q4 2 0 4 q-4 2 0 4 q4 2 0 4 q-4 2 0 4 q4 2 0 4" fill="none" stroke="currentColor" stroke-width="1.6"/>',
   slur: '<path d="M3 15 q9 -10 18 0 q-9 -7 -18 0z" fill="currentColor"/>',
+  // beams (DESIGN §41): two eighths, apart or joined; small notes for cues
+  beamBreak: '<g fill="currentColor"><ellipse cx="5" cy="19" rx="3" ry="2.2"/><ellipse cx="17" cy="19" rx="3" ry="2.2"/></g><g stroke="currentColor" stroke-width="1.3"><line x1="7.6" y1="19" x2="7.6" y2="5"/><line x1="19.6" y1="19" x2="19.6" y2="5"/></g><g stroke="currentColor" stroke-width="3"><line x1="7" y1="6" x2="10" y2="6"/><line x1="16" y1="6" x2="20" y2="6"/></g><line x1="13" y1="2" x2="13" y2="22" stroke="currentColor" stroke-dasharray="2 2"/>',
+  beamJoin: '<g fill="currentColor"><ellipse cx="5" cy="19" rx="3" ry="2.2"/><ellipse cx="17" cy="19" rx="3" ry="2.2"/></g><g stroke="currentColor" stroke-width="1.3"><line x1="7.6" y1="19" x2="7.6" y2="5"/><line x1="19.6" y1="19" x2="19.6" y2="5"/></g><line x1="7" y1="6" x2="20.2" y2="6" stroke="currentColor" stroke-width="3"/>',
+  beamAuto: '<g fill="currentColor"><ellipse cx="5" cy="19" rx="3" ry="2.2"/><ellipse cx="17" cy="19" rx="3" ry="2.2"/></g><g stroke="currentColor" stroke-width="1.3"><line x1="7.6" y1="19" x2="7.6" y2="5"/><line x1="19.6" y1="19" x2="19.6" y2="5"/></g><line x1="7" y1="6" x2="20.2" y2="6" stroke="currentColor" stroke-width="3" opacity=".45"/><text x="12" y="15" font-size="7" text-anchor="middle" fill="currentColor" font-family="system-ui">A</text>',
+  cue: '<g fill="currentColor"><ellipse cx="7" cy="17" rx="2.6" ry="1.9"/><ellipse cx="16" cy="13" rx="2.6" ry="1.9"/></g><g stroke="currentColor" stroke-width="1"><line x1="9.2" y1="17" x2="9.2" y2="7"/><line x1="18.2" y1="13" x2="18.2" y2="5"/><line x1="9" y1="7" x2="18.4" y2="5" stroke-width="2.2"/></g>',
   cresc: '<path d="M21 6 L3 12 L21 18" fill="none" stroke="currentColor" stroke-width="1.6"/>',
   dim: '<path d="M3 6 L21 12 L3 18" fill="none" stroke="currentColor" stroke-width="1.6"/>',
   gliss: '<line x1="4" y1="19" x2="20" y2="5" stroke="currentColor" stroke-width="1.8"/>',
@@ -353,11 +358,12 @@ const PALETTES = [
   ["Articulations", "accent", ["fermata", "staccato", "accent", "tenuto", "marcato", "breath", "caesura"].map((m) => "n-" + m)],
   ["Ornaments", "trill", ["n-trill", "n-invMordent", "n-mordent", "n-turn", "n-tremolo", "n-arpeggio"]],
   ["Dynamics", "mf", [...M.DYNS.map((d) => "d-" + d), "d-none"]],
+  ["Beams and cue notes", "beamBreak", ["n-beamBreak", "n-beamJoin", "n-beamAuto", "n-cue"]],
   ["Slurs and lines", "slur", ["n-slur", "n-cresc", "n-dim", "n-8va", "n-8vb", "n-15ma", "n-15mb", "n-ped"]],
   ["Brass effects", "fall", ["n-scoop", "n-fall", "n-doit", "n-gliss"]],
   ["Text, chords, fingering, lyrics and tempo", "text", ["n-text", "n-chord", "n-finger", "n-lyrics", "b-rehearsal", "b-tempo"]],
 ];
-const ICON_OF = { "n-slur": "slur", "n-cresc": "cresc", "n-dim": "dim", "n-gliss": "gliss", "n-tremolo": "tremolo", "n-arpeggio": "arpeggio",
+const ICON_OF = { "n-beamBreak": "beamBreak", "n-beamJoin": "beamJoin", "n-beamAuto": "beamAuto", "n-cue": "cue", "n-slur": "slur", "n-cresc": "cresc", "n-dim": "dim", "n-gliss": "gliss", "n-tremolo": "tremolo", "n-arpeggio": "arpeggio",
   "n-8va": "8va", "n-8vb": "8vb", "n-15ma": "15ma", "n-15mb": "15mb", "n-ped": "ped",
   "n-lyrics": "lyrics", "n-text": "text", "n-chord": "chord", "n-finger": "finger", "b-rehearsal": "rehearsal", "b-tempo": "tempo", "d-none": "none" };
 // An icon from the score's own music font, cropped to the glyph.
@@ -1615,6 +1621,40 @@ async function tempoFrom() {
   if (!M.okBpm(bpm)) { message("A tempo is a whole number from 20 to 400", true); return; }
   if (edit((s) => M.setTempo(s, b, bpm))) message(`Tempo ${bpm} from bar ${M.barNumber(state.score, b)}`);
 }
+// Notes ▸ Beams and cue notes (DESIGN §41)
+function setBeam(kind) {
+  const r = range();
+  if (!r.length) { message("Select notes first", true); return; }
+  eachSel((sc, s, p, e) => { if (kind) e.beam = kind; else delete e.beam; return null; });
+  message(kind === "break" ? "Beam broken before the selected note" : kind === "join" ? "Beamed to the note before" : "Beamed as usual");
+}
+function toggleCue() {
+  const r = range();
+  if (!r.length) { message("Select notes first", true); return; }
+  const on = !r.every((p) => lb(state.sel.staff)[p.bar][p.idx].cue);
+  eachSel((sc, s, p, e) => { if (on) e.cue = true; else delete e.cue; return null; });
+  message(on ? "Cue notes: drawn small, not played" : "Normal notes");
+}
+
+// Edit ▸ Go to bar… (DESIGN §41): by the printed number, so a pickup is bar 0
+async function goToBar() {
+  const sc = state.score, first = M.barNumber(sc, 0), last = M.barNumber(sc, sc.measures.length - 1);
+  const v = await ask("Go to bar", `Bar number (${first}–${last})`, String(M.barNumber(sc, state.caret.bar)));
+  if (v === null) return;
+  const b = +v.trim() - first;
+  if (!Number.isInteger(b) || b < 0 || b >= sc.measures.length) { message(`There's no bar ${v.trim().slice(0, 10)}`, true); return; }
+  state.sel = null; state.selEnd = null;
+  state.caret = { staff: state.caret.staff, bar: b };
+  refresh();
+  $("caret-hl").scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+// Score ▸ Breaks (DESIGN §41): a new line or page from the caret's bar
+function setBreak(kind) {
+  const b = repBar();
+  if (edit((sc) => M.setBreak(sc, b, kind))) message(kind ? `${M.BREAKS[kind]} before bar ${M.barNumber(state.score, b)}` : "Break removed");
+}
+
 // rit., accel. and a tempo on a bar; swing for the score (DESIGN §39)
 function setRamp(kind) {
   const b = repBar();
@@ -1676,6 +1716,13 @@ const CMD = {
   "m-zoomin": { run: () => setZoom(zoom * 1.2) },
   "m-zoomout": { run: () => setZoom(zoom / 1.2) },
   "m-zoom1": { run: () => setZoom(1) },
+  "m-goto": { run: () => goToBar() },
+  "n-beamBreak": { run: () => setBeam("break"), on: hasSel },
+  "n-beamJoin": { run: () => setBeam("join"), on: hasSel },
+  "n-beamAuto": { run: () => setBeam(null), on: hasSel },
+  "n-cue": { run: () => toggleCue(), on: hasSel },
+  ...Object.fromEntries(["line", "page"].map((k) => ["k-" + k, { run: () => setBreak(k), on: () => repBar() > 0 }])),
+  "k-none": { run: () => setBreak(null), on: () => !!state.score.measures[repBar()]?.brk },
   "p-play": { run: () => startPlay() },
   "p-stop": { run: () => stopPlay() },
   ...Object.fromEntries(PLAY_OPTS.map((k) => ["p-" + k, { run: () => togglePlayOpt(k) }])),

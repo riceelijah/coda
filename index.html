@@ -111,7 +111,12 @@
   #title:hover, #composer:hover { background: rgba(37, 99, 235, .06); }
   #systems { position: relative; cursor: crosshair; user-select: none; -webkit-user-select: none; }
   #systems.select-tool { cursor: default; }
-  .system { break-inside: avoid; }
+  .system { break-inside: avoid; position: relative; }
+  /* line and page breaks (DESIGN §41): marked on screen only */
+  .system.page-break { border-top: 1px dashed var(--muted, #999); break-before: page; }
+  .system.line-break::before, .system.page-break::before { position: absolute; left: 4px; top: 2px; font: 11px system-ui, sans-serif; color: var(--muted, #999); }
+  .system.line-break::before { content: "↵ line break"; }
+  .system.page-break::before { content: "page break"; }
   .system svg { display: block; overflow: visible; } /* marks above high notes stay visible */
   #ghost {
     position: absolute; pointer-events: none; display: none; border-radius: 50%;
@@ -186,6 +191,8 @@
 
   @media print {
     @page { margin: 12mm; }
+    .system.page-break { border-top: none; }
+    .system.line-break::before, .system.page-break::before { content: none; }
     body { display: block; background: #fff; }
     #topbar, #palette, #status, #report, #ctx, dialog, #ghost, #sel-box, .hl, #lyric-box { display: none !important; }
     #desk { padding: 0; overflow: visible; }
@@ -232,6 +239,8 @@
         <button role="menuitem" id="m-copy" data-short="mod+C">Copy</button>
         <button role="menuitem" id="m-paste" data-short="mod+V">Paste</button>
         <button role="menuitem" id="m-delete" data-short="Delete">Delete</button>
+        <hr>
+        <button role="menuitem" id="m-goto">Go to bar…</button>
       </div></div>
     <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">View</button>
       <div class="mlist" role="menu" hidden>
@@ -292,6 +301,14 @@
             <button role="menuitem" id="n-fall">Fall</button>
             <button role="menuitem" id="n-doit">Doit</button>
             <button role="menuitem" id="n-gliss">Slide to next (gliss.)</button>
+          </div></div>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Beams and cue notes<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitem" id="n-beamBreak">Break the beam before this note</button>
+            <button role="menuitem" id="n-beamJoin">Beam to the note before</button>
+            <button role="menuitem" id="n-beamAuto">Beam as usual</button>
+            <hr>
+            <button role="menuitem" id="n-cue">Cue notes (small, silent) on/off</button>
           </div></div>
         <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Slurs and lines<span aria-hidden="true">▸</span></button>
           <div class="mlist submenu" role="menu">
@@ -384,6 +401,12 @@
             <button role="menuitem" id="r-ds">D.S.</button>
             <button role="menuitem" id="r-dsFine">D.S. al Fine</button>
             <button role="menuitem" id="r-dsCoda">D.S. al Coda</button>
+          </div></div>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Breaks<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitem" id="k-line">Line break before this bar</button>
+            <button role="menuitem" id="k-page">Page break before this bar</button>
+            <button role="menuitem" id="k-none">Remove break</button>
           </div></div>
         <button role="menuitem" id="b-rehearsal">Rehearsal mark…</button>
         <button role="menuitem" id="b-len">Bar length (pickup)…</button>

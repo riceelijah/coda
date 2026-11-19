@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barLen, setBarLen, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER, ORNAMENTS, OTT_SHIFT, staffLines, ottAt, shiftUnderLines, MAX_KIND, okDur,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER, ORNAMENTS, OTT_SHIFT, staffLines, ottAt, shiftUnderLines, MAX_KIND, okDur, beamGroups, beamsFromModes,
 } from "../model.js";
 import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, RAMPS, rampOf, okSwing, swingOf, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
@@ -33,22 +33,24 @@ const HEAD_OUT = { x: "x", cx: "circle-x", d: "diamond", t: "triangle" };
 const drumInst = (pid, n) => `<instrument id="${pid}-I${n}"/>`;
 const headXml = (p) => (p.drum && HEAD_OUT[DRUMS.get(p.drum)?.head] ? `<notehead>${HEAD_OUT[DRUMS.get(p.drum).head]}</notehead>` : "");
 
-function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl, pid, slideStop, k = 0, d = 0 }) {
+function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl, pid, slideStop, k = 0, d = 0, beam }) {
   const x = ["<note>"];
+  if (ev.cue) x.push("<cue/>"); // DESIGN §41: small, silent
   if (chord) x.push("<chord/>");
   if (p) {
     x.push(pitchXml(p, d)); // under an octave line the file has the sounding octave (DESIGN §37)
   } else x.push("<rest/>");
   x.push(`<duration>${eventTicks(ev)}</duration>`);
   const tieStart = p && ev.tie;
-  if (tieStop) x.push('<tie type="stop"/>');
-  if (tieStart) x.push('<tie type="start"/>');
+  if (tieStop && !ev.cue) x.push('<tie type="stop"/>'); // a cue note's ties are only drawn: <tied> below
+  if (tieStart && !ev.cue) x.push('<tie type="start"/>');
   if (p?.drum) x.push(drumInst(pid, p.drum));
-  x.push(`<voice>${voice}</voice>`, `<type>${TYPE_OF[ev.dur]}</type>`);
+  x.push(`<voice>${voice}</voice>`, `<type${ev.cue ? ' size="cue"' : ""}>${TYPE_OF[ev.dur]}</type>`);
   for (let i = 0; i < (ev.dots || 0); i++) x.push("<dot/>");
   if (ev.tup) x.push(`<time-modification><actual-notes>${ev.tup[0]}</actual-notes><normal-notes>${ev.tup[1]}</normal-notes></time-modification>`);
   if (p) x.push(headXml(p));
   if (staffNo) x.push(`<staff>${staffNo}</staff>`);
+  if (beam && !chord) x.push(`<beam number="1">${beam}</beam>`);
   const nots = [];
   if (tieStop) nots.push('<tied type="stop"/>');
   if (tieStart) nots.push('<tied type="start"/>');
@@ -146,12 +148,15 @@ function barXml(score, s, b, staffNo, voice, v, syl, pid, oct) {
   const pbar = b > 0 ? bars[b - 1] : [];
   const prev = pbar.length ? pbar[pbar.length - 1] : null;
   const runs = tupletRuns(bar);
+  // beams (DESIGN §41), on every bar: a reader that sees any <beam> takes the file's beaming throughout
+  const beamOf = new Map();
+  for (const g of beamGroups(bar, attrsAt(score, b).time)) g.forEach((i, k) => beamOf.set(i, k ? (k === g.length - 1 ? "end" : "continue") : "begin"));
   const starts = new Set(runs.map((r) => r.idx[0])), stops = new Set(runs.map((r) => r.idx[r.idx.length - 1]));
   const out = [];
   bar.forEach((ev, i) => {
     const before = i > 0 ? bar[i - 1] : prev;
     const tied = (p) => !!(before && before.tie && before.pitches.some((q) => q.step === p.step && q.oct === p.oct && q.drum === p.drum));
-    const d = oct.get(ev) || 0, flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev), pid, d };
+    const d = oct.get(ev) || 0, flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev), pid, d, beam: beamOf.get(i) };
     const dir = (body) => `<direction placement="below"><direction-type>${body}</direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`;
     if (ev.dyn) out.push(dir(`<dynamics><${ev.dyn}/></dynamics>`));
     if (ev.harm) out.push(harmXml(ev.harm, staffNo)); // DESIGN §38
@@ -212,6 +217,8 @@ export function exportMusicXML(score) {
     x.push(`<part id="P${gi + 1}">`);
     score.measures.forEach((m, b) => {
       x.push(pick && !b ? `<measure number="0" implicit="yes">` : `<measure number="${pick ? b : b + 1}">`);
+      const brk = b > 0 && score.measures[b].brk; // DESIGN §41
+      if (brk) x.push(brk === "page" ? `<print new-page="yes"/>` : `<print new-system="yes"/>`);
       x.push(leftBarline(score.measures, b));
       const a = attrsAt(score, b);
       const attrs = [];
@@ -326,6 +333,9 @@ function clefFrom(el, report) {
 export function importMusicXML(text, fileName = "", format = "MusicXML") {
   const report = new Report(format);
   const doc = parseXml(text);
+  const ours = [...doc.getElementsByTagName("software")].some((e) => e.textContent.trim() === "Coda");
+  // beams are read from Coda's own files only (DESIGN §41): others beam every note their own way
+  const beamed = ours && doc.getElementsByTagName("beam").length > 0;
   const root = doc.documentElement;
   if (root.localName === "score-timewise") throw new Error("This is a 'timewise' MusicXML file, which Coda can't read yet. Most programs can re-export it as standard (partwise) MusicXML.");
   if (root.localName !== "score-partwise") throw new Error("This XML file isn't a MusicXML score.");
@@ -548,12 +558,14 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           const d = Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
           pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
         } else if (tag === "print") { // layout is Coda's own
-          // ponytail: breaks are skipped, not counted: MuseScore writes one for every line it laid out, so
-          // a file can't tell placed breaks from its own layout.
+          // Breaks are read only from Coda's own files (DESIGN §41). Others mark every line they laid out at
+          // their own page width, so a file can't tell placed breaks from its layout: skipped, not counted.
+          const brk = el.getAttribute("new-page") === "yes" ? "page" : el.getAttribute("new-system") === "yes" ? "line" : null;
+          if (ours && brk && mi > 0) (rep[mi] ||= {}).brk = brk;
         } else if (tag !== "note") countUnread(report, { children: [el] }, MEASURE_READ, MEASURE_NAMES);
         if (tag === "note") {
           const start = pos.t;
-          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums, lines, pendHarm });
+          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums, lines, pendHarm, beamed });
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
@@ -576,6 +588,10 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   if (!score.staves.length) throw new Error("This MusicXML file has no parts.");
 
   score.measures.push(...measuresFrom((partAttrs.find((a) => !a.perc) || partAttrs[0]).attrs));
+  for (const st of score.staves) for (const bars of allLayers(st)) bars.forEach((bar, b) => {
+    if (bar.some((e) => "_bm" in e)) beamsFromModes(bar, attrsAt(score, b).time, bar.map((e) => e._bm));
+    for (const e of bar) delete e._bm;
+  });
   const broken = clearBrokenSpans(score), slides = clearBrokenSlides(score);
   if (broken) report.count("Unfinished or overlapping slurs and lines (not imported)", broken);
   if (slides) report.count("Slides not to the very next note, or between chords of different sizes (not imported)", slides);
@@ -632,7 +648,7 @@ const ATTR_READ = new Set(["divisions", "key", "time", "clef", "transpose", "sta
 const BARLINE_READ = new Set(["bar-style", "repeat", "ending", "footnote", "level"]);
 const DIRTYPE_READ = new Set(["words", "rehearsal", "wedge", "dynamics", "segno", "coda", "metronome"]);
 const NOTATIONS_READ = new Set(["fermata", "articulations", "ornaments", "technical", "slur", "slide", "glissando", "tied", "tuplet", "arpeggiate", "footnote", "level"]);
-const NOTE_READ = new Set(["chord", "grace", "pitch", "unpitched", "rest", "duration", "tie", "voice", "type", "dot", "accidental", "time-modification",
+const NOTE_READ = new Set(["cue", "chord", "grace", "pitch", "unpitched", "rest", "duration", "tie", "voice", "type", "dot", "accidental", "time-modification",
   "stem", "notehead", "notehead-text", "staff", "beam", "notations", "lyric", "instrument", "play", "listen", "footnote", "level"]);
 const MARKS = {
   articulations: "Other articulations (not imported)",
@@ -650,7 +666,7 @@ function finishDrums(staves, report) {
   });
 }
 
-function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums, lines, pendHarm }) {
+function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums, lines, pendHarm, beamed }) {
   const isRest = !!kid(el, "rest");
   const grace = kid(el, "grace");
   if (grace && isRest) { report.count("Grace rests (not imported)"); return; }
@@ -713,11 +729,11 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     }
   }
   if (new Set(marks.filter((m) => ORNAMENTS.includes(m))).size > 1) report.count("Second ornaments on a note (the last is kept)");
-  countUnread(report, el, NOTE_READ, { cue: "Cue notes (shown and played as normal notes)" });
+  countUnread(report, el, NOTE_READ);
   const head = txt(el, "notehead");
   if (head && head !== "normal" && !kid(el, "unpitched")) report.count("Special noteheads (shown as normal)");
   const addMarks = (ev) => { for (const m of marks) setMark(ev, m, true); if (glide) ev.gliss = true; };
-  const tieStart = kids(el, "tie").some((t) => t.getAttribute("type") === "start");
+  const tieStart = kids(el, "tie").some((t) => t.getAttribute("type") === "start") || (!!kid(el, "cue") && !!el.querySelector('notations > tied[type="start"]')); // cue notes have no <tie>
 
   let pitch = null;
   const p = kid(el, "pitch") || kid(el, "unpitched");
@@ -787,7 +803,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   dots = Math.min(2, dots);
   if (!okDur(dur, dots)) { dots = 1; report.count("Double-dotted 64th notes given one dot"); }
 
-  const ev = { dur, dots, tie: tieStart && !!pitch, pitches: pitch ? [pitch] : [] };
+  const ev = { dur, dots, tie: tieStart && !!pitch, pitches: pitch ? [pitch] : [], ...(kid(el, "cue") ? { cue: true } : {}) };
   const tm = kid(el, "time-modification");
   if (tm) {
     const tup = [+txt(tm, "actual-notes"), +txt(tm, "normal-notes")];
@@ -804,6 +820,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     report.count("Gaps in a voice filled with rests");
   }
   addMarks(ev);
+  if (beamed) { const bm = kids(el, "beam").find((x) => (x.getAttribute("number") || "1") === "1")?.textContent.trim(); ev._bm = bm === "begin" ? "begin" : bm ? "mid" : "no"; }
   const pd = pend[staffNo];
   if (pd && (pd.mi < mi || start >= pd.at)) { ev.dyn = pd.dyn; pend[staffNo] = null; }
   const pt = pendText[staffNo];

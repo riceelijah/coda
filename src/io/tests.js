@@ -1317,6 +1317,71 @@ export async function run({ check, eq }) {
     return M.barTicks(padded) === 1920 || "padding " + M.barTicks(padded);
   });
 
+  await check("Beams: the model's groups match VexFlow's; break and join (DESIGN §41)", async () => {
+    const { vexBeamGroups } = await import("../render.js");
+    const same = (bar, time, where) => { const a = JSON.stringify(M.beamGroups(bar, time, true)), b = JSON.stringify(vexBeamGroups(bar, time)); return a === b ? null : `${where}: ${a} vs ${b}`; };
+    const files = ["simple.musicxml", "piano.musicxml", "drums.musicxml", "piano.mscz", ...["beam_over_graces", "enharmonics_test", "expdef", "exprlayers", "exprv2", "grace_notes", "keysigs", "layers", "multistaff_inst", "piano_inst", "quintuplet", "slur", "syllables", "timesig-inddisp", "transpose", "v1v2Ties", "v1v2Ties2", "v1v2tuplets", "wordext"].map((f) => `musx/${f}.musx`)];
+    let bars = 0;
+    for (const f of files) {
+      let sc;
+      try { sc = (await importBytes(await fetchBytes("samples/" + f), f.split("/").pop())).score; } catch { continue; }
+      for (const st of sc.staves) for (const layer of M.allLayers(st)) for (let b = 0; b < layer.length; b++) {
+        if (!layer[b].length) continue;
+        bars++;
+        const e = same(layer[b].map((x) => ({ ...x, pitches: x.pitches.map(({ drum, ...p }) => p) })), M.attrsAt(sc, b).time, `${f} bar ${b + 1}`);
+        if (e) return e;
+      }
+    }
+    // random bars: eighths to 64ths, dots, rests, quarters, triplets, in 4/4, 3/4, 6/8, 2/2 and 5/8
+    let seed = 7;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    for (let k = 0; k < 400; k++) {
+      const time = [[4, 4], [3, 4], [6, 8], [2, 2], [5, 8]][k % 5], cap = M.barCapacity(time), bar = [];
+      let t = 0;
+      while (t < cap) {
+        const pick = [["8", 0], ["16", 0], ["8", 1], ["32", 0], ["q", 0], ["16", 1], ["64", 0]][rnd(7)];
+        if (rnd(6) === 0 && t + 480 <= cap) { for (let j = 0; j < 3; j++) bar.push({ ...ev("8", "C5"), tup: [3, 2] }); t += 480; continue; }
+        const e = ev(pick[0], rnd(5) ? "C5" : null, { dots: pick[1] });
+        if (t + M.eventTicks(e) > cap) break;
+        bar.push(e); t += M.eventTicks(e);
+      }
+      const e = same(bar, time, `random ${k} ${time} ${M.brief?.(bar) || bar.map((x) => x.dur + ".".repeat(x.dots) + (x.pitches.length ? "" : "r") + (x.tup ? "t" : "")).join(" ")}`);
+      if (e) return e;
+    }
+    // break and join
+    const bar = [ev("8", "C5"), ev("8", "D5"), ev("8", "E5"), ev("8", "F5"), ev("q", "G5"), ev("8", "A5"), ev("8", "B5")];
+    if (JSON.stringify(M.beamGroups(bar, [4, 4])) !== "[[0,1],[2,3],[5,6]]") return "default " + JSON.stringify(M.beamGroups(bar, [4, 4]));
+    bar[2].beam = "join"; bar[1].beam = "break";
+    if (JSON.stringify(M.beamGroups(bar, [4, 4])) !== "[[1,2,3]]" + "" && JSON.stringify(M.beamGroups(bar, [4, 4])) !== "[[1,2,3],[5,6]]") return "overrides " + JSON.stringify(M.beamGroups(bar, [4, 4]));
+    bar[6].beam = "break";
+    if (JSON.stringify(M.beamGroups(bar, [4, 4])) !== "[[1,2,3]]") return "break a pair " + JSON.stringify(M.beamGroups(bar, [4, 4]));
+    return bars > 20 || "only " + bars + " sample bars";
+  });
+
+  await check("Breaks, cue notes and beams set by hand: model, playback, MusicXML and MuseScore (DESIGN §41)", async () => {
+    const s = M.newScore({ bars: 3 });
+    if (!M.setBreak(s, 0, "line") || M.setBreak(s, 1, "line") || M.setBreak(s, 2, "page") || !M.isValidScore(s)) return "setBreak";
+    const row = () => [ev("8", "C5"), ev("8", "D5"), ev("8", "E5"), ev("8", "F5"), ev("q", "G5"), ev("8", "A5"), ev("8", "B5")];
+    s.staves[0].bars[0] = row(); s.staves[0].bars[1] = row(); s.staves[0].bars[2] = row();
+    s.staves[0].bars[0][1].beam = "break"; s.staves[0].bars[0][2].beam = "join";
+    s.staves[0].bars[1][0].cue = true; s.staves[0].bars[1][1].cue = true;
+    if (!M.isValidScore(s)) return "invalid";
+    const n = schedule(s).notes.map((x) => x.start);
+    if (n.includes(1920) || n.includes(2160) || !n.includes(2400)) return "cue notes play";
+    const keep = (sc) => JSON.stringify([sc.measures.map((m) => m.brk || ""), sc.staves[0].bars.map((b) => b.map((e) => (e.beam || "") + (e.cue ? "c" : "")).join(","))]);
+    const want = keep(s);
+    const x = importMusicXML(exportMusicXML(s), "s.musicxml").score;
+    if (keep(x) !== want) return "MusicXML " + keep(x) + " vs " + want;
+    const m = importMSCX(exportMSCX(s), "s.mscx").score;
+    if (keep(m) !== want.replace(/"line","page"/, '"line","page"')) return "MuseScore " + keep(m) + " vs " + want;
+    // another program's MusicXML: its line starts and beams are its own layout, not read
+    const foreign = exportMusicXML(s).replace("<software>Coda</software>", "<software>Other</software>");
+    const f = importMusicXML(foreign, "f.musicxml").score;
+    if (f.measures.some((mm) => mm.brk) || f.staves[0].bars.flat().some((e) => e.beam)) return "foreign layout read";
+    M.deleteMeasure(s, 0);
+    return !s.measures[0].brk || "bar 1 kept a break";
+  });
+
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;

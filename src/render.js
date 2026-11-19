@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, barLen, barCapacity, barNumber, partGroups, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, ONE_NOTE, melismas, OTT_SHIFT, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic, RAMPS } from "./model.js";
+import { attrsAt, barLen, barCapacity, barNumber, partGroups, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, ONE_NOTE, melismas, OTT_SHIFT, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic, RAMPS, beamGroups } from "./model.js";
 import { DRUMS } from "./drums.js";
 
 const VF = () => Vex.Flow;
@@ -88,14 +88,15 @@ export function layout(score) {
     const first = !cur;
     const pre = prefixW(widestKey(score, b));
     const w = minWidth(score, b) + (first ? pre : changeW(score, b)) + (score.staves.some((st) => st.clefs?.[b + 1]) ? 24 : 0);
-    const avail = room();
-    if (cur && cur.used + w > avail) {
+    const avail = room(), brk = b > 0 && score.measures[b].brk; // DESIGN §41
+    if (cur && (cur.used + w > avail || brk)) {
+      if (brk) cur.forced = true;
       systems.push(cur);
       cur = null;
       b--; // re-measure this bar as the first of a new system
       continue;
     }
-    if (!cur) cur = { bars: [], widths: [], used: 0 };
+    if (!cur) cur = { bars: [], widths: [], used: 0, page: b > 0 && score.measures[b].brk === "page", line: b > 0 && score.measures[b].brk === "line" };
     cur.bars.push(b);
     cur.widths.push(w);
     cur.used += w;
@@ -103,11 +104,18 @@ export function layout(score) {
   if (cur) systems.push(cur);
   systems.forEach((sys, i) => {
     const last = i === systems.length - 1, avail = i ? full : full - ind;
-    if (last && sys.used < avail * 0.6) return;
+    if ((last || sys.forced) && sys.used < avail * 0.6) return; // a short last line, or one ended by a break, isn't stretched
     const f = avail / sys.used;
     sys.widths = sys.widths.map((w) => w * f);
   });
   return systems;
+}
+
+// VexFlow's own beam groups for a bar, as event indexes: tests check beamGroups against it (DESIGN §41).
+export function vexBeamGroups(bar, time, clef = "treble") {
+  const VFl = VF(), notes = bar.map((ev) => makeNote(ev, clef, 0));
+  for (const run of tupletRuns(bar)) new VFl.Tuplet(run.idx.map((i) => notes[i]), { num_notes: run.tup[0], notes_occupied: run.tup[1] });
+  return VFl.Beam.generateBeams(notes, { groups: VFl.Beam.getDefaultBeamGroups(`${time[0]}/${time[1]}`) }).map((b) => b.getNotes().map((n) => notes.indexOf(n)));
 }
 
 // stem: 0 = automatic, 1 = up, -1 = down (when layers share a bar, DESIGN §15)
@@ -117,8 +125,10 @@ function makeNote(ev, clef, stem = 0) {
   const keys = rest ? [stem ? REST_KEY_LAYER[clef][stem > 0 ? 0 : 1] : REST_KEY[clef]]
     : ev.pitches.map(keyOf);
   const duration = ev.dur + "d".repeat(ev.dots || 0) + (rest ? "r" : "");
-  const note = stem ? new VFl.StaveNote({ clef, keys, duration, stem_direction: stem })
-    : new VFl.StaveNote({ clef, keys, duration, auto_stem: true });
+  // cue notes (DESIGN §41): VexFlow's grace note class draws the head, stem, flags and accidentals small
+  const Note = ev.cue && ev.pitches.length ? VFl.GraceNote : VFl.StaveNote;
+  const note = stem ? new Note({ clef, keys, duration, stem_direction: stem, slash: false })
+    : new Note({ clef, keys, duration, auto_stem: true, slash: false });
   if (ev.dots) VFl.Dot.buildAndAttach([note], { all: true });
   if (ev.grace) { // DESIGN §26: one is a slashed eighth, more are beamed sixteenths; accidentals come from applyAccidentals
     const one = ev.grace.length === 1;
@@ -177,7 +187,7 @@ export function render(score, container, sel, opts = {}) {
 
   systems.forEach((sys, si) => {
     const el = document.createElement("div");
-    el.className = "system";
+    el.className = "system" + (sys.page ? " page-break" : sys.line ? " line-break" : "");
     container.appendChild(el);
     const renderer = new VFl.Renderer(el, VFl.Renderer.Backends.SVG);
     renderer.resize(SHEET_W, height);
@@ -631,7 +641,9 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
               { num_notes: run.tup[0], notes_occupied: run.tup[1], location: stem < 0 ? -1 : 1 }));
             tuplets[tuplets.length - 1].grey = grey;
           }
-          if (bar.some((e) => e.pitches.length && ["8", "16", "32", "64"].includes(e.dur))) {
+          if (bar.some((e) => e.beam)) { // beams set by hand (DESIGN §41): the model's groups, so files and page agree
+            for (const g of beamGroups(bar, time)) { const bm = new VFl.Beam(g.map((i) => notes[i]), !stem); bm.grey = grey; beams.push(bm); }
+          } else if (bar.some((e) => e.pitches.length && ["8", "16", "32", "64"].includes(e.dur))) {
             for (const bm of VFl.Beam.generateBeams(notes, { groups: VFl.Beam.getDefaultBeamGroups(`${time[0]}/${time[1]}`), maintain_stem_directions: !!stem })) {
               bm.grey = grey;
               beams.push(bm);

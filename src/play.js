@@ -80,6 +80,7 @@ export function schedule(score, from = 0) {
       }
       for (const ev of bars[bar]) {
         const len = eventTicks(ev), n0 = notes.length, run = runOf.get(ev);
+        if (ev.cue) { open.clear(); slide = null; at += len; continue; } // cue notes are silent (DESIGN §41)
         if (ev.marks?.includes("fermata")) fermatas.set(at, Math.min(fermatas.get(at) ?? Infinity, len));
         // a drum staff plays its drum numbers on the kit, program -1 (DESIGN §27)
         const perc = isPerc(st), nextOpen = new Map(), tr = st.transpose?.[0] || 0, base = { vel: velAt(si, at), program: perc ? -1 : st.program ?? 0, staff: si, ...(st.sound && !perc ? { sound: st.sound } : {}) };

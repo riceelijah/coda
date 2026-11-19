@@ -939,6 +939,7 @@ export function deleteMeasure(score, idx) {
   }
   if (idx === 0) {
     const m = score.measures[0];
+    delete m.brk; // bar 1 always starts a line
     if (m.tempo) { score.tempo = m.tempo; delete m.tempo; }
     if (m.key === undefined) m.key = a0.key;
     if (!m.time) { m.time = a0.time; if (a0.sym) m.sym = a0.sym; }
@@ -1223,6 +1224,91 @@ export function padBars(score) {
 }
 
 // Basic shape check for restored/imported data (untrusted input).
+// ---------- beams (DESIGN §41) ----------
+// ev.beam: "break" starts a new beam at this note; "join" beams it to the note before.
+export const BEAMS = ["break", "join"];
+// VexFlow's default beam groups for a time signature, in ticks.
+function beatGroup([n, d]) {
+  const table = { "1/2": [1, 2], "2/2": [1, 2], "3/2": [1, 2], "4/2": [1, 2], "1/4": [1, 4], "2/4": [1, 4], "3/4": [1, 4], "4/4": [1, 4],
+    "1/8": [1, 8], "2/8": [2, 8], "3/8": [3, 8], "4/8": [2, 8], "1/16": [1, 16], "2/16": [2, 16], "3/16": [3, 16], "4/16": [2, 16] }[`${n}/${d}`];
+  const [a, b] = table || (n % 3 === 0 ? [3, d] : d > 4 ? [2, d] : [1, d]);
+  return (a * 1920) / b;
+}
+// The beamed groups of a bar, as lists of event indexes: VexFlow's Beam.generateBeams worked through
+// in ticks, so files and the page agree without a renderer, then each note's override. `auto`:
+// without overrides.
+export function beamGroups(bar, time, auto = false) {
+  const g = beatGroup(time), short = (e) => BASE[e.dur] < 480; // shorter than a quarter, by its written value
+  // 1. split into beats; a short note crossing a beat starts the next group
+  const groups = [];
+  let cur = [], carry = 0;
+  bar.forEach((ev, i) => {
+    cur.push(i);
+    const sum = cur.reduce((s, k) => s + eventTicks(bar[k]), 0) + carry, cap = !short(ev) && ev.tup ? 2 * g : g;
+    if (sum > cap) {
+      const next = short(ev) ? [cur.pop()] : [];
+      groups.push(cur);
+      carry = sum - g;
+      while (carry >= g) carry -= g;
+      cur = next;
+    } else if (sum === cap) { groups.push(cur); carry = 0; cur = []; }
+  });
+  if (cur.length) groups.push(cur);
+  // 2. rests split a group; a group holding a quarter or longer has no beam (VexFlow reads "q" and "h"
+  // as no number here, so they don't split it: matched, so the page doesn't change)
+  let out = [];
+  for (const grp of groups) {
+    let run = [];
+    for (const i of grp) {
+      if (!bar[i].pitches.length) { if (run.length) out.push(run); run = []; } else run.push(i);
+    }
+    if (run.length) out.push(run);
+  }
+  out = out.filter((grp) => grp.every((i) => short(bar[i])));
+  // 3. the overrides: a break splits a group, a join merges with the note before when both can take a beam
+  if (!auto && bar.some((e) => e.beam)) {
+    const of = new Map();
+    out.forEach((grp, k) => grp.forEach((i) => of.set(i, k)));
+    const flat = [];
+    bar.forEach((ev, i) => {
+      const ok = ev.pitches.length && short(ev), prev = flat[flat.length - 1];
+      const joined = i > 0 && ok && (ev.beam === "join" ? prev?.at(-1) === i - 1 : ev.beam !== "break" && of.has(i) && of.get(i) === of.get(i - 1));
+      if (!ok) return;
+      if (joined) prev.push(i); else flat.push([i]);
+    });
+    out = flat;
+  }
+  return out.filter((grp) => grp.length > 1);
+}
+
+// Beam modes read from a file, one per event ("begin", "mid", "no", or undefined for as usual), into the
+// overrides that give that beaming here.
+export function beamsFromModes(bar, time, modes) {
+  const of = new Map();
+  beamGroups(bar, time, true).forEach((g, k) => g.forEach((i) => of.set(i, k)));
+  bar.forEach((ev, i) => {
+    delete ev.beam;
+    if (!i) return;
+    const auto = of.has(i) && of.get(i) === of.get(i - 1), m = modes[i];
+    const want = m === "begin" || m === "no" || modes[i - 1] === "no" ? false : m === "mid" ? true : auto;
+    if (want && !auto && ev.pitches.length && bar[i - 1].pitches.length && BASE[ev.dur] < 480 && BASE[bar[i - 1].dur] < 480) ev.beam = "join";
+    else if (!want && auto) ev.beam = "break";
+  });
+}
+
+// ---------- line and page breaks (DESIGN §41) ----------
+// measures[b].brk: "line" or "page", a new line (or page, when printed) starts at bar b.
+export const BREAKS = { line: "Line break", page: "Page break" };
+export function setBreak(score, b, kind) {
+  const m = score.measures[b];
+  if (!m) return "No such bar";
+  if (!kind) { delete m.brk; return null; }
+  if (!b) return "The first bar always starts a line";
+  if (!Object.hasOwn(BREAKS, kind)) return "Unknown break";
+  m.brk = kind;
+  return null;
+}
+
 // ---------- swing and rit./accel. (DESIGN §39) ----------
 // score.swing = [first, second]: each beat's two eighths play in that ratio ([2, 1] is a triplet
 // feel), in x/4 and x/2 time. Off when absent.
@@ -1281,7 +1367,7 @@ export function isValidScore(sc) {
     if (!n || !sc.measures[0].time) return false;
     if (!sc.measures.every((m) => m.sym === undefined || (m.time && TIME_SYMS[m.sym] && symOk(m.sym, m.time)))) return false;
     if (!sc.measures.every(okRepeats)) return false;
-    if (!sc.measures.every((m) => m.ramp === undefined || Object.hasOwn(RAMPS, m.ramp)) || (sc.swing !== undefined && !okSwing(sc.swing))) return false;
+    if (!sc.measures.every((m) => (m.ramp === undefined || Object.hasOwn(RAMPS, m.ramp)) && (m.brk === undefined || Object.hasOwn(BREAKS, m.brk))) || (sc.swing !== undefined && !okSwing(sc.swing))) return false;
     if (!sc.measures.every((m, b) => m.tempo === undefined || (b > 0 && okBpm(m.tempo)))) return false;
     if (!sc.measures.every((m) => m.rehearsal === undefined || okText(m.rehearsal, MAX_REHEARSAL))) return false;
     if (!sc.measures.every((m) => m.len === undefined || (Number.isInteger(m.len) && m.len > 0 && m.len % 60 === 0))) return false;
@@ -1293,7 +1379,7 @@ export function isValidScore(sc) {
       (e.grace === undefined || (Array.isArray(e.grace) && e.grace.length > 0 && e.grace.length <= MAX_GRACE && e.pitches.length > 0 && e.grace.every(okPitch))) &&
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m)))) &&
       (e.dyn === undefined || DYNS.includes(e.dyn)) && (e.text === undefined || okText(e.text, MAX_TEXT)) && (e.harm === undefined || okChord(e.harm)) &&
-      (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&
+      (e.cue === undefined || e.cue === true) && (e.beam === undefined || BEAMS.includes(e.beam)) && (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&
       (e.gliss === undefined || (e.gliss === true && e.pitches.length > 0)) &&
       (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true) &&
       [e.slur2, e.slur2End, e.ped, e.pedEnd, e.ottEnd].every((f) => f === undefined || f === true) && (e.ott === undefined || Object.hasOwn(OTT_SHIFT, e.ott)) &&
