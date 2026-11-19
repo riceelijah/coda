@@ -1447,6 +1447,12 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   other ornaments.
 - MuseScore: `<Ornament>` (and MuseScore 3 articulation subtypes), `<Arpeggio>`,
   `<TremoloSingleChord>`/`<Tremolo>`, and voice-level `<Breath>` after the chord it follows.
+- Playback (`perform` in play.js, so MIDI export too): accent +20 and marcato +30 velocity; breath
+  and caesura end the note early (a quarter of it, at most an eighth); arpeggio rolls the chord up in
+  steps of a 64th at most; the top note of a chord carries the ornament: trill and tremolo
+  repeat in 32nds (a drum tremolo is a roll), mordents are two 32nds before the main note, a turn
+  splits the note in four. Neighbours are the written notes a step away in the written key
+  (accidentals earlier in the bar are not applied). Not on notes tied into, tied on, or sliding.
 
 ## 35. Marking palettes
 

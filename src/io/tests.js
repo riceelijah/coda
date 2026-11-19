@@ -905,6 +905,25 @@ export async function run({ check, eq }) {
     return M.isValidScore(s) || "validation";
   });
 
+  await check("marks in playback: accents louder, ornaments from the key, tremolo and trill in 32nds, arpeggio rolled, breath shortens (DESIGN §34)", () => {
+    const s = M.newScore({ bars: 1, key: 2 }); // D major: the note above E is F♯
+    const n = (st, mark, more) => { const e = { dur: "q", dots: 0, tie: false, pitches: [{ step: st, oct: 4, alter: st === 3 ? 1 : 0 }, ...(more ? [{ step: st + 2, oct: 4, alter: 0 }] : [])] }; M.setMark(e, mark, true); return e; };
+    s.staves[0].bars[0] = [n(2, "invMordent"), n(2, "accent"), n(0, "arpeggio", true), n(2, "turn")];
+    const ns = schedule(s).notes.sort((a, b) => a.start - b.start || a.midi - b.midi);
+    const at = (t) => ns.filter((x) => x.start >= t && x.start < t + 480).map((x) => x.midi);
+    if (at(0).join() !== "64,66,64") return "upper mordent " + at(0); // E F♯ E
+    const acc = ns.find((x) => x.start === 480), plain = ns.find((x) => x.start === 0);
+    if (!(acc.vel > plain.vel)) return "accent";
+    const arp = ns.filter((x) => x.start >= 960 && x.start < 1440);
+    if (arp.length !== 2 || arp[1].start <= arp[0].start) return "arpeggio " + JSON.stringify(arp);
+    if (at(1440).join() !== "66,64,62,64") return "turn " + at(1440); // F♯ E D E
+    s.staves[0].bars[0] = [n(0, "trill"), n(0, "tremolo"), n(0, "breath"), n(0, "staccato")];
+    const t = schedule(s).notes;
+    if (t.filter((x) => x.start < 480).length !== 8 || t.filter((x) => x.start >= 480 && x.start < 960).length !== 8) return "trill/tremolo counts";
+    const br = t.find((x) => x.start === 960);
+    return br.end < 1440 || "breath";
+  });
+
   await check("drum notes move a line keeping their drum, as a file's own drum map has them (DESIGN §28)", () => {
     const s = M.newScore({ preset: "drums", bars: 1 });
     s.staves[0].bars[0] = [{ dur: "q", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0, drum: 38 }] }]; // snare, at its kit position

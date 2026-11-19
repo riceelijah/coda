@@ -1,6 +1,6 @@
 // Coda playback: sampled General MIDI sounds fetched on demand, with a triangle-wave fallback.
 // See docs/DESIGN.md §7 and §13.3.
-import { attrsAt, barCapacity, barLen, eventTicks, midi as midiOf, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder, tempoAt } from "./model.js";
+import { attrsAt, barCapacity, barLen, eventTicks, midi as midiOf, keyAt, keyAlter, diatonic, fromDiatonic, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder, tempoAt } from "./model.js";
 import { drumHit } from "./drumsynth.js";
 import { GM } from "./gm.js";
 import { getSound } from "./usersounds.js";
@@ -69,6 +69,7 @@ export function schedule(score, from = 0) {
           if (ev.tie) nextOpen.set(m, n);
           else if (ev.marks?.includes("staccato")) n.end = (Math.max(n.start, at) + at + len) / 2; // sounds half its length (after any grace notes)
         });
+        if (ev.marks) perform(ev, made.map((n, k) => ({ n, p: ev.pitches[k] })).filter(({ n }) => n.start === on && !n.root && !n.glide), notes, { at, len, perc, tied: !!ev.tie, key: keyAt(score, si, bar), tr });
         // a slide takes the last half of its note, at most a beat
         slide = ev.gliss && !perc ? { from: made, t0: Math.max(at + len / 2, at + len - PPQ), end: at + len } : null;
         open.clear();
@@ -78,6 +79,48 @@ export function schedule(score, from = 0) {
     });
   }));
   return { notes, barStart, total, timeOf };
+}
+
+// How marks sound (DESIGN §34). `fresh`: this event's newly struck notes, low to high (not tied
+// into, not part of a slide). Ornaments and tremolos split the top note into short notes; a tied
+// note keeps its ornament silent so the tie still holds.
+const SHORT = 60; // a 32nd
+function perform(ev, pairs, list, { at, len, perc, tied, key, tr }) {
+  const has = (m) => ev.marks.includes(m), fresh = pairs.map((x) => x.n);
+  for (const n of fresh) {
+    if (has("accent")) n.vel = Math.min(127, n.vel + 20);
+    if (has("marcato")) n.vel = Math.min(127, n.vel + 30);
+    if (has("breath") || has("caesura")) n.end = Math.max(n.start + SHORT, Math.min(n.end, at + len - Math.min(len / 4, PPQ / 2)));
+  }
+  if (has("arpeggio") && fresh.length > 1) {
+    const step = Math.min(SHORT / 2, len / 2 / fresh.length);
+    fresh.forEach((n, k) => { n.start += k * step; });
+  }
+  const top = fresh[fresh.length - 1], tp = pairs[pairs.length - 1]?.p;
+  if (!top || tied) return;
+  const neighbour = (d) => { // the written note a step away, in the written key, as it sounds
+    const q = fromDiatonic(diatonic(tp) + d);
+    return midiOf({ ...q, alter: keyAlter(key, q.step) }) + tr;
+  };
+  let seq = null; // [midi, ticks]...
+  const m = top.midi;
+  if (has("tremolo")) seq = Array.from({ length: Math.max(1, Math.floor((top.end - top.start) / SHORT)) }, () => [m, SHORT]);
+  else if (perc) return;
+  else if (has("trill")) seq = Array.from({ length: Math.max(1, Math.floor((top.end - top.start) / SHORT)) }, (_, k) => [k % 2 ? neighbour(1) : m, SHORT]);
+  else if (has("mordent")) seq = [[m, SHORT], [neighbour(-1), SHORT]];
+  else if (has("invMordent")) seq = [[m, SHORT], [neighbour(1), SHORT]];
+  else if (has("turn")) { const q = (top.end - top.start) / 4; seq = [[neighbour(1), q], [m, q], [neighbour(-1), q]]; }
+  if (!seq) return;
+  const end = top.end;
+  let t = top.start;
+  // the top note becomes the first piece; the rest are new notes, the last one lasting to the end
+  seq.forEach(([mm, d], k) => {
+    const n = k ? { ...top, midi: mm, start: t } : top;
+    n.midi = mm; n.end = Math.min(end, t + d);
+    if (k) list.push(n);
+    t += d;
+  });
+  if (t < end && !has("trill") && !has("tremolo")) list.push({ ...top, midi: m, start: t, end });
 }
 
 // Velocity at a tick (relative to bar `from`) for staff si (DESIGN §22). A part's dynamics, from
