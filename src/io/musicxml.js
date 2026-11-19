@@ -500,6 +500,9 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   applyTempi(score, tempi, report);
   rep.forEach((r, b) => { if (b < score.measures.length) Object.assign(score.measures[b], r); else report.count("Repeat marks after the last bar (not imported)"); });
   short.forEach((len, b) => { if (len && setBarLen(score, b, len)) report.count("Short bars Coda can't show (shown full length)"); });
+  // MusicXML has no length for a short last bar; after a pickup, an underfull last bar is one
+  const z = score.measures.length - 1, zl = Math.max(...score.staves.flatMap((st) => allLayers(st).map((bars) => barTicks(bars[z]))));
+  if (score.measures[0].len && z > 0 && zl > 0) setBarLen(score, z, zl);
   const lostClefs = finishClefs(score);
   if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
   report.notes = noteCount(score);

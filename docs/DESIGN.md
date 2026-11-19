@@ -1059,7 +1059,7 @@ NotePad's name and limits: **layers 1–4** per staff, each its own rhythm; stem
   notehead side. Layers sharing a bar: all marks on the stem side. Not printed on rests except
   a fermata.
 - **Playback:** staccato sounds half its length. A fermata doesn't change timing.
-- **Entry:** Notes ▸ Fermata / Staccato / Accent / Tenuto / Marcato over the selection; the first
+- **Entry:** Notes ▸ Articulations ▸ Fermata / Staccato / Accent / Tenuto / Marcato over the selection; the first
   three are also in the right-click menu.
 - **Files:** MusicXML `<fermata>` and `<articulations>` (`staccato`, `accent`, `tenuto`,
   `strong-accent` = marcato) both ways; other articulations are counted. A fermata on a
@@ -1244,7 +1244,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   Entry positions: D4 pedal hi-hat, E4 bass drum 2, F4 bass drum, G4/A4 floor toms, B4 low tom,
   C5 snare, D5/E5 toms, F5 ride, G5 closed hi-hat, A5 crash, B5 crash 2, C6 splash.
 - **Entry:** a click or typed letter snaps to the nearest entry position and takes its drum;
-  ↑/↓ move to the next one. Notes ▸ Drum sound (and the context menu) sets any kit drum on the
+  ↑/↓ move to the next one. Notes ▸ Drums ▸ Drum sound (and the context menu) sets any kit drum on the
   selected notes, which also moves them to that drum's position. Accidentals and transposition
   don't apply; ties match by drum, not position. A Shift+letter or chord click that snaps to a
   drum already in the chord is refused rather than taking it out. Copy/paste between drum and
@@ -1318,7 +1318,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   | Feature | Where |
   |---|---|
   | Notes, rests, dots (double), ties, chords | palette, keys (§6.3, §11.1) |
-  | Double sharps / flats | Notes ▸ Double sharp / Double flat |
+  | Double sharps / flats | Notes ▸ Double sharp and flat |
   | Any tuplet ratio | Notes ▸ Tuplet… (typed, e.g. 5:3) |
   | Layers 1–4 | Notes ▸ Layer, status bar |
   | Grace notes | Notes ▸ Grace notes |
@@ -1329,8 +1329,8 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   | Repeats, endings, D.C./D.S./segno/coda/Fine | Score ▸ Repeats and endings |
   | Part names, order, grand staff, drum staff | Score ▸ Parts and instruments… |
   | Any transposition | Parts dialog ▸ Other… (semitones, steps) |
-  | Instrument (GM program), drum per note | Parts dialog; Notes ▸ Drum sound… |
-  | Drum note away from its kit position | Notes ▸ Drum note up / down a line (same sound) |
+  | Instrument (GM program), drum per note | Parts dialog; Notes ▸ Drums ▸ Drum sound… |
+  | Drum note away from its kit position | Notes ▸ Drums ▸ Drum note up / down a line (same sound) |
   | Title, composer, tempo | Score ▸ Title, composer, tempo… |
   | Tempo change | Score ▸ Tempo from this bar… (§29) |
   | Text above a note (dolce, pizz.) | Notes ▸ Text above note… (§30) |
@@ -1384,7 +1384,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   follow at once (same bar or the next), be a note, differ, and have as many notes (chord note
   *n* goes to note *n*). Not on tied notes or drum staves. Drawn as a straight line from each
   notehead to its partner; across a line break, to the system's end and on from the next start.
-  Notes ▸ Slide to next: over a range, every note slides into the next, so a phrase glides.
+  Notes ▸ Brass effects ▸ Slide to next: over a range, every note slides into the next, so a phrase glides.
   Edits that break a slide drop it (`clearBrokenSlides`, with the broken ties).
 - **Sound:** pitch bends on the note's own voice (sample `playbackRate` or the tone's frequency):
   a scoop rises from a minor third below over 0.12 s; a fall or doit moves a fifth down or up

@@ -1,6 +1,6 @@
 // Standard MIDI File import. See docs/DESIGN.md §9.4.
 // MIDI holds performance data, not notation, so the result is a transcription.
-import { barCapacity, splitTicks, spellMidi, padBars, noteCount, PPQ, isPerc, attrsAt, tempoAt, setTempo, clampBpm } from "../model.js";
+import { barCapacity, barLen, splitTicks, spellMidi, padBars, noteCount, PPQ, isPerc, attrsAt, tempoAt, setTempo, clampBpm } from "../model.js";
 import { isDrum, drumPitch } from "../drums.js";
 import { Report } from "./util.js";
 import { schedule } from "../play.js";
@@ -84,7 +84,7 @@ export function importMIDI(bytes, fileName = "") {
 
   // meta: first of each kind wins
   let tempo = null, time = null, key = null;
-  let extraMeta = false;
+  let extraMeta = false, second = null; // second: the time signature after a pickup
   const names = [], tempos = []; // tempos: [tick, bpm] after the first
 
   tracks.forEach((evs, ti) => evs.forEach((e) => {
@@ -94,7 +94,9 @@ export function importMIDI(bytes, fileName = "") {
       if (tempo === null) tempo = Math.round(60e6 / us); else tempos.push([q(e.tick), 60e6 / us]);
     } else if (e.meta === 0x58 && e.data.length >= 2) {
       const t = [e.data[0], 2 ** e.data[1]];
-      if (time === null) time = t; else if (e.tick > 0) extraMeta = true;
+      if (time === null) time = t;
+      else if (e.tick > 0 && !second) second = { at: q(e.tick), t };
+      else if (e.tick > 0) extraMeta = true;
     } else if (e.meta === 0x59 && e.data.length >= 1) {
       const sf = e.data[0] > 127 ? e.data[0] - 256 : e.data[0];
       if (key === null) key = Math.max(-7, Math.min(7, sf)); else if (e.tick > 0) extraMeta = true;
@@ -102,8 +104,13 @@ export function importMIDI(bytes, fileName = "") {
       names[ti] = new TextDecoder("latin1").decode(e.data).trim();
     }
   }));
-  if (extraMeta) report.add("Only the first time signature and key signature were used.");
   if (!time || ![1, 2, 4, 8, 16, 32].includes(time[1]) || time[0] < 1) time = [4, 4];
+  // a first time signature one short bar long, then the real one: a pickup (DESIGN §33), as Coda writes it
+  let P = 0;
+  const okT = (t) => [1, 2, 4, 8, 16, 32].includes(t[1]) && t[0] >= 1;
+  if (second && okT(second.t) && second.at === barCapacity(time) && second.at < barCapacity(second.t) && second.at % 60 === 0) { P = second.at; time = second.t; }
+  else if (second) extraMeta = true;
+  if (extraMeta) report.add("Only the first time signature and key signature were used.");
   key = key ?? 0;
   tempo = Math.max(20, Math.min(400, tempo || 120));
 
@@ -169,9 +176,10 @@ export function importMIDI(bytes, fileName = "") {
       // split [a,b) at barlines, then into note values; tie all note pieces together
       const pieces = [];
       while (a < b) {
-        const barEnd = (Math.floor(a / L) + 1) * L;
+        const bar = a < P ? 0 : Math.floor((a - P) / L) + (P ? 1 : 0);
+        const barEnd = a < P ? P : P + (Math.floor((a - P) / L) + 1) * L;
         const segEnd = Math.min(b, barEnd);
-        for (const d of splitTicks(segEnd - a)) pieces.push({ bar: Math.floor(a / L), d });
+        for (const d of splitTicks(segEnd - a)) pieces.push({ bar, d });
         a = segEnd;
       }
       pieces.forEach((p, i) => {
@@ -197,11 +205,12 @@ export function importMIDI(bytes, fileName = "") {
   const bars = Math.max(...score.staves.map((s) => s.bars.length));
   while (score.measures.length < bars) score.measures.push({});
   padBars(score);
+  if (P) score.measures[0].len = P;
   // tempo changes (DESIGN §29): one per bar, at its start
   tempos.sort((a, b) => a[0] - b[0]);
   const seen = new Set([0]); // bar 1 has the first tempo
   for (const [t, bpm] of tempos) {
-    const b = Math.floor(t / L);
+    const b = t < P ? 0 : Math.floor((t - P) / L) + (P ? 1 : 0);
     if (b < score.measures.length && clampBpm(bpm) === tempoAt(score, b)) continue; // the same again, e.g. in another track
     if (b >= score.measures.length || seen.has(b)) { report.count("Tempo changes skipped (one per bar is kept)"); continue; }
     seen.add(b);
@@ -235,9 +244,13 @@ export function exportMIDI(score) {
   for (const { bar, tick } of barStart) {
     const a = attrsAt(score, bar), tp = tempoAt(score, bar);
     if (tp !== bpm) { const us = Math.round(60000000 / tp); cond.push({ tick, bytes: meta(0x51, [us >> 16, (us >> 8) & 255, us & 255]) }); bpm = tp; }
-    if (!was || a.time.join() !== was.time.join()) cond.push({ tick, bytes: meta(0x58, [a.time[0], Math.log2(a.time[1]), 24, 8]) });
+    // a short bar (DESIGN §33) gets a time signature of its own length, e.g. 1/4 for a one-beat pickup
+    const len = barLen(score, bar);
+    let ts = a.time;
+    if (len < barCapacity(a.time)) { let d = a.time[1]; while ((len * d) % 1920 && d < 32) d *= 2; ts = [(len * d) / 1920, d]; }
+    if (!was || ts.join() !== was.ts.join()) cond.push({ tick, bytes: meta(0x58, [ts[0], Math.log2(ts[1]), 24, 8]) });
     if (!was || a.key !== was.key) cond.push({ tick, bytes: meta(0x59, [a.key & 255, 0]) });
-    was = a;
+    was = { ...a, ts };
   }
   const tracks = [track(cond)];
   score.staves.forEach((st, s) => {

@@ -28,11 +28,11 @@ const txt = (el, name) => { const k = kid(el, name); return k ? k.textContent.tr
 
 // What the importer reads, or can pass over because it is layout, ids or playback detail; anything
 // else is counted (CLAUDE.md: never drop silently). Names give the labels for common losses.
-const LAYOUT = ["eid", "linkedTo", "linkedMain", "visible", "offset", "color", "placement", "track", "Beam", "BeamMode", "StemDirection", "Stem", "Hook", "NoteDot", "noStem", "stemDirection", "mirror", "dotPosition", "headType", "fixed", "fixedLine", "line", "Events", "veloType", "velocity", "veloOffset", "endSpanner", "tick", "tuning", "Accidental", "duration", "autoplace", "minDistance", "userOff", "pos"];
+const LAYOUT = ["eid", "linkedTo", "linkedMain", "visible", "offset", "color", "placement", "track", "Beam", "BeamMode", "StemDirection", "Stem", "Hook", "NoteDot", "noStem", "stemDirection", "mirror", "dotPosition", "headType", "fixed", "fixedLine", "line", "Events", "veloType", "velocity", "veloOffset", "endSpanner", "tuning", "Accidental", "duration", "autoplace", "minDistance", "userOff", "pos"];
 // Measure-level: repeats are read above; the rest is layout. LayoutBreak passes silently: MuseScore writes one per system.
 const MEASURE_ONLY = ["voice", "startRepeat", "endRepeat", "irregular", "LayoutBreak", "multiMeasureRest", "breakMultiMeasureRest", "vspacer", "vspacerUp", "vspacerDown", "vspacerFixed", "noOffset", "measureNumberMode", "stretch", "MeasureNumber", "MMRest"];
 const VOICE_READ = new Set([...LAYOUT, ...MEASURE_ONLY, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "StaffState"]);
-const VOICE_NAMES = { Harmony: "Chord symbols (not imported)", Breath: "Breath marks and caesuras (not imported)", FiguredBass: "Figured bass (not imported)", Tremolo: "Tremolos (not imported)", TremoloTwoChord: "Tremolos (not imported)", FretDiagram: "Fret diagrams (not imported)", InstrumentChange: "Instrument changes (not imported)", Image: "Images (not imported)" };
+const VOICE_NAMES = { Harmony: "Chord symbols (not imported)", Breath: "Breath marks and caesuras (not imported)", FiguredBass: "Figured bass (not imported)", Tremolo: "Tremolos (not imported)", TremoloTwoChord: "Tremolos (not imported)", FretDiagram: "Fret diagrams (not imported)", InstrumentChange: "Instrument changes (not imported)", tick: "Positions in MuseScore 2 voices (notes may be misplaced)", Image: "Images (not imported)" };
 const MEASURE_READ = new Set([...LAYOUT, ...MEASURE_ONLY]);
 const CHORD_READ = new Set([...LAYOUT, ...GRACE, "durationType", "dots", "Note", "Articulation", "ChordLine", "Lyrics", "Spanner", "Tuplet"]);
 const CHORD_NAMES = { Ornament: "Ornaments (trills, mordents, turns) (not imported)", Arpeggio: "Arpeggios (not imported)", TremoloSingleChord: "Tremolos (not imported)", Tremolo: "Tremolos (not imported)", small: "Cue notes (shown and played as normal notes)", staffMove: "Cross-staff notes (shown on their own staff)" };
@@ -181,7 +181,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (staff.clef === null) { staff.clef = clef || "treble"; break; }
             if ((clef === "percussion") !== (staff.clef === "percussion")) { report.count("Changes to or from the percussion clef mid-part (not imported)"); break; }
             let at = mi;
-            if (cur >= barCapacity(time)) at = mi + 1;
+            if (cur >= (short[mi] ?? barCapacity(time))) at = mi + 1;
             else if (cur > 0) report.count("Clef changes inside a bar moved to its start");
             if (at === 0) staff.clef = clef || "treble"; else (staff.clefs ||= {})[at] = clef || "treble";
             break;
@@ -288,7 +288,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (dt === "measure") { // whole-bar rest = empty bar
               if (marks.length) report.count("Fermatas on whole-bar rests (not imported)");
               if (pendText[vi]) report.count("Text over a bar with no notes moved to the next note");
-              cur += barCapacity(time); break;
+              cur += (short[mi] ?? barCapacity(time)); break;
             }
             let dur = DUR[dt];
             if (!dur && LONGER.has(dt)) { dur = "w"; report.count("Notes longer than a whole note shortened"); }

@@ -238,29 +238,36 @@
         <button role="menuitem" id="n-down" data-short="↓">Down a step</button>
         <button role="menuitem" id="n-octup" data-short="Shift+↑">Up an octave</button>
         <button role="menuitem" id="n-octdown" data-short="Shift+↓">Down an octave</button>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Double sharp and flat<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitem" id="n-dsharp">Double sharp</button>
+            <button role="menuitem" id="n-dflat">Double flat</button>
+          </div></div>
         <hr>
         <button role="menuitem" id="n-tie" data-short="T">Tie to next</button>
         <button role="menuitem" id="n-tuplet" data-short="9">Tuplet…</button>
         <button role="menuitem" id="n-untup">Remove tuplet</button>
-        <button role="menuitem" id="n-dsharp">Double sharp</button>
-        <button role="menuitem" id="n-dflat">Double flat</button>
-        <button role="menuitem" id="n-drum">Drum sound…</button>
-        <button role="menuitem" id="n-drumup">Drum note up a line (same sound)</button>
-        <button role="menuitem" id="n-drumdown">Drum note down a line (same sound)</button>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Grace notes<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitem" id="n-grace">Grace notes (on/off)</button>
+            <button role="menuitem" id="n-nograce">Remove grace notes</button>
+          </div></div>
         <hr>
-        <button role="menuitem" id="n-fermata">Fermata</button>
-        <button role="menuitem" id="n-staccato">Staccato</button>
-        <button role="menuitem" id="n-accent">Accent</button>
-        <button role="menuitem" id="n-tenuto">Tenuto</button>
-        <button role="menuitem" id="n-marcato">Marcato</button>
-        <button role="menuitem" id="n-scoop">Scoop</button>
-        <button role="menuitem" id="n-fall">Fall</button>
-        <button role="menuitem" id="n-doit">Doit</button>
-        <button role="menuitem" id="n-gliss">Slide to next (gliss.)</button>
-        <button role="menuitem" id="n-grace">Grace notes (on/off)</button>
-        <button role="menuitem" id="n-nograce">Remove grace notes</button>
-        <button role="menuitem" id="n-lyrics" data-short="L">Lyrics…</button>
-        <button role="menuitem" id="n-text">Text above note…</button>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Articulations<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitem" id="n-fermata">Fermata</button>
+            <button role="menuitem" id="n-staccato">Staccato</button>
+            <button role="menuitem" id="n-accent">Accent</button>
+            <button role="menuitem" id="n-tenuto">Tenuto</button>
+            <button role="menuitem" id="n-marcato">Marcato</button>
+          </div></div>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Brass effects<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitem" id="n-scoop">Scoop</button>
+            <button role="menuitem" id="n-fall">Fall</button>
+            <button role="menuitem" id="n-doit">Doit</button>
+            <button role="menuitem" id="n-gliss">Slide to next (gliss.)</button>
+          </div></div>
         <button role="menuitem" id="n-slur" data-short="S">Slur</button>
         <button role="menuitem" id="n-cresc">Crescendo hairpin</button>
         <button role="menuitem" id="n-dim">Diminuendo hairpin</button>
@@ -282,10 +289,22 @@
             <button role="menuitem" id="d-none">No dynamic</button>
           </div></div>
         <hr>
-        <button role="menuitem" id="n-layer1">Layer 1</button>
-        <button role="menuitem" id="n-layer2">Layer 2</button>
-        <button role="menuitem" id="n-layer3">Layer 3</button>
-        <button role="menuitem" id="n-layer4">Layer 4</button>
+        <button role="menuitem" id="n-lyrics" data-short="L">Lyrics…</button>
+        <button role="menuitem" id="n-text">Text above note…</button>
+        <hr>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Drums<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitem" id="n-drum">Drum sound…</button>
+            <button role="menuitem" id="n-drumup">Drum note up a line (same sound)</button>
+            <button role="menuitem" id="n-drumdown">Drum note down a line (same sound)</button>
+          </div></div>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Layer<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitem" id="n-layer1">Layer 1</button>
+            <button role="menuitem" id="n-layer2">Layer 2</button>
+            <button role="menuitem" id="n-layer3">Layer 3</button>
+            <button role="menuitem" id="n-layer4">Layer 4</button>
+          </div></div>
       </div></div>
     <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Score</button>
       <div class="mlist" role="menu" hidden>
@@ -390,7 +409,7 @@
         <option value="piano">Piano (grand staff)</option>
         <option value="trebleBass">Treble + Bass</option>
         <option value="satb">SATB (4 staves)</option>
-        <option value="drums">Drums</option>
+        <option value="drums">Drums (drum kit)</option>
       </select>
       <label class="new-only" for="f-sound">Sound</label><select class="new-only" id="f-sound"></select>
       <label class="new-only" for="f-key">Key</label><select class="new-only" id="f-key"></select>
@@ -438,7 +457,7 @@
         <option value="treble">Treble staff</option><option value="bass">Bass staff</option>
         <option value="alto">Alto staff</option><option value="tenor">Tenor staff</option>
         <option value="grand">Grand staff (two staves)</option>
-        <option value="percussion">Drum staff</option>
+        <option value="percussion">Drums (drum kit)</option>
       </select>
       <button class="btn" type="button" id="inst-add">Add</button>
     </div>
@@ -553,7 +572,7 @@
       <tr><td><kbd>7</kbd> <kbd>6</kbd> <kbd>5</kbd> <kbd>4</kbd> <kbd>3</kbd> <kbd>2</kbd></td><td>Whole, half, quarter, eighth, 16th, 32nd (also changes the selected note)</td></tr>
       <tr><td><kbd>.</kbd></td><td>Dot (press again for a double dot, again for none)</td></tr>
       <tr><td><kbd>+</kbd> <kbd>-</kbd> <kbd>N</kbd></td><td>Sharp, flat, natural</td></tr>
-      <tr><td>Drum staff</td><td>Click or type A–G for the drum on that line or space; <kbd>↑</kbd>/<kbd>↓</kbd> go to the next drum; Notes ▸ Drum sound… for any other</td></tr>
+      <tr><td>Drum staff</td><td>Click or type A–G for the drum on that line or space; <kbd>↑</kbd>/<kbd>↓</kbd> go to the next drum; Notes ▸ Drums ▸ Drum sound… for any other</td></tr>
       <tr><td><kbd>T</kbd></td><td>Tie the selected note to the next</td></tr>
       <tr><td><kbd>S</kbd></td><td>Slur the selected notes</td></tr>
       <tr><td><kbd>L</kbd></td><td>Type lyrics from the selected note (Space: next note, -: next syllable, ↑/↓: verse, Enter: done)</td></tr>
@@ -574,7 +593,7 @@
       <tr><td>Click / drag</td><td>Selection tool: select a note, or drag a box around notes; <kbd>Shift</kbd>+click extends</td></tr>
       <tr><td><kbd>Shift</kbd>+<kbd>A</kbd>–<kbd>G</kbd></td><td>Add that note above the selected note (build a chord)</td></tr>
       <tr><td>Shift+click</td><td>Add or remove a chord note on the clicked note</td></tr>
-      <tr><td>Notes ▸ Fermata…Marcato</td><td>Add or remove a fermata or articulation on the selected notes (also on right-click)</td></tr>
+      <tr><td>Notes ▸ Articulations</td><td>Add or remove a fermata or articulation on the selected notes (also on right-click)</td></tr>
       <tr><td>File ▸ Print… (<kbd>Ctrl/Cmd</kbd>+<kbd>P</kbd>)</td><td>Print the score, or save it as a PDF from the print dialog</td></tr>
       <tr><td>File ▸ Export</td><td>PDF (through the print dialog), MusicXML, .mxl, MuseScore, MIDI, WAV or compressed audio</td></tr>
       <tr><td>Score ▸ Parts and instruments…</td><td>Add, remove, rename and reorder parts, and pick each part's sound</td></tr>

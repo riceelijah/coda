@@ -202,7 +202,7 @@ function drawCaret() {
 function updateStatus() {
   const sc = state.score, { staff, bar } = state.caret;
   const a = state.armed;
-  const parts = [`Bar ${bar + 1}`, `Staff ${staff + 1}${sc.staves[staff].name ? " (" + sc.staves[staff].name + ")" : ""}`];
+  const parts = [`Bar ${M.barNumber(state.score, bar)}`, `Staff ${staff + 1}${sc.staves[staff].name ? " (" + sc.staves[staff].name + ")" : ""}`];
   if (state.layer || sc.staves.some((st) => st.layers)) parts.push(`Layer ${state.layer + 1}`);
   const ev = selEvent();
   const n = range().length;
@@ -1066,7 +1066,7 @@ function closeSetup() {
     if (!t) { message(`"${$("f-time").value}" isn't a time signature (try 7/8, 5/4, C or C|)`, true); return; }
     const sc = M.newScore({
       title, composer, tempo, preset: $("f-preset").value, key: +$("f-key").value,
-      ...t, bars: +$("f-bars").value || 16, program: +$("f-sound").value,
+      ...t, bars: +$("f-bars").value || 16, program: +$("f-sound").value || 0,
     });
     const pick = +$("f-pickup").value; // a pickup bar (DESIGN §33), as in a setup wizard
     if (pick > 0 && pick < t.time[0] && M.setBarLen(sc, 0, Math.round((pick * 1920) / t.time[1]))) message("That pickup isn't a length a bar can have, so bar 1 is full", true);
@@ -1085,6 +1085,10 @@ function fillSounds(sel, value) {
     for (const it of GM.filter((x) => x.family === fam)) g.appendChild(new Option(it.name, it.program));
     sel.appendChild(g);
   }
+  // drums are a kind of part (DESIGN §27), listed here too so they're found where sounds are
+  const d = document.createElement("optgroup");
+  d.label = "Drums"; d.appendChild(new Option("Drum kit", "drums"));
+  sel.appendChild(d);
   sel.value = value;
 }
 
@@ -1143,6 +1147,13 @@ function partRow({ from, kind, name, value, tr = "0,0" }) {
   nm.className = "nm"; nm.maxLength = 60; nm.value = name; nm.placeholder = "Part name"; nm.setAttribute("aria-label", "Part name");
   sel.className = "snd"; sel.setAttribute("aria-label", "Sound");
   fillSounds(sel, 0);
+  sel.addEventListener("change", () => { // an existing part can't become drums: say where drums come from
+    if (sel.value !== "drums") return;
+    sel.value = sel.dataset.was ?? "0";
+    message("For drums, add a part below: Add a part ▸ Drums (drum kit)", true);
+    $("inst-kind").value = "percussion";
+  });
+  sel.addEventListener("focus", () => { sel.dataset.was = sel.value; });
   sel.dataset.want = value;
   if (kind === "percussion") { // the built-in kit (DESIGN §27): no instrument or transposition to choose
     sel.replaceChildren(new Option("Drum kit (built in)", "0")); sel.disabled = true; trs.disabled = true;
@@ -1340,7 +1351,7 @@ function openAttrs() {
   const b = state.caret.bar, sc = state.score;
   const at = M.attrsAt(sc, b);
   const m = sc.measures[b];
-  $("attrs-head").textContent = `Key and time from bar ${b + 1}`;
+  $("attrs-head").textContent = `Key and time from bar ${M.barNumber(state.score, b)}`;
   $("a-key").value = at.key;
   $("a-key").previousElementSibling.textContent = sc.staves.some((st) => st.transpose) ? "Key (concert)" : "Key";
   $("a-time").value = M.timeLabel(at);
@@ -1380,42 +1391,42 @@ function ask(head, label, value) {
 const repBar = () => state.caret.bar;
 function barMark(k, val) {
   const b = repBar(), m = state.score.measures[b], on = val === true ? !m[k] : m[k] !== val;
-  if (edit((sc) => M.setBarMark(sc, b, k, on && val))) message(`${on ? "" : "Removed: "}${k === "jump" ? M.JUMPS[val] : document.getElementById("r-" + k).textContent} at bar ${b + 1}`);
+  if (edit((sc) => M.setBarMark(sc, b, k, on && val))) message(`${on ? "" : "Removed: "}${k === "jump" ? M.JUMPS[val] : document.getElementById("r-" + k).textContent} at bar ${M.barNumber(state.score, b)}`);
 }
 // text above a note and rehearsal marks (DESIGN §30): empty removes
 async function noteText() {
   const s = state.sel, ev = selEvent();
   if (!ev) { message("Select a note or rest first", true); return; }
-  const v = await ask(`Text above bar ${s.bar + 1}`, "Text, such as dolce or pizz. (empty to remove)", ev.text || "");
+  const v = await ask(`Text above bar ${M.barNumber(state.score, s.bar)}`, "Text, such as dolce or pizz. (empty to remove)", ev.text || "");
   if (v === null) return;
   edit((sc) => M.setText(sc.staves[s.staff].bars[s.bar][s.idx], v)); // inside edit, bars is the current layer
 }
 async function rehearsal() {
   const b = repBar(), sc = state.score;
-  const v = await ask(`Rehearsal mark at bar ${b + 1}`, `Up to ${M.MAX_REHEARSAL} letters or digits (empty to remove)`, sc.measures[b].rehearsal || M.nextRehearsal(sc, b));
+  const v = await ask(`Rehearsal mark at bar ${M.barNumber(state.score, b)}`, `Up to ${M.MAX_REHEARSAL} letters or digits (empty to remove)`, sc.measures[b].rehearsal || M.nextRehearsal(sc, b));
   if (v === null) return;
   edit((x) => M.setRehearsal(x, b, v));
 }
 // tempo changes (DESIGN §29): empty, or the tempo before, removes the change
 async function tempoFrom() {
   const b = repBar(), sc = state.score;
-  const v = await ask(`Tempo from bar ${b + 1}`, "Quarter notes a minute (20–400)" + (b ? "; empty for no change" : ""), M.tempoAt(sc, b));
+  const v = await ask(`Tempo from bar ${M.barNumber(state.score, b)}`, "Quarter notes a minute (20–400)" + (b ? "; empty for no change" : ""), M.tempoAt(sc, b));
   if (v === null) return;
   const bpm = v.trim() === "" && b ? M.tempoAt(sc, b - 1) : +v;
   if (!M.okBpm(bpm)) { message("A tempo is a whole number from 20 to 400", true); return; }
-  if (edit((s) => M.setTempo(s, b, bpm))) message(`Tempo ${bpm} from bar ${b + 1}`);
+  if (edit((s) => M.setTempo(s, b, bpm))) message(`Tempo ${bpm} from bar ${M.barNumber(state.score, b)}`);
 }
 // short bars (DESIGN §33): a pickup, or the bar that completes it at the end
 async function barLength() {
   const b = repBar(), sc = state.score, { time } = M.attrsAt(sc, b), beat = 1920 / time[1];
-  const v = await ask(`Length of bar ${b + 1}`, `Beats, counting in the time signature's ${time[0]}/${time[1]} (empty for a full bar)`, M.barLen(sc, b) / beat);
+  const v = await ask(`Length of bar ${M.barNumber(state.score, b)}`, `Beats, counting in the time signature's ${time[0]}/${time[1]} (empty for a full bar)`, M.barLen(sc, b) / beat);
   if (v === null) return;
   const n = v.trim() === "" ? time[0] : +v;
-  if (!(n > 0) || n > time[0]) { message(`A bar holds from a part of a beat up to ${time[0]} beats`, true); return; }
-  if (edit((s) => M.setBarLen(s, b, Math.round(n * beat)))) message(n < time[0] ? `Bar ${b + 1} is ${n} beat${n === 1 ? "" : "s"} long` : `Bar ${b + 1} is a full bar`);
+  if (!(Math.round(n * beat) >= 60) || n > time[0]) { message(`A bar holds from a part of a beat up to ${time[0]} beats`, true); return; }
+  if (edit((s) => M.setBarLen(s, b, Math.round(n * beat)))) message(n < time[0] ? `Bar ${M.barNumber(state.score, b)} is ${n} beat${n === 1 ? "" : "s"} long` : `Bar ${M.barNumber(state.score, b)} is a full bar`);
 }
 async function repeatTimes() {
-  const b = repBar(), v = await ask(`End repeat at bar ${b + 1}`, `Times the section plays (2–${M.MAX_REPEAT})`, state.score.measures[b].repEnd || 3);
+  const b = repBar(), v = await ask(`End repeat at bar ${M.barNumber(state.score, b)}`, `Times the section plays (2–${M.MAX_REPEAT})`, state.score.measures[b].repEnd || 3);
   if (v === null) return;
   if (!(+v >= 2 && +v <= M.MAX_REPEAT && Number.isInteger(+v))) { message(`Play a section 2 to ${M.MAX_REPEAT} times`, true); return; }
   edit((sc) => M.setBarMark(sc, b, "repEnd", +v));
@@ -1484,7 +1495,7 @@ const CMD = {
   "b-delbar": { run: () => {
     const b = state.caret.bar;
     const has = state.score.staves.some((s) => M.allLayers(s).some((bars) => bars[b].length));
-    if (has && !confirm(`Delete bar ${b + 1} and its notes?`)) return;
+    if (has && !confirm(`Delete bar ${M.barNumber(state.score, b)} and its notes?`)) return;
     edit((sc) => M.deleteMeasure(sc, b));
   }, on: () => state.score.measures.length > 1 },
   "b-attrs": { run: () => openAttrs() },
@@ -1875,7 +1886,11 @@ function init() {
   $("us-add").onclick = () => addOwnSound();
   $("usounds").addEventListener("close", () => fillOwnSounds());
   fillSounds($("f-sound"), 0);
-  $("f-preset").onchange = (e) => { $("f-sound").value = e.target.value === "satb" ? 52 : 0; $("f-sound").disabled = e.target.value === "drums"; };
+  $("f-preset").onchange = (e) => { $("f-sound").value = e.target.value === "drums" ? "drums" : e.target.value === "satb" ? 52 : 0; };
+  $("f-sound").onchange = (e) => { // Drum kit in the sound list makes a drum score
+    if (e.target.value === "drums") $("f-preset").value = "drums";
+    else if ($("f-preset").value === "drums") $("f-preset").value = "treble";
+  };
   setupCommands();
   document.querySelectorAll("#layers button").forEach((b, i) => (b.onclick = () => setLayer(i)));
   setupCtx();

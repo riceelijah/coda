@@ -871,10 +871,17 @@ export async function run({ check, eq }) {
     M.setAttrs(s, 0, { time: [3, 4] });
     const t = schedule(s).barStart.map((x) => x.tick);
     if (t.join() !== "0,480,1920") return "starts " + t;
+    s.staves[0].bars[2] = [q(3), q(0)]; M.setBarLen(s, 2, 960);
     const x = exportMusicXML(s);
     if (!x.includes('<measure number="0" implicit="yes">') || !x.includes('<measure number="2">')) return "MusicXML numbers";
+    if (importMusicXML(x).score.measures[2].len !== 960) return "MusicXML short last bar";
     if (importMusicXML(x).score.measures[0].len !== 480 || importMSCX(exportMSCX(s), "p.mscx").score.measures[0].len !== 480) return "round trip";
-    const old = M.newScore({ bars: 1 }); s.measures[1].len = 1920;
+    s.staves[0].bars[1] = [q(0), q(1), q(2)];
+    const mid = importMIDI(exportMIDI(s), "p.mid").score;
+    if (mid.measures[0].len !== 480 || mid.measures[0].time.join() !== "3,4" || mid.staves[0].bars[0].length !== 1 || mid.staves[0].bars[1].length !== 3) return "MIDI " + JSON.stringify([mid.measures[0], mid.staves[0].bars.map((b) => b.length)]);
+    s.measures[2].len = 2880; // a bar deleted with its time change can leave a length too long: it reads as full
+    if (M.barLen(s, 2) !== 1440 || !M.isValidScore(s)) return "clamp";
+    const old = M.newScore({ bars: 1 }); s.measures[1].len = 30;
     return (M.isValidScore(old) && !M.isValidScore(s)) || "validation";
   });
 
