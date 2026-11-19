@@ -488,6 +488,16 @@ export const NAV_WORDS = /^(d\.\s?c\.?|da capo|d\.\s?s\.?|dal segno|to coda|fine
 export const cleanText = (s, max) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 const okText = (t, max) => typeof t === "string" && t.length > 0 && t.length <= max && t === cleanText(t, max) && !NAV_WORDS.test(t);
 // Set (or with empty text, remove) one event's text.
+// Fingering (DESIGN §34): p.finger on a note of a chord, a finger 0–5 or a change such as 3-1.
+export const FINGER = /^[0-5](-[0-5])?$/;
+// "1 3 5": fingers for the notes from the lowest up; "-" or nothing leaves one without. Empty clears.
+export function setFingers(ev, s) {
+  const f = String(s).trim().split(/[\s,]+/).filter(Boolean);
+  if (f.some((x) => x !== "-" && !FINGER.test(x))) return "Fingers are 0–5, a change like 3-1, one per note from the lowest";
+  if (f.length > ev.pitches.length) return `This chord has ${ev.pitches.length} note${ev.pitches.length > 1 ? "s" : ""}`;
+  ev.pitches.forEach((p, k) => { if (f[k] && f[k] !== "-") p.finger = f[k]; else delete p.finger; });
+  return null;
+}
 export function setText(ev, s) {
   const t = cleanText(s, MAX_TEXT);
   if (NAV_WORDS.test(t)) return `Use Score ▸ Repeats and endings for "${t}"`;
@@ -1021,7 +1031,7 @@ export function isValidScore(sc) {
     if (!sc.measures.every((m) => m.rehearsal === undefined || okText(m.rehearsal, MAX_REHEARSAL))) return false;
     if (!sc.measures.every((m) => m.len === undefined || (Number.isInteger(m.len) && m.len > 0 && m.len % 60 === 0))) return false;
     let okPitch;
-    const pitched = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2 && p.drum === undefined;
+    const pitched = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2 && p.drum === undefined && (p.finger === undefined || FINGER.test(p.finger));
     const drum = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && p.alter === 0 && Number.isInteger(p.drum) && p.drum >= 35 && p.drum <= 81;
     const okBars = (bars) => Array.isArray(bars) && bars.length === n && bars.every((bar) => Array.isArray(bar) && bar.every((e) =>
       DURS.includes(e.dur) && Array.isArray(e.pitches) && e.pitches.every(okPitch) &&

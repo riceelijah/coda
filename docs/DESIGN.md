@@ -1338,6 +1338,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   | Pickup bar, short last bar | File ▸ New (Pickup beats); Score ▸ Bar length (pickup)… (§33) |
   | Trill, mordents, turn, tremolo, arpeggio | Notes ▸ Ornaments (§34) |
   | Breath mark, caesura | Notes ▸ Articulations (§34) |
+  | Fingering (per chord note, finger changes) | Notes ▸ Fingering… (§34) |
 
 ## 29. Tempo changes (Phase 34)
 
@@ -1453,6 +1454,9 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   repeat in 32nds (a drum tremolo is a roll), mordents are two 32nds before the main note, a turn
   splits the note in four. Neighbours are the written notes a step away in the written key
   (accidentals earlier in the bar are not applied). Not on notes tied into, tied on, or sliding.
+- Fingering: `p.finger` on a pitch, 0–5 or a change such as 3-1 (`FINGER`); Notes ▸ Fingering…
+  takes them from the lowest note up ("1 3 5", "-" skips one). Drawn above a single note, beside
+  each notehead of a chord. MusicXML `<technical><fingering>`, MuseScore `<Fingering>` in `<Note>`.
 - Fermatas hold a note or rest twice as long in every part: `schedule` keeps `fermatas` (unrolled
   tick -> shortest held length there) and `timeOf` adds the extra seconds, so audio, WAV and the
   play cursor agree and a repeated bar holds again. MIDI writes half the tempo for the held span;

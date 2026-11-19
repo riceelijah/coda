@@ -336,6 +336,7 @@ const SVG_ICON = {
   text: '<text x="12" y="16" font-size="10" text-anchor="middle" fill="currentColor" font-family="Georgia, serif" font-style="italic">Abc</text>',
   rehearsal: '<rect x="5" y="4" width="14" height="16" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="12" y="17" font-size="12" text-anchor="middle" fill="currentColor" font-family="Georgia, serif" font-weight="bold">A</text>',
   tempo: '<text x="12" y="16" font-size="10" text-anchor="middle" fill="currentColor" font-family="Georgia, serif">♩=</text>',
+  finger: '<text x="12" y="17" font-size="14" text-anchor="middle" fill="currentColor" font-family="Georgia, serif">1 3</text>',
   none: '<path d="M6 6 L18 18 M18 6 L6 18" stroke="currentColor" stroke-width="1.8"/>',
 };
 const dynIcon = (d) => `<text x="12" y="16" font-size="${d.length > 2 ? 10 : 13}" text-anchor="middle" fill="currentColor" font-family="Georgia, serif" font-style="italic" font-weight="bold">${d}</text>`;
@@ -348,10 +349,10 @@ const PALETTES = [
   ["Dynamics", "mf", [...M.DYNS.map((d) => "d-" + d), "d-none"]],
   ["Slurs and hairpins", "slur", ["n-slur", "n-cresc", "n-dim"]],
   ["Brass effects", "fall", ["n-scoop", "n-fall", "n-doit", "n-gliss"]],
-  ["Text, lyrics and tempo", "text", ["n-lyrics", "n-text", "b-rehearsal", "b-tempo"]],
+  ["Text, fingering, lyrics and tempo", "text", ["n-text", "n-finger", "n-lyrics", "b-rehearsal", "b-tempo"]],
 ];
 const ICON_OF = { "n-slur": "slur", "n-cresc": "cresc", "n-dim": "dim", "n-gliss": "gliss", "n-tremolo": "tremolo", "n-arpeggio": "arpeggio",
-  "n-lyrics": "lyrics", "n-text": "text", "b-rehearsal": "rehearsal", "b-tempo": "tempo", "d-none": "none" };
+  "n-lyrics": "lyrics", "n-text": "text", "n-finger": "finger", "b-rehearsal": "rehearsal", "b-tempo": "tempo", "d-none": "none" };
 // An icon from the score's own music font, cropped to the glyph.
 function glyphIcon(code) {
   const box = document.createElement("div");
@@ -1487,6 +1488,14 @@ async function noteText() {
   if (v === null) return;
   edit((sc) => M.setText(sc.staves[s.staff].bars[s.bar][s.idx], v)); // inside edit, bars is the current layer
 }
+async function fingering() {
+  const s = state.sel, ev = selEvent();
+  if (!ev?.pitches.length) { message("Select a note first", true); return; }
+  const now = ev.pitches.map((p) => p.finger || "-").join(" ").replace(/( -)+$/, "");
+  const v = await ask("Fingering", ev.pitches.length > 1 ? "Fingers from the lowest note up, e.g. 1 3 5 (empty to remove)" : "Finger 0–5, or a change such as 3-1 (empty to remove)", now === "-" ? "" : now);
+  if (v === null) return;
+  edit((sc) => M.setFingers(sc.staves[s.staff].bars[s.bar][s.idx], v));
+}
 async function rehearsal() {
   const b = repBar(), sc = state.score;
   const v = await ask(`Rehearsal mark at bar ${M.barNumber(state.score, b)}`, `Up to ${M.MAX_REHEARSAL} letters or digits (empty to remove)`, sc.measures[b].rehearsal || M.nextRehearsal(sc, b));
@@ -1592,6 +1601,7 @@ const CMD = {
   "b-len": { run: () => barLength() },
   "b-rehearsal": { run: () => rehearsal() },
   "n-text": { run: () => noteText(), on: hasSel },
+  "n-finger": { run: () => fingering(), on: hasSel },
   ...Object.fromEntries(Object.keys(M.JUMPS).map((j) => ["r-" + j, { run: () => barMark("jump", j) }])),
   "r-volta1": { run: () => ending([1]) },
   "r-volta2": { run: () => ending([2]) },

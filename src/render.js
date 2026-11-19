@@ -140,6 +140,13 @@ function makeNote(ev, clef, stem = 0) {
       note.addModifier(new VFl.Articulation(MARK_VF[m]).setPosition(above ? P.ABOVE : P.BELOW), 0);
     }
   }
+  if (!rest) { // fingering (DESIGN §34): above a single note, beside each notehead of a chord
+    const fs = ev.pitches.map((p, k) => [p.finger, k]).filter(([f]) => f);
+    for (const [f, k] of fs) {
+      const m = new VFl.FretHandFinger(f).setPosition(keys.length > 1 ? VFl.ModifierPosition.LEFT : VFl.ModifierPosition.ABOVE);
+      note.addModifier(m, k);
+    }
+  }
   if (ev.dyn) { // dynamics: bold italic text under the note (DESIGN §22)
     const a = new VFl.Annotation(ev.dyn).setFont("Georgia", 14, "bold", "italic");
     note.addModifier(a.setVerticalJustification(VFl.Annotation.VerticalJustify.BOTTOM), 0);

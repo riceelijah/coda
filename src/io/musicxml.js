@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barLen, setBarLen, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER,
 } from "../model.js";
 import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
@@ -53,6 +53,7 @@ function noteXml(ev, p, { chord, staffNo, voice, tieStop, tupStart, tupStop, syl
   if (tieStop) nots.push('<tied type="stop"/>');
   if (tieStart) nots.push('<tied type="start"/>');
   if (slideStop) nots.push(`<slide type="stop" line-type="solid" number="${k + 1}"/>`); // DESIGN §31, numbered per chord note
+  if (p?.finger) nots.push(`<technical><fingering>${p.finger}</fingering></technical>`); // DESIGN §34
   if (p && ev.gliss) nots.push(`<slide type="start" line-type="solid" number="${k + 1}"/>`);
   if (!chord && tupStart) nots.push('<tuplet type="start" bracket="yes"/>');
   if (!chord && tupStop) nots.push('<tuplet type="stop"/>');
@@ -581,6 +582,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   // fermatas and the articulations Coda holds are kept; other markings are counted, not dropped silently
   const marks = [], slur = {};
   let glide = false; // a slide or glissando starts here (DESIGN §31); its stop is the next note
+  let finger = null; // DESIGN §34
   for (const n of kids(el, "notations")) {
     for (const c of n.children) {
       if (c.localName === "fermata") marks.push("fermata");
@@ -605,7 +607,13 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
       } else if (c.localName === "arpeggiate" && !isRest) {
         marks.push("arpeggio");
         if (c.getAttribute("direction") && !kid(el, "chord")) report.count("Arpeggios with arrows (drawn plain)");
-      } else if (c.localName === "technical") report.count(MARKS.technical, c.children.length);
+      } else if (c.localName === "technical") {
+        for (const t of c.children) {
+          if (t.localName !== "fingering") report.count(MARKS.technical);
+          else if (FINGER.test(t.textContent.trim()) && !finger) finger = t.textContent.trim();
+          else report.count("Fingerings Coda can't show (not imported)");
+        }
+      }
       else if (c.localName === "slur") {
         const t = c.getAttribute("type");
         // one slur at a time per staff and layer: the first number opened is followed, others counted
@@ -638,7 +646,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     let alter = parseFloat(txt(p, "alter") || "0");
     if (!Number.isInteger(alter)) { report.count("Microtonal alterations rounded"); alter = Math.round(alter); }
     if (step < 0 || !Number.isFinite(oct)) return;
-    pitch = { step, oct, alter: Math.max(-2, Math.min(2, alter)) };
+    pitch = { step, oct, alter: Math.max(-2, Math.min(2, alter)), ...(finger ? { finger } : {}) };
     if (p.localName === "unpitched") { // a drum (DESIGN §27): its instrument's MIDI note; finishDrums fills in the rest
       const n = drums?.[kid(el, "instrument")?.getAttribute("id")];
       pitch = { step, oct, alter: 0, drum: isDrum(n) ? n : 0 }; // 0: not known yet

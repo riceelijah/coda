@@ -1,7 +1,7 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
 import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides } from "../model.js";
-import { parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
+import { FINGER, parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip, countUnread } from "./util.js";
@@ -40,7 +40,7 @@ const VOICE_NAMES = { Harmony: "Chord symbols (not imported)", Breath: "Breath m
 const MEASURE_READ = new Set([...LAYOUT, ...MEASURE_ONLY]);
 const CHORD_READ = new Set([...LAYOUT, ...GRACE, "durationType", "dots", "Note", "Articulation", "ChordLine", "Lyrics", "Spanner", "Tuplet", "Ornament", "Arpeggio", "TremoloSingleChord", "Tremolo"]);
 const CHORD_NAMES = { Ornament: "Ornaments (trills, mordents, turns) (not imported)", Arpeggio: "Arpeggios (not imported)", TremoloSingleChord: "Tremolos (not imported)", Tremolo: "Tremolos (not imported)", small: "Cue notes (shown and played as normal notes)", staffMove: "Cross-staff notes (shown on their own staff)" };
-const NOTE_READ = new Set([...LAYOUT, "pitch", "tpc", "tpc2", "Spanner", "Tie", "play", "small"]);
+const NOTE_READ = new Set([...LAYOUT, "pitch", "tpc", "tpc2", "Spanner", "Tie", "play", "small", "Fingering"]);
 const DRUM_NOTE_READ = new Set([...NOTE_READ, "head"]); // a drum's notehead comes from the kit (DESIGN §27)
 const NOTE_NAMES = { Fingering: "Fingering (not imported)", headGroup: "Special noteheads (shown as normal)", head: "Special noteheads (shown as normal)", Bend: "Bends (not imported)", fret: "Tablature frets and strings (not imported)", string: "Tablature frets and strings (not imported)" };
 
@@ -326,6 +326,10 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               for (const n of kids(el, "Note")) {
                 const p = notePitch(n);
                 if (!p) continue;
+                for (const f of kids(n, "Fingering")) { // DESIGN §34
+                  const t = cleanText(kid(f, "text")?.textContent, 20);
+                  if (FINGER.test(t) && !p.finger && p.drum === undefined) p.finger = t; else report.count("Fingerings Coda can't show (not imported)");
+                }
                 if (!ev.pitches.some((q) => q.step === p.step && q.oct === p.oct && q.drum === p.drum)) ev.pitches.push(p);
                 const tieSp = kids(n, "Spanner").find((s) => s.getAttribute("type") === "Tie" && kid(s, "next"));
                 if (tieSp || kid(n, "Tie")) ev.tie = true;
@@ -612,7 +616,7 @@ function voiceXml(bar, ties, b, cap, st, spans = {}, syl = new Map()) {
           (t.prev[mm] ? `<Spanner type="Tie"><prev>${t.prev[mm]}</prev></Spanner>` : "") +
           (t.gnext[n] ? `<Spanner type="Glissando"><Glissando><subtype>0</subtype></Glissando><next>${t.gnext[n]}</next></Spanner>` : "") +
           (t.gprev[n] ? `<Spanner type="Glissando"><prev>${t.gprev[n]}</prev></Spanner>` : "");
-        return `<Note>${sp}${pitchXml(p)}</Note>`;
+        return `<Note>${sp}${pitchXml(p)}${p.finger ? `<Fingering><text>${p.finger}</text></Fingering>` : ""}</Note>`;
       }).join("");
       // grace notes (DESIGN §26), as MuseScore writes them: one acciaccatura, or grace16s
       const one = e.grace?.length === 1;

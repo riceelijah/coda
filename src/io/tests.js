@@ -940,6 +940,20 @@ export async function run({ check, eq }) {
     return back.report.warnings.some((w) => /Held notes/.test(w)) || "not counted: " + back.report.warnings;
   });
 
+  await check("fingering: one per chord note, low to high, checked, MusicXML and MuseScore round trips (DESIGN §34)", () => {
+    const s = M.newScore({ bars: 1 });
+    s.staves[0].bars[0] = [{ dur: "w", dots: 0, tie: false, pitches: [{ step: 0, oct: 4, alter: 0 }, { step: 2, oct: 4, alter: 0 }, { step: 4, oct: 4, alter: 0 }] }];
+    const ev = s.staves[0].bars[0][0];
+    if (!M.setFingers(ev, "1 3 5 2") || !M.setFingers(ev, "7")) return "bad input accepted";
+    if (M.setFingers(ev, "1 - 3-1") || ev.pitches.map((p) => p.finger).join() !== "1,,3-1") return "set " + JSON.stringify(ev.pitches);
+    const want = JSON.stringify(ev.pitches);
+    for (const [k, r] of [["MusicXML", importMusicXML(exportMusicXML(s), "f.musicxml")], ["MuseScore", importMSCX(exportMSCX(s), "f.mscx")]]) {
+      if (JSON.stringify(r.score.staves[0].bars[0][0].pitches) !== want) return k + " " + JSON.stringify(r.score.staves[0].bars[0][0].pitches);
+    }
+    M.setFingers(ev, "");
+    return (M.isValidScore(s) && ev.pitches.every((p) => !p.finger)) || "clear";
+  });
+
   await check("drum notes move a line keeping their drum, as a file's own drum map has them (DESIGN §28)", () => {
     const s = M.newScore({ preset: "drums", bars: 1 });
     s.staves[0].bars[0] = [{ dur: "q", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0, drum: 38 }] }]; // snare, at its kit position
