@@ -1211,6 +1211,74 @@ export async function run({ check, eq }) {
     return true;
   });
 
+  await check("Swing: long-short eighths, even triplets, a pickup, ties (DESIGN §39)", () => {
+    const s = M.newScore({ bars: 2 });
+    s.swing = [2, 1];
+    s.staves[0].bars[0] = [ev("8", "C5"), ev("8", "D5"), ev("8", "E5", { tie: true }), ev("8", "E5"), ev("h", "F5")];
+    const tri = (p) => ({ ...ev("8", p), tup: [3, 2] });
+    s.staves[0].bars[1] = [tri("C5"), tri("D5"), tri("E5"), ev("q", "G5", { dots: 1 }), ev("8", "A5"), ev("q", "B5")];
+    if (!M.isValidScore(s)) return "invalid";
+    const n = schedule(s).notes.map((x) => [x.start, x.end].map((v) => Math.round(v)).join("-"));
+    if (!eq(n.slice(0, 4), ["0-320", "320-480", "480-960", "960-1920"])) return "eighths " + n.slice(0, 4); // the tie joins across the swung off-beat
+    if (!eq(n.slice(4, 7), ["1920-2080", "2080-2240", "2240-2400"])) return "triplets " + n.slice(4, 7);
+    if (!eq(n.slice(7, 9), ["2400-3200", "3200-3360"])) return "dotted quarter and eighth " + n.slice(7, 9);
+    const p = M.newScore({ bars: 2 });
+    p.swing = [2, 1];
+    M.setBarLen(p, 0, 240);
+    p.staves[0].bars[0] = [ev("8", "G4")];
+    const pn = schedule(p).notes[0];
+    if (pn.end - pn.start !== 160 || pn.end !== 240) return "pickup " + pn.start + "-" + pn.end;
+    s.measures[0].time = [6, 8]; // compound time stays straight
+    if (schedule(s).notes[1].start !== 240) return "6/8 swung";
+    p.swing = [2, 2];
+    return !M.isValidScore(p) || "2:2 accepted";
+  });
+
+  await check("rit. and accel.: tempo steps, a tempo, the MIDI tempo map agrees (DESIGN §39)", () => {
+    const s = M.newScore({ bars: 4, tempo: 120 });
+    for (let b = 0; b < 4; b++) s.staves[0].bars[b] = [ev("w", "C5")];
+    s.staves[0].bars[3][0].marks = ["fermata"];
+    M.setRamp(s, 2, "rit");
+    const st = M.tempoSteps(s);
+    if (st[1].length !== 1 || st[2].length !== 8 || Math.abs(st[3][7][1] - 90) > 1e-9) return "steps " + st[3].at(-1);
+    const { total, timeOf } = schedule(s);
+    // tempo from the exported file's own map
+    const bytes = exportMIDI(s), tempos = [];
+    let i = 22, tick = 0; // first track's events, after MThd (14) and MTrk header (8)
+    const vlq = () => { let v = 0, b; do { b = bytes[i++]; v = (v << 7) | (b & 0x7f); } while (b & 0x80); return v; };
+    for (;;) {
+      tick += vlq();
+      if (bytes[i] !== 0xff) return "not a meta event";
+      const type = bytes[i + 1]; i += 2; const len = vlq();
+      if (type === 0x51) tempos.push([tick, (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2]]);
+      i += len;
+      if (type === 0x2f) break;
+    }
+    let secs = 0;
+    tempos.forEach(([t, us], k) => { secs += ((Math.min(tempos[k + 1]?.[0] ?? total, total) - t) * us) / 1e6 / 480; });
+    if (Math.abs(secs - timeOf(total)) > 1e-3) return `MIDI ${secs} vs ${timeOf(total)}`;
+    // a tempo straight after: back to 120; an accel. to a faster mark ends at that mark
+    M.setRamp(s, 3, "atempo");
+    if (M.tempoSteps(s)[3][0][1] !== 120) return "a tempo";
+    M.setRamp(s, 3, null); M.setRamp(s, 2, null); M.setRamp(s, 1, "accel"); M.setTempo(s, 2, 150);
+    const a = M.tempoSteps(s)[1];
+    if (a[a.length - 1][1] !== 150 || M.tempoSteps(s)[2][0][1] !== 150) return "accel " + a.at(-1);
+    const e = ev("q", "C4");
+    return (M.setText(e, "rit.") && !e.text) || "typed rit. kept as text";
+  });
+
+  await check("Swing and rit. in MusicXML and MuseScore files (DESIGN §39)", async () => {
+    const s = M.newScore({ bars: 3 });
+    s.swing = [3, 1];
+    M.setRamp(s, 1, "rit"); M.setRamp(s, 2, "atempo");
+    const back = importMusicXML(exportMusicXML(s), "s.musicxml").score;
+    if (String(back.swing) !== "3,1" || back.measures[1].ramp !== "rit" || back.measures[2].ramp !== "atempo") return "MusicXML " + back.swing + " " + back.measures.map((m) => m.ramp);
+    if (back.staves[0].bars.flat().some((e) => e.text)) return "words left as text";
+    const { exportMSCX, importMSCX } = await import("./mscz.js");
+    const m = importMSCX(exportMSCX(s), "s.mscx").score;
+    return (String(m.swing) === "3,1" && m.measures[1].ramp === "rit" && m.measures[2].ramp === "atempo") || "MuseScore " + m.swing + " " + m.measures.map((x) => x.ramp);
+  });
+
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;

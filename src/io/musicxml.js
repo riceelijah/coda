@@ -3,7 +3,7 @@ import {
   attrsAt, barCapacity, barLen, setBarLen, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
   tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER, ORNAMENTS, OTT_SHIFT, staffLines, ottAt, shiftUnderLines, MAX_KIND,
 } from "../model.js";
-import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
+import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, RAMPS, rampOf, okSwing, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
 import { decodeText, parseXml, Report, unzip, countUnread } from "./util.js";
 
@@ -238,6 +238,11 @@ export function exportMusicXML(score) {
       if (bpm && gi === 0) {
         x.push(`<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${bpm}</per-minute></metronome></direction-type><sound tempo="${bpm}"/></direction>`);
       }
+      if (gi === 0 && b === 0 && score.swing) { // DESIGN §39
+        const [f, q] = score.swing;
+        x.push(`<direction placement="above"><direction-type><words>Swing</words></direction-type><sound><swing><first>${f}</first><second>${q}</second><swing-type>eighth</swing-type></swing></sound></direction>`);
+      }
+      if (gi === 0 && score.measures[b].ramp) x.push(`<direction placement="above"><direction-type><words>${RAMPS[score.measures[b].ramp]}</words></direction-type></direction>`);
       if (gi === 0 && score.measures[b].rehearsal) x.push(`<direction placement="above"><direction-type><rehearsal>${esc(score.measures[b].rehearsal)}</rehearsal></direction-type></direction>`);
       if (gi === 0) x.push(...navXml(score.measures[b], true));
       // every layer bar with notes, as voice staff×4 + layer + 1, separated by <backup> (DESIGN §15)
@@ -346,6 +351,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   const partAttrs = []; // per part, per bar: {key, time}; the key comes from the first part that isn't drums
   const rep = []; // per bar: repeat and navigation marks (DESIGN §28)
   const tempi = []; // per bar: the tempo from its start, in quarters per minute (DESIGN §29)
+  let swingSeen; // the first swing read (null: straight)
   let ending = null; // numbers of the ending open in the first part
   const short = []; // per bar: the length of a bar marked implicit (DESIGN §33)
   kids(root, "part").forEach((part, pi) => {
@@ -467,11 +473,26 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
             }
             Object.assign(rep[at] ||= {}, nav);
           }
+          const swingEl = (tag === "sound" ? el : kid(el, "sound"))?.querySelector("swing");
+          if (swingEl) { // DESIGN §39: the first one, for the whole score
+            const w = kid(swingEl, "straight") ? null : [+txt(swingEl, "first"), +txt(swingEl, "second")];
+            const ok = !w || (okSwing(w) && (txt(swingEl, "swing-type") || "eighth") === "eighth");
+            if (!ok) report.count("Swing Coda can't play (not imported)");
+            else if (swingSeen !== undefined) { if (String(w) !== String(swingSeen)) report.count("Swing changes after the start (not imported)"); }
+            else { swingSeen = w; if (w) score.swing = w; }
+          }
           for (const dt of tag === "direction" ? kids(el, "direction-type") : []) {
             for (const c of dt.children) {
               if (nav && ["words", "segno", "coda"].includes(c.localName)) continue;
               if (c.localName === "words") { // text above the staff's next note or rest (DESIGN §30)
-                const sn = +(txt(el, "staff") || 1), t = cleanText(c.textContent, 1e4);
+                const sn = +(txt(el, "staff") || 1), t = cleanText(c.textContent, 1e4), ramp = rampOf(t);
+                if (ramp) { // rit., accel. and a tempo play (DESIGN §39): on the bar
+                  const at = pos.t >= barCapacity(time) ? mi + 1 : mi;
+                  if (at === mi && pos.t > 0) report.count("rit., accel. and a tempo inside a bar moved to its start");
+                  (rep[at] ||= {}).ramp = ramp;
+                  continue;
+                }
+                if (/^swing$/i.test(t) && swingEl) continue; // shown from the swing setting
                 if (t) pendText[sn] = { text: cleanText([pendText[sn]?.text, t].filter(Boolean).join(" "), 1e4), at: pos.t, mi };
                 continue;
               }

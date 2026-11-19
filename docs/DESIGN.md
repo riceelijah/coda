@@ -1532,3 +1532,39 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   drawing; not saved or undone). Notes entered by click, A–G, chord letters or grace notes go
   through `entered()`, which takes the accidental from the concert key and writes the note where
   the part reads it; pitch names in the status bar are the ones shown.
+
+## 39. Playback: click, count-in, loop, cursor, swing, rit. and accel. (Phase 43)
+
+**Play menu.** Play from this bar (Space), Stop, then three ticks: **Click**, **Count-in**, **Loop the
+selected bars**, and **Swing ▸** Off / Light (3:2) / Medium (2:1) / Heavy (3:1). Click, count-in and loop
+are this browser's preferences (localStorage, never the score or undo). Swing is part of the score.
+
+- **Click.** A wood block on every beat, louder on the downbeat; built in `start()` so audio export,
+  MIDI and the sounds a score needs never include it. Beats are dotted quarters in 6/8, 9/8, 12/8.
+- **Count-in.** A bar of clicks at the starting bar's tempo. From a pickup, only the beats it is
+  missing: an eighth pickup in 4/4 hears 1, 2, 3, and comes in on the "and" of 4.
+- **Loop.** With notes selected, the bars from the first to the last selected play over and over
+  (count-in only before the first time). With nothing selected, from the caret to the end. Without
+  Loop, Space plays from the caret as before: selecting two notes for a slur doesn't change Play.
+- **Cursor.** A line moves through the notes during playback, placed from the drawn notes of every
+  staff in the bar (whole-bar rests, drawn mid-bar, are skipped).
+
+**Swing.** `score.swing = [first, second]`. In x/4 and x/2 bars each quarter's two eighths play in that
+ratio; 6/8 and other x/8 bars stay straight. A tuplet group swings as a whole, with its notes even
+inside it. A pickup's beats are counted from its end, so an eighth pickup plays as the short
+off-beat. Ties, slides, ornaments and pedals follow the swung notes; dynamics don't move. "Swing" is
+drawn above bar 1. MusicXML `<sound><swing>` (first, second, eighth); MuseScore `<StaffText><swing
+unit="eighth" ratio="67"/>` (MuseScore itself neither reads nor writes MusicXML's swing). Only the first
+swing in a file is used; a change later on is counted.
+
+**rit., accel., a tempo.** `measures[b].ramp` is "rit", "accel" or "atempo" (Score ▸ Tempo ▸). A ramp runs
+from its bar to the next bar with a tempo, a ramp or a tempo, or to the end, changing tempo every
+eighth note: towards that next tempo when it goes the same way, else by a quarter (rit. to ¾, accel.
+to 4⁄3). A ramp straight after another starts where it ended. `tempoSteps(score)` gives each bar's
+steps; playback and the MIDI conductor track both use it, so the file's tempo map times out the same
+(halved while a fermata holds, §34). Drawn in italics over the first staff, above the line's chord
+symbols, text and octave lines. Typed "rit." text is refused with a pointer to the menu, as for D.C.
+(§28); old saves holding such text still load. MusicXML and MuseScore words and staff text "rit.",
+"rall.", "accel.", "a tempo" (and spelled-out forms) become the bar mark; inside a bar they move to its
+start and are counted. MuseScore gets them as staff text, which it shows but doesn't play.
+ponytail: one ramp shape (linear, eighth steps) and fixed ¾ / 4⁄3 targets.

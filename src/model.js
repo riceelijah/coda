@@ -590,6 +590,7 @@ export function concertView(score) {
 export function setText(ev, s) {
   const t = cleanText(s, MAX_TEXT);
   if (NAV_WORDS.test(t)) return `Use Score ▸ Repeats and endings for "${t}"`;
+  if (RAMP_WORDS.test(t)) return `Use Score ▸ Tempo for "${t}", so it plays`;
   if (t) ev.text = t; else delete ev.text;
   return null;
 }
@@ -1216,6 +1217,55 @@ export function padBars(score) {
 }
 
 // Basic shape check for restored/imported data (untrusted input).
+// ---------- swing and rit./accel. (DESIGN §39) ----------
+// score.swing = [first, second]: each beat's two eighths play in that ratio ([2, 1] is a triplet
+// feel), in x/4 and x/2 time. Off when absent.
+export const SWINGS = [["Off", null], ["Light (3:2)", [3, 2]], ["Medium (2:1)", [2, 1]], ["Heavy (3:1)", [3, 1]]];
+export const okSwing = (w) => Array.isArray(w) && w.length === 2 && w.every((n) => Number.isInteger(n) && n >= 1 && n <= 16) && w[0] > w[1];
+// The simplest ratio for a percentage (MuseScore stores 67 for 2:1).
+export function swingOf(pct) {
+  for (let q = 1; q <= 16; q++) for (let f = q + 1; f <= 16; f++) if (Math.round((100 * f) / (f + q)) === Math.round(pct)) return [f, q];
+  return null;
+}
+// measures[b].ramp: "rit" or "accel" from bar b's start, or "atempo" (back to the marked tempo).
+export const RAMPS = { rit: "rit.", accel: "accel.", atempo: "a tempo" };
+export const RAMP_WORDS = /^(rit\.?|ritard\.?|ritardando|rall\.?|rallentando|accel\.?|accelerando|a tempo)$/i;
+export const rampOf = (t) => !RAMP_WORDS.test(t) ? null : /^a/i.test(t) ? (/^accel/i.test(t) ? "accel" : "atempo") : "rit";
+export function setRamp(score, b, kind) {
+  const m = score.measures[b];
+  if (!m) return "No such bar";
+  if (!kind) delete m.ramp; else if (kind in RAMPS) m.ramp = kind; else return "Unknown tempo change";
+  return null;
+}
+const RAMP_STEP = 240; // the tempo moves every eighth note
+// Tempo through each bar: per bar, [[ticks from its start, quarters per minute]...], the first at 0.
+// A rit. or accel. runs to the next bar with a tempo, rit., accel. or a tempo (or the end): towards
+// that bar's tempo when it goes the same way, else by a quarter. One ramp straight after another
+// starts where it ended.
+export function tempoSteps(score) {
+  const ms = score.measures, lin = [];
+  let t = 0;
+  ms.forEach((_, b) => { lin.push(t); t += barLen(score, b); });
+  const out = ms.map((_, b) => [[0, tempoAt(score, b)]]);
+  let carry = null; // {bar, bpm}: where the last ramp ended
+  ms.forEach((m, b) => {
+    if (m.ramp !== "rit" && m.ramp !== "accel") return;
+    let n = b + 1;
+    while (n < ms.length && !ms[n].tempo && !ms[n].ramp) n++;
+    const dir = m.ramp === "rit" ? -1 : 1, nx = ms[n]?.tempo;
+    const b0 = carry?.bar === b && !m.tempo ? carry.bpm : tempoAt(score, b);
+    const b1 = nx && (nx - b0) * dir > 0 ? nx : b0 * (dir < 0 ? 0.75 : 4 / 3);
+    const a = lin[b], z = n < ms.length ? lin[n] : t, steps = Math.max(1, Math.ceil((z - a) / RAMP_STEP));
+    const bpm = (j) => b0 + ((b1 - b0) * (j + 1)) / steps;
+    for (let k = b; k < n; k++) {
+      out[k] = [];
+      for (let j = Math.floor((lin[k] - a) / RAMP_STEP); a + j * RAMP_STEP < lin[k] + barLen(score, k); j++) out[k].push([Math.max(0, a + j * RAMP_STEP - lin[k]), bpm(j)]);
+    }
+    carry = { bar: n, bpm: b1 };
+  });
+  return out;
+}
+
 export function isValidScore(sc) {
   try {
     if (!sc || !Array.isArray(sc.measures) || !Array.isArray(sc.staves) || !sc.staves.length) return false;
@@ -1223,6 +1273,7 @@ export function isValidScore(sc) {
     if (!n || !sc.measures[0].time) return false;
     if (!sc.measures.every((m) => m.sym === undefined || (m.time && TIME_SYMS[m.sym] && symOk(m.sym, m.time)))) return false;
     if (!sc.measures.every(okRepeats)) return false;
+    if (!sc.measures.every((m) => m.ramp === undefined || m.ramp in RAMPS) || (sc.swing !== undefined && !okSwing(sc.swing))) return false;
     if (!sc.measures.every((m, b) => m.tempo === undefined || (b > 0 && okBpm(m.tempo)))) return false;
     if (!sc.measures.every((m) => m.rehearsal === undefined || okText(m.rehearsal, MAX_REHEARSAL))) return false;
     if (!sc.measures.every((m) => m.len === undefined || (Number.isInteger(m.len) && m.len > 0 && m.len % 60 === 0))) return false;

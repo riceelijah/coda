@@ -240,7 +240,7 @@ export function importMIDI(bytes, fileName = "") {
 // per staff with its name and instrument. MIDI is performance data: marks, spellings and the
 // split into layers are not kept.
 export function exportMIDI(score) {
-  const { notes, barStart, held, pedals } = schedule(score);
+  const { notes, barStart, held, pedals, tempos } = schedule(score);
   const vlq = (n) => { const b = [n & 0x7f]; while ((n >>= 7)) b.unshift((n & 0x7f) | 0x80); return b; };
   const track = (evs) => { // evs: [{tick, bytes}], sorted
     const out = [];
@@ -254,10 +254,9 @@ export function exportMIDI(score) {
 
   const cond = [];
   if (score.title) cond.push({ tick: 0, bytes: meta(0x03, text(score.title)) });
-  let was = null, bpm = 0; // bars play unrolled (DESIGN §28): after a repeat the key, time or tempo may differ with no change marked
+  let was = null; // bars play unrolled (DESIGN §28): after a repeat the key, time or tempo may differ with no change marked
   for (const { bar, tick } of barStart) {
-    const a = attrsAt(score, bar), tp = tempoAt(score, bar);
-    if (tp !== bpm) { const us = Math.round(60000000 / tp); cond.push({ tick, bytes: meta(0x51, [us >> 16, (us >> 8) & 255, us & 255]) }); bpm = tp; }
+    const a = attrsAt(score, bar);
     // a short bar (DESIGN §33) gets a time signature of its own length, e.g. 1/4 for a one-beat pickup
     const len = barLen(score, bar);
     let ts = a.time;
@@ -266,10 +265,15 @@ export function exportMIDI(score) {
     if (!was || a.key !== was.key) cond.push({ tick, bytes: meta(0x59, [a.key & 255, 0]) });
     was = { ...a, ts };
   }
-  // fermatas (DESIGN §34): half the tempo while the held note lasts
-  const tempoAtTick = (t) => { let b = barStart[0]; for (const x of barStart) { if (x.tick > t) break; b = x; } return tempoAt(score, b.bar); };
+  // the tempo map playback uses (DESIGN §29, §39), at half speed while a fermata holds (§34)
   const usOf = (bpm) => { const us = Math.round(60000000 / bpm); return meta(0x51, [us >> 16, (us >> 8) & 255, us & 255]); };
-  for (const { a, z } of held()) cond.push({ tick: a, bytes: usOf(tempoAtTick(a) / 2) }, { tick: z, bytes: usOf(tempoAtTick(z)) });
+  const hs = held(), bpmAt = (t) => { let v = tempos[0]?.bpm || score.tempo || 100; for (const x of tempos) { if (x.tick > t) break; v = x.bpm; } return v; };
+  let last = 0;
+  for (const t of [...new Set([...tempos.map((x) => x.tick), ...hs.flatMap((h) => [h.a, h.z])])].sort((a, b) => a - b)) {
+    const v = bpmAt(t) / (hs.some((h) => t >= h.a && t < h.z) ? 2 : 1);
+    if (!t && v !== bpmAt(t)) { cond.push({ tick: 0, bytes: usOf(bpmAt(0)) }); last = bpmAt(0); } // the marked tempo first, so a downbeat fermata reads back as held
+    if (Math.abs(v - last) > 1e-9) { cond.push({ tick: Math.round(t), bytes: usOf(v) }); last = v; }
+  }
   cond.sort((a, b) => a.tick - b.tick);
   const tracks = [track(cond)];
   score.staves.forEach((st, s) => {
@@ -277,9 +281,9 @@ export function exportMIDI(score) {
     const evs = [{ tick: 0, bytes: meta(0x03, text(st.name || `Staff ${s + 1}`)) }, ...(perc ? [] : [{ tick: 0, bytes: [0xc0 | ch, st.program ?? 0] }])];
     const ons = [];
     for (const n of notes) if (n.staff === s) {
-      ons.push({ tick: n.start, on: 1, bytes: [0x90 | ch, n.midi, n.vel ?? 80] }, { tick: n.end, on: 0, bytes: [0x80 | ch, n.midi, 0] });
+      ons.push({ tick: Math.round(n.start), on: 1, bytes: [0x90 | ch, n.midi, n.vel ?? 80] }, { tick: Math.round(n.end), on: 0, bytes: [0x80 | ch, n.midi, 0] }); // swung ticks need not be whole
     }
-    for (const [a, z] of pedals[s]) ons.push({ tick: a, on: 1, bytes: [0xb0 | ch, 64, 127] }, { tick: z, on: 0, bytes: [0xb0 | ch, 64, 0] }); // DESIGN §37
+    for (const [a, z] of pedals[s].map((u) => u.map(Math.round))) ons.push({ tick: a, on: 1, bytes: [0xb0 | ch, 64, 127] }, { tick: z, on: 0, bytes: [0xb0 | ch, 64, 0] }); // DESIGN §37
     ons.sort((a, b) => a.tick - b.tick || a.on - b.on); // note-offs first at equal ticks
     tracks.push(track(evs.concat(ons)));
   });

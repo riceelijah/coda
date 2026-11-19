@@ -1,7 +1,7 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
 import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides, melismas, ONE_NOTE, OTT_SHIFT, MAX_KIND } from "../model.js";
-import { FINGER, ORNAMENTS, parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
+import { FINGER, ORNAMENTS, parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, RAMPS, rampOf, swingOf, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip, countUnread } from "./util.js";
@@ -122,6 +122,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   const short = []; // per bar: the length a short bar has, from the first staff
   const mark = (b, k, v) => { (rep[b] ||= {})[k] = v; };
   const tempi = []; // per bar: tempo from its start (DESIGN §29)
+  let swingSeen; // the first swing read (null: straight)
   kids(sc, "Staff").forEach((stEl, si) => {
     const d = decl[si] || { name: "", brace: false };
     const staff = { name: d.name, clef: null, brace: d.brace, bars: [], ...(d.program !== undefined ? { program: d.program } : {}),
@@ -269,7 +270,19 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             break;
           }
           case "StaffText": case "SystemText": case "Expression": case "PlayTechAnnotation": { // text above the next note (DESIGN §30)
-            const t = cleanText(kid(el, "text")?.textContent, 1e4);
+            const t = cleanText(kid(el, "text")?.textContent, 1e4), sw = kid(el, "swing"), ramp = rampOf(t);
+            if (sw) { // DESIGN §39: <swing unit ratio>, the first for the whole score
+              const w = sw.getAttribute("unit") === "eighth" ? swingOf(+sw.getAttribute("ratio")) : null, straight = +sw.getAttribute("ratio") <= 50;
+              if (!w && !straight) report.count("Swing Coda can't play (not imported)");
+              else if (swingSeen !== undefined) { if (String(w) !== String(swingSeen)) report.count("Swing changes after the start (not imported)"); }
+              else { swingSeen = w; if (w) score.swing = w; }
+              if (/^swing$/i.test(t || "")) break;
+            }
+            if (ramp) { // rit., accel. and a tempo play: on the bar
+              if (cur > 0) report.count("rit., accel. and a tempo inside a bar moved to its start");
+              mark(mi, "ramp", ramp);
+              break;
+            }
             if (t) pendText[vi] = cleanText([pendText[vi], t].filter(Boolean).join(" "), 1e4);
             break;
           }
@@ -546,6 +559,8 @@ export function exportMSCX(score) {
           if (s === 0 && m.rehearsal) x.push(`<RehearsalMark><text>${esc(m.rehearsal)}</text></RehearsalMark>`); // DESIGN §30
           if (s === 0) x.push(...navStart(score.measures, b));
           const bpm = b === 0 ? score.tempo : m.tempo; // tempo changes (DESIGN §29)
+          if (s === 0 && b === 0 && score.swing) x.push(`<StaffText><swing unit="eighth" ratio="${Math.round((100 * score.swing[0]) / (score.swing[0] + score.swing[1]))}"/><text>Swing</text></StaffText>`); // DESIGN §39
+          if (s === 0 && m.ramp) x.push(`<StaffText><text>${RAMPS[m.ramp]}</text></StaffText>`);
           if (bpm && s === 0) x.push(`<Tempo><tempo>${bpm / 60}</tempo><followText>1</followText><text><sym>metNoteQuarterUp</sym> = ${bpm}</text></Tempo>`);
         }
         const bar = layers[v][b];

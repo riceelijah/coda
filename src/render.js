@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, barLen, barCapacity, barNumber, partGroups, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, ONE_NOTE, melismas, OTT_SHIFT, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
+import { attrsAt, barLen, barCapacity, barNumber, partGroups, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, ONE_NOTE, melismas, OTT_SHIFT, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic, RAMPS } from "./model.js";
 import { DRUMS } from "./drums.js";
 
 const VF = () => Vex.Flow;
@@ -286,6 +286,23 @@ export function render(score, container, sel, opts = {}) {
     } catch (e) { console.error(e); }
   }))));
 
+  // rit., accel. and a tempo (DESIGN §39): over the bar's first staff, above its notes, chord symbols and text
+  score.measures.forEach((m, b) => {
+    const c = m.ramp && cells.find((x) => x.bar === b && x.staff === 0);
+    if (!c) return;
+    // the line's chord row and text can reach over from the bar before, so clear them across the line
+    const line = cells.filter((x) => x.sys === c.sys && x.staff === 0).map((x) => x.bar);
+    const refs = (noteRef[0] || []).flatMap((l) => l?.[b] || []), evs = allLayers(score.staves[0]).flatMap((bars) => line.flatMap((k) => bars[k]));
+    let y = Math.min(c.yTop - 10, ...refs.map((r) => (r.note.getBoundingBox()?.y ?? Infinity) - 8));
+    if (chordRow[c.sys + ":0"] !== undefined) y = Math.min(y, chordRow[c.sys + ":0"] - 20);
+    if (evs.some((e) => e.text)) y -= 16;
+    if (floor["top:" + c.sys + ":0"] !== undefined) y = Math.min(y, floor["top:" + c.sys + ":0"] - 6); // above an octave line
+    const ctx = ctxs[c.sys];
+    ctx.save(); ctx.setFont("Georgia", 13, "normal", "italic");
+    ctx.fillText(RAMPS[m.ramp], c.notes[0]?.x - 4 || c.x0 + 8, y);
+    ctx.restore();
+  });
+
   // Slurs and hairpins (DESIGN §23)
   // Lyrics: a line per verse for each staff and system, below its notes and dynamics (DESIGN §24).
   // lyricY["sys:staff"] = verse 1's baseline, for the app's lyric box.
@@ -487,7 +504,8 @@ function repeatMarks(VFl, score, b, s, stave) {
   const upOf = (i) => {
     const top = BOTTOM_LINE[clefAt(st, i)] + 8;
     const hi = Math.max(top, ...allLayers(st).flatMap((bars) => bars[i].flatMap((e) => [...e.pitches, ...(e.grace || [])].map(diatonic))));
-    const text = allLayers(st).some((bars) => bars[i].some((e) => e.text)) ? 18 : 0; // above text on its notes (DESIGN §30)
+    const has = (k) => allLayers(st).some((bars) => bars[i].some((e) => e[k]));
+    const text = (has("text") ? 18 : 0) + (has("harm") ? 24 : 0); // above text and chord symbols on its notes (DESIGN §30, §38)
     return -Math.max(0, (hi - top - 2) * 5) - text;
   };
   const up = upOf(b);
@@ -509,9 +527,10 @@ function repeatMarks(VFl, score, b, s, stave) {
   if (m.jump) stave.setRepetitionType(VFl.Repetition.type[REP_VF[m.jump]], up);
   // tempo changes (DESIGN §29); bar 1's tempo is shown only when the score has changes
   const bpm = b ? m.tempo : ms.some((x) => x.tempo) && score.tempo;
-  if (bpm) stave.setTempo({ duration: "q", bpm }, up - (m.volta ? 42 : 0)).getModifiers().at(-1).setShiftX(dx + (m.segno ? 35 : m.coda ? 60 : 10));
+  const name = !b && score.swing ? "Swing" : ""; // DESIGN §39
+  if (bpm || name) stave.setTempo({ ...(name && { name }), ...(bpm && { duration: "q", bpm }) }, up - (m.volta ? 42 : 0)).getModifiers().at(-1).setShiftX(dx + (m.segno ? 35 : m.coda ? 60 : 10));
   // a rehearsal mark (DESIGN §30): boxed, at the barline, above all of these
-  if (m.rehearsal) stave.setSection(m.rehearsal, up - lift - (m.segno || m.coda || bpm ? 26 : m.volta ? 6 : 0), -6, 13);
+  if (m.rehearsal) stave.setSection(m.rehearsal, up - lift - (m.segno || m.coda || bpm || name ? 26 : m.volta ? 6 : 0), -6, 13);
 }
 
 // Is (b, i) selected? sel may carry `end` for a range (DESIGN §11.7).

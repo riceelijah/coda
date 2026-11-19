@@ -1,6 +1,6 @@
 // Coda playback: sampled General MIDI sounds fetched on demand, with a triangle-wave fallback.
 // See docs/DESIGN.md §7 and §13.3.
-import { attrsAt, barCapacity, barLen, eventTicks, midi as midiOf, keyAt, keyAlter, diatonic, fromDiatonic, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder, tempoAt, staffLines, ottAt } from "./model.js";
+import { attrsAt, barCapacity, barLen, eventTicks, midi as midiOf, keyAt, keyAlter, diatonic, fromDiatonic, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder, tempoSteps, staffLines, ottAt, tupletRuns } from "./model.js";
 import { drumHit } from "./drumsynth.js";
 import { GM } from "./gm.js";
 import { getSound } from "./usersounds.js";
@@ -23,15 +23,24 @@ export function schedule(score, from = 0) {
     t += barLen(score, b);
   }
   const total = t;
-  // seconds at an unrolled tick, each bar at its own tempo (DESIGN §29)
+  // seconds at an unrolled tick, each bar at its own tempo (DESIGN §29), stepping through a rit. or accel. (§39)
+  const steps = tempoSteps(score);
+  const inBar = (bar, u) => { // seconds from the bar's start to u ticks into it (before it or past it: its first or last tempo)
+    const st = steps[bar];
+    if (u <= 0) return (u * 60) / st[0][1] / PPQ;
+    let sum = 0;
+    for (let i = 0; i < st.length && st[i][0] < u; i++) sum += ((Math.min(u, st[i + 1]?.[0] ?? Infinity) - st[i][0]) * 60) / st[i][1] / PPQ;
+    return sum;
+  };
   const secs = [0];
-  barStart.forEach(({ bar, tick }, k) => secs.push(secs[k] + ((barStart[k + 1]?.tick ?? total) - tick) * 60 / tempoAt(score, bar) / PPQ));
+  barStart.forEach(({ bar, tick }, k) => secs.push(secs[k] + inBar(bar, (barStart[k + 1]?.tick ?? total) - tick)));
   const plain = (x) => {
     let k = 0;
     while (k + 1 < barStart.length && barStart[k + 1].tick <= x) k++;
     if (!barStart.length) return x * 60 / (score.tempo || 100) / PPQ;
-    return secs[k] + (x - barStart[k].tick) * 60 / tempoAt(score, barStart[k].bar) / PPQ;
+    return secs[k] + inBar(barStart[k].bar, x - barStart[k].tick);
   };
+  const tempos = barStart.flatMap(({ bar, tick }) => steps[bar].map(([u, bpm]) => ({ tick: tick + u, bpm }))); // for MIDI
   // fermatas (DESIGN §34): a held note or rest takes twice as long, for every part. Seconds
   // stretch, ticks don't. fermatas: unrolled start tick -> its length (the shortest held there).
   const fermatas = new Map();
@@ -53,7 +62,7 @@ export function schedule(score, from = 0) {
     return t + h.before + (x >= h.z ? h.extra : t - h.pa);
   };
   const held = () => { timeOf(0); return holds; };
-  const notes = [];
+  const notes = [], swing = score.swing;
   const linVel = dynamics(score, 0);
   const lines = score.staves.map((_, si) => staffLines(score, si)); // octave lines and pedal marks (DESIGN §37)
   score.staves.forEach((st, si) => allLayers(st).forEach((bars) => {
@@ -63,8 +72,14 @@ export function schedule(score, from = 0) {
       let at = tick;
       if (k && barStart[k - 1].bar !== bar - 1) { open.clear(); slide = null; } // after a repeat or jump: a tie or slide doesn't carry over
       const velAt = (si, a) => linVel(si, lin[bar] + a - tick);
+      const runOf = new Map(); // a tuplet's events -> the group's [start, end], for swing
+      if (swing) {
+        let t = tick;
+        const starts = bars[bar].map((e) => { const a = t; t += eventTicks(e); return a; });
+        for (const r of tupletRuns(bars[bar])) { const i = r.idx[r.idx.length - 1], g = [starts[r.idx[0]], starts[i] + eventTicks(bars[bar][i])]; for (const j of r.idx) runOf.set(bars[bar][j], g); }
+      }
       for (const ev of bars[bar]) {
-        const len = eventTicks(ev);
+        const len = eventTicks(ev), n0 = notes.length, run = runOf.get(ev);
         if (ev.marks?.includes("fermata")) fermatas.set(at, Math.min(fermatas.get(at) ?? Infinity, len));
         // a drum staff plays its drum numbers on the kit, program -1 (DESIGN §27)
         const perc = isPerc(st), nextOpen = new Map(), tr = st.transpose?.[0] || 0, base = { vel: velAt(si, at), program: perc ? -1 : st.program ?? 0, staff: si, ...(st.sound && !perc ? { sound: st.sound } : {}) };
@@ -78,7 +93,7 @@ export function schedule(score, from = 0) {
         ev.pitches.forEach((p, k) => {
           const m = midi(p) + tr; // sounding pitch (DESIGN §21)
           let n = open.get(m);
-          if (n && n.end === at && !g) n.end = at + len;
+          if (n && n.end === at && !g) { n.end = at + len; n.te = run; }
           else {
             n = { start: on, end: at + len, midi: m, ...base };
             notes.push(n);
@@ -99,10 +114,23 @@ export function schedule(score, from = 0) {
         slide = ev.gliss && !perc ? { from: made, t0: Math.max(at + len / 2, at + len - PPQ), end: at + len } : null;
         open.clear();
         nextOpen.forEach((v, k) => open.set(k, v));
+        if (run) for (let i = n0; i < notes.length; i++) notes[i].ts = notes[i].te = run;
         at += len;
       }
     });
   }));
+  const sw = swing ? swingWarp(score, barStart, total) : null;
+  if (sw) { // ticks become swung ticks; a tuplet group swings as a whole, its notes evenly inside it
+    const w = (x, r) => (r && x > r[0] && x < r[1] ? sw(r[0]) + ((x - r[0]) * (sw(r[1]) - sw(r[0]))) / (r[1] - r[0]) : sw(x));
+    for (const n of notes) {
+      n.start = w(n.start, n.ts); n.end = w(n.end, n.te);
+      for (const gl of n.glide || []) { gl.t0 = sw(gl.t0); gl.t1 = sw(gl.t1); }
+    }
+    const f = [...fermatas];
+    fermatas.clear();
+    for (const [a, l] of f) fermatas.set(sw(a), sw(a + l) - sw(a));
+  }
+  for (const n of notes) { delete n.ts; delete n.te; }
   const pedals = lines.map(({ ped }) => { // unrolled: [down, up] per staff
     const out = [];
     for (const r of ped) {
@@ -117,14 +145,30 @@ export function schedule(score, from = 0) {
         wz = z;
       }
     }
-    return out.sort((p, q) => p[0] - q[0]);
+    return out.sort((p, q) => p[0] - q[0]).map((u) => (sw ? u.map(sw) : u));
   });
   // the pedal lets every note struck under it ring until it lifts: ring is for audio, MIDI writes the pedal
   for (const n of notes) {
     const q = pedals[n.staff].find(([a, z]) => n.start >= a && n.start < z);
     if (q && q[1] > n.end) n.ring = q[1];
   }
-  return { notes: notes.filter((n) => n.midi >= 0 && n.midi <= 127), barStart, total, timeOf, held, pedals }; // octave lines can take a note off the keyboard
+  return { notes: notes.filter((n) => n.midi >= 0 && n.midi <= 127), barStart, total, timeOf, held, pedals, tempos }; // octave lines can take a note off the keyboard
+}
+
+// Swing (DESIGN §39): an unrolled tick -> where it plays. Each quarter's first half stretches to the
+// swing ratio's share of the beat and its second half shrinks, in x/4 and x/2 bars; a pickup's
+// beats are counted from its end. Beats themselves don't move.
+function swingWarp(score, barStart, total) {
+  const share = (PPQ * score.swing[0]) / (score.swing[0] + score.swing[1]), h = PPQ / 2;
+  return (x) => {
+    if (x < 0 || x >= total || !barStart.length) return x;
+    let k = 0;
+    while (k + 1 < barStart.length && barStart[k + 1].tick <= x) k++;
+    const { bar, tick } = barStart[k], { off } = beatsOf(score, bar), { time } = attrsAt(score, bar);
+    if (time[1] > 4) return x;
+    const u = (x - tick + off) % PPQ;
+    return x - u + (u <= h ? (u * share) / h : share + ((u - h) * (PPQ - share)) / h);
+  };
 }
 
 // How marks sound (DESIGN §34). `fresh`: this event's newly struck notes, low to high (not tied

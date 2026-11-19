@@ -352,7 +352,15 @@
             <button role="menuitem" id="c-alto">Alto</button>
             <button role="menuitem" id="c-tenor">Tenor</button>
           </div></div>
-        <button role="menuitem" id="b-tempo">Tempo from this bar…</button>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Tempo<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitem" id="b-tempo">Tempo from this bar…</button>
+            <hr>
+            <button role="menuitem" id="t-rit">rit. (slowing) from this bar</button>
+            <button role="menuitem" id="t-accel">accel. (speeding up) from this bar</button>
+            <button role="menuitem" id="t-atempo">a tempo here</button>
+            <button role="menuitem" id="t-none">Remove rit., accel. or a tempo</button>
+          </div></div>
         <button role="menuitem" id="b-transpose">Transpose…</button>
         <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Repeats and endings<span aria-hidden="true">▸</span></button>
           <div class="mlist submenu" role="menu">
@@ -393,6 +401,14 @@
         <button role="menuitemcheckbox" aria-checked="false" id="p-click">Click</button>
         <button role="menuitemcheckbox" aria-checked="false" id="p-countIn">Count-in</button>
         <button role="menuitemcheckbox" aria-checked="false" id="p-loop">Loop the selected bars</button>
+        <hr>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Swing<span aria-hidden="true">▸</span></button>
+          <div class="mlist submenu" role="menu">
+            <button role="menuitemradio" aria-checked="false" id="sw-0">Off</button>
+            <button role="menuitemradio" aria-checked="false" id="sw-1">Light (3:2)</button>
+            <button role="menuitemradio" aria-checked="false" id="sw-2">Medium (2:1)</button>
+            <button role="menuitemradio" aria-checked="false" id="sw-3">Heavy (3:1)</button>
+          </div></div>
       </div></div>
     <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Help</button>
       <div class="mlist" role="menu" hidden>

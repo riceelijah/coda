@@ -162,6 +162,7 @@ function selEvent() {
 function refresh() {
   fixRefs();
   const sc = state.score;
+  showSwing();
   $("title").textContent = sc.title || "Untitled";
   $("composer").textContent = sc.composer || "";
   $("tempo").value = sc.tempo;
@@ -1610,6 +1611,19 @@ async function tempoFrom() {
   if (!M.okBpm(bpm)) { message("A tempo is a whole number from 20 to 400", true); return; }
   if (edit((s) => M.setTempo(s, b, bpm))) message(`Tempo ${bpm} from bar ${M.barNumber(state.score, b)}`);
 }
+// rit., accel. and a tempo on a bar; swing for the score (DESIGN §39)
+function setRamp(kind) {
+  const b = repBar();
+  if (edit((sc) => M.setRamp(sc, b, kind))) message(kind ? `${M.RAMPS[kind]} from bar ${M.barNumber(state.score, b)}` : "Removed");
+}
+function setSwing(k) {
+  const w = M.SWINGS[k][1];
+  if (edit((sc) => { if (w) sc.swing = w; else delete sc.swing; return null; })) message(w ? `Swing ${w[0]}:${w[1]}: eighth notes play long-short` : "Swing off: eighth notes play evenly");
+}
+function showSwing() {
+  M.SWINGS.forEach(([, w], k) => { const on = String(w) === String(state.score.swing ?? null); $("sw-" + k).setAttribute("aria-checked", on); $("sw-" + k).dataset.label ||= $("sw-" + k).textContent; $("sw-" + k).textContent = (on ? "✓ " : "") + $("sw-" + k).dataset.label; });
+}
+
 // short bars (DESIGN §33): a pickup, or the bar that completes it at the end
 async function barLength() {
   const b = repBar(), sc = state.score, { time } = M.attrsAt(sc, b), beat = 1920 / time[1];
@@ -1709,6 +1723,9 @@ const CMD = {
   "r-repEnd": { run: () => barMark("repEnd", 2) },
   "r-times": { run: () => repeatTimes() },
   "b-tempo": { run: () => tempoFrom() },
+  ...Object.fromEntries(["rit", "accel", "atempo"].map((k) => ["t-" + k, { run: () => setRamp(k) }])),
+  "t-none": { run: () => setRamp(null), on: () => !!state.score.measures[repBar()]?.ramp },
+  ...Object.fromEntries(M.SWINGS.map((_, k) => ["sw-" + k, { run: () => setSwing(k) }])),
   "b-len": { run: () => barLength() },
   "b-rehearsal": { run: () => rehearsal() },
   "n-text": { run: () => noteText(), on: hasSel },
