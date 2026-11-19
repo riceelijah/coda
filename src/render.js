@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel } from "./model.js";
+import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
 import { DRUMS } from "./drums.js";
 
 const VF = () => Vex.Flow;
@@ -331,13 +331,25 @@ function repeatMarks(VFl, score, b, s, stave) {
   if (m.repStart) stave.setBegBarType(VFl.Barline.type.REPEAT_BEGIN);
   if (m.repEnd) stave.setEndBarType(VFl.Barline.type.REPEAT_END);
   if (s !== 0) return;
+  // above the bar's highest note: 5 units per step past two steps over the top line
+  const st = score.staves[0];
+  const upOf = (i) => {
+    const top = BOTTOM_LINE[clefAt(st, i)] + 8;
+    const hi = Math.max(top, ...allLayers(st).flatMap((bars) => bars[i].flatMap((e) => [...e.pitches, ...(e.grace || [])].map(diatonic))));
+    return -Math.max(0, (hi - top - 2) * 5);
+  };
+  const up = upOf(b);
   if (m.volta) {
     // a bracket carried onto a new line goes on as a plain line, without its number
     const T = VFl.Volta.type, begins = !sameVolta(ms[b - 1]?.volta, m.volta), ends = !sameVolta(ms[b + 1]?.volta, m.volta);
-    stave.setVoltaType(begins && ends ? T.BEGIN_END : begins ? T.BEGIN : ends ? T.END : T.MID, begins ? voltaLabel(m.volta) : "", 0);
+    let a = b, z = b; // one bracket, one height
+    while (sameVolta(ms[a - 1]?.volta, m.volta)) a--;
+    while (sameVolta(ms[z + 1]?.volta, m.volta)) z++;
+    const vUp = Math.min(...ms.slice(a, z + 1).map((_, k) => upOf(a + k)));
+    stave.setVoltaType(begins && ends ? T.BEGIN_END : begins ? T.BEGIN : ends ? T.END : T.MID, begins ? voltaLabel(m.volta) : "", vUp);
   }
-  for (const key of ["segno", "coda", "toCoda", "fine"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]]);
-  if (m.jump) stave.setRepetitionType(VFl.Repetition.type[REP_VF[m.jump]]);
+  for (const key of ["segno", "coda", "toCoda", "fine"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]], up);
+  if (m.jump) stave.setRepetitionType(VFl.Repetition.type[REP_VF[m.jump]], up);
 }
 
 // Is (b, i) selected? sel may carry `end` for a range (DESIGN §11.7).

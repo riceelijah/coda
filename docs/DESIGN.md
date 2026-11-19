@@ -1265,7 +1265,9 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   it (the bracket splits); deleting a bar drops its marks.
 - **Playing order** (`playOrder(score)`, pure, shared by playback, audio and MIDI export): a
   section runs from the last ‖: (or the bar after the last :‖ or run of endings, or bar 1) to :‖
-  and plays `repEnd` times; on pass n only endings holding n play. D.C. goes to bar 1, D.S. to the
+  and plays `repEnd` times; a :‖ inside an ending also goes back while a higher-numbered ending in
+  the same run is still to come (so `[1. :‖] [2. :‖] [3.]` reaches the 3rd); on pass n only
+  endings holding n play. D.C. goes to bar 1, D.S. to the
   first segno (bar 1 if none); each jump is taken once, repeats are not taken again after it, and
   each run of endings then plays only its last ending. "al Fine" stops after a Fine bar; "al Coda"
   goes from a To Coda bar to the next coda sign (ignored if there is none). Plain D.C./D.S. play to
@@ -1279,8 +1281,11 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   BEGIN_END; the number only where the bracket begins) and `Repetition` (segno, coda, To Coda,
   Fine, D.C./D.S. variants) on the top staff. A :‖ played more than twice gets "×n" above it.
 - **Editing:** Score ▸ Repeats and endings. Marks go on the caret bar (the selected note's bar);
-  choosing one that's there removes it. An ending covers the selected bars; "Ending with
-  numbers…" takes "1, 2" or "1-3"; "End repeat, play several times…" asks for the count.
+  choosing one that's there removes it. An ending covers the selected range of bars; "Ending with
+  numbers…" takes "1, 2" or "1-3"; "End repeat, play several times…" asks for the count. These and
+  the part transposition's "Other…" ask in a small in-page dialog (`#ask`), not `window.prompt`,
+  which some embedded browsers block. Marks are drawn above the bar's highest note; one ending
+  bracket keeps one height.
 - **MusicXML:** `<barline>` left/right with `<repeat direction times>` and `<ending number type>`
   (start; stop before a repeat or at the end; discontinue otherwise), in every part. Segno and
   coda are `<direction>`s with `<segno/>`/`<coda/>`; To Coda, Fine and jumps are `<words>` with
@@ -1312,8 +1317,8 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   | Part names, order, grand staff, drum staff | Score ▸ Parts and instruments… |
   | Any transposition | Parts dialog ▸ Other… (semitones, steps) |
   | Instrument (GM program), drum per note | Parts dialog; Notes ▸ Drum sound… |
+  | Drum note away from its kit position | Notes ▸ Drum note up / down a line (same sound) |
   | Title, composer, tempo | Score ▸ Title, composer, tempo… |
 
-  Exception: a drum note away from its kit position (a file's own drum map) can't be placed
-  by hand; Drum sound… always uses the kit position. The model has one tempo per score, so
-  tempo changes are not held at all (importers keep the first and count the rest).
+  The model has one tempo per score, so tempo changes are not held at all (importers keep the
+  first and count the rest).

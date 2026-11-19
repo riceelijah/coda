@@ -315,4 +315,3 @@ DESIGN.md before work starts.
   round trip is tested. A real MuseScore 3/4 file with endings and D.S. al Coda would confirm them.
 - **`.musx` repeats:** only the measure's forward/backward repeat flags are read (unverified, no
   sample has them); endings and text repeats are counted.
-- **Drum notes away from their kit position** (from a file's own drum map) can't be placed by hand.

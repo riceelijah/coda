@@ -687,7 +687,7 @@ export async function run({ check, eq }) {
       if (!eq(M.parseTime(v)?.time, want)) bad.push(v);
     for (const v of ["7/6", "0/4", "4/", "x", "100/4"]) if (M.parseTime(v)) bad.push("accepted " + v);
     if (!eq(M.parseTuplet("7:4"), [7, 4]) || !eq(M.parseTuplet("9,8"), [9, 8])) bad.push("tuplet");
-    for (const v of ["3:3", "1:2", "7", "20:4"]) if (M.parseTuplet(v)) bad.push("accepted tuplet " + v);
+    for (const v of ["3:3", "0:2", "7", "100:4"]) if (M.parseTuplet(v)) bad.push("accepted tuplet " + v);
     if (!eq(M.parseTranspose("-2, -1"), [-2, -1]) || !eq(M.parseTranspose("+5,3"), [5, 3]) || M.parseTranspose("40,1")) bad.push("transpose");
     // a 7/8 bar takes seven eighths
     const s = M.newScore({ bars: 1, ...M.parseTime("7/8") });
@@ -726,6 +726,10 @@ export async function run({ check, eq }) {
     const v = M.newScore({ bars: 4 });
     M.setVolta(v, 1, 1, [1, 2]); M.setBarMark(v, 1, "repEnd", 3); M.setVolta(v, 2, 2, [3]);
     if (order(v) !== "1 2 1 2 1 3 4") bad.push("endings 1,2 / 3: " + order(v));
+    // plain :| in the 1st and 2nd endings still reaches the 3rd
+    const e3 = M.newScore({ bars: 5 });
+    M.setVolta(e3, 1, 1, [1]); M.setBarMark(e3, 1, "repEnd", 2); M.setVolta(e3, 2, 2, [2]); M.setBarMark(e3, 2, "repEnd", 2); M.setVolta(e3, 3, 3, [3]);
+    if (order(e3) !== "1 2 1 3 1 4 5") bad.push("endings 1 / 2 / 3: " + order(e3));
     // D.C. after endings plays only the last ending; a missing coda sign ignores To Coda
     M.setBarMark(v, 3, "jump", "dcCoda"); M.setBarMark(v, 0, "toCoda", true);
     if (order(v) !== "1 2 1 2 1 3 4 1 3 4") bad.push("D.C. al Coda, last ending, no coda: " + order(v));
@@ -773,6 +777,19 @@ export async function run({ check, eq }) {
     const y = importMusicXML(xml, "w.xml");
     if (marks(y.score) !== JSON.stringify([{ segno: true }, { fine: true }, { jump: "dsFine", volta: [1] }].map((r) => Object.fromEntries(Object.entries(r).sort())))) return "words " + marks(y.score);
     return JSON.stringify(y.report).includes("Text directions") || "unknown words not counted";
+  });
+
+  await check("drum notes move a line keeping their drum, as a file's own drum map has them (DESIGN §28)", () => {
+    const s = M.newScore({ preset: "drums", bars: 1 });
+    s.staves[0].bars[0] = [{ dur: "q", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0, drum: 38 }] }]; // snare, at its kit position
+    const was = s.staves[0].bars[0][0].pitches[0];
+    if (M.moveDrumNote(s, 0, 0, 0, 1)) return "refused";
+    const p = s.staves[0].bars[0][0].pitches[0];
+    if (p.drum !== 38 || M.diatonic(p) !== M.diatonic(was) + 1 || !M.isValidScore(s)) return JSON.stringify(p);
+    if (!M.moveDrumNote(s, 0, 0, 0, 40)) return "moved off the staff";
+    const t = M.newScore({ bars: 1 });
+    t.staves[0].bars[0] = [{ dur: "q", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0 }] }];
+    return !!M.moveDrumNote(t, 0, 0, 0, 1) || "moved a pitched note";
   });
 
   // Later phases: MIDI, MuseScore, musx.

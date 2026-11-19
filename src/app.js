@@ -923,6 +923,13 @@ function onKey(e) {
   if (handled) e.preventDefault();
 }
 
+// Drum notes up or down a line or space, same drum (DESIGN §28).
+function moveDrums(steps) {
+  const s = state.sel, r = range().filter((p) => lb(s.staff)[p.bar][p.idx].pitches.length);
+  if (!r.length) { message("Rests have no drum", true); return; }
+  edit((sc) => { for (const p of r) { const e = M.moveDrumNote(sc, s.staff, p.bar, p.idx, steps); if (e) return e; } return null; });
+}
+
 function transposeSel(steps) {
   const s = state.sel;
   if (!s) { message("Select a note first", true); return; }
@@ -1056,9 +1063,9 @@ function partRow({ from, kind, name, value, tr = "0,0" }) {
   trs.value = tr;
   trs.dataset.was = tr;
   // any interval a file can carry can be typed here too (DESIGN §21)
-  trs.onchange = () => {
+  trs.onchange = async () => {
     if (trs.value !== "?") { trs.dataset.was = trs.value; return; }
-    const t = M.parseTranspose(prompt("Transposition from written to sounding: semitones, letter steps (B♭ is -2, -1; F is -7, -4)", trs.dataset.was.replace(",", ", ")) ?? "");
+    const t = M.parseTranspose(await ask("Transposition", "Semitones, letter steps from written to sounding (B♭: -2, -1; F: -7, -4)", trs.dataset.was.replace(",", ", ")) ?? "");
     const v = t ? t.join(",") : trs.dataset.was;
     if (t && ![...trs.options].some((o) => o.value === v)) trs.insertBefore(other(v), trs.lastChild);
     trs.value = trs.dataset.was = v;
@@ -1286,24 +1293,36 @@ function closeAttrs() {
   }
 }
 
-// ---------- repeats and navigation (DESIGN §28) ----------
-// Marks go on the caret bar; an ending covers the selected bars (or the caret bar).
+// A one-line question in a dialog (window.prompt is blocked in some embedded browsers).
+// Resolves to the text, or null when cancelled.
+function ask(head, label, value) {
+  const d = $("ask");
+  $("ask-head").textContent = head; $("ask-label").textContent = label; $("ask-in").value = value;
+  d.returnValue = "";
+  d.showModal();
+  $("ask-in").select();
+  return new Promise((res) => d.addEventListener("close", () => res(d.returnValue === "ok" ? $("ask-in").value : null), { once: true }));
+}
 
-const repBar = () => (state.sel ? state.sel.bar : state.caret.bar);
+// ---------- repeats and navigation (DESIGN §28) ----------
+// Marks go on the caret bar, like the rest of the Score menu; an ending covers the selected range
+// of bars (or the caret bar).
+
+const repBar = () => state.caret.bar;
 function barMark(k, val) {
   const b = repBar(), m = state.score.measures[b], on = val === true ? !m[k] : m[k] !== val;
   if (edit((sc) => M.setBarMark(sc, b, k, on && val))) message(`${on ? "" : "Removed: "}${k === "jump" ? M.JUMPS[val] : document.getElementById("r-" + k).textContent} at bar ${b + 1}`);
 }
-function repeatTimes() {
-  const b = repBar(), v = prompt(`Bar ${b + 1} ends a repeat. How many times does the section play? (2–${M.MAX_REPEAT})`, state.score.measures[b].repEnd || 3);
+async function repeatTimes() {
+  const b = repBar(), v = await ask(`End repeat at bar ${b + 1}`, `Times the section plays (2–${M.MAX_REPEAT})`, state.score.measures[b].repEnd || 3);
   if (v === null) return;
   if (!(+v >= 2 && +v <= M.MAX_REPEAT && Number.isInteger(+v))) { message(`Play a section 2 to ${M.MAX_REPEAT} times`, true); return; }
   edit((sc) => M.setBarMark(sc, b, "repEnd", +v));
 }
-function ending(nums) {
-  const a = repBar(), z = state.sel && state.selEnd ? state.selEnd.bar : a;
+async function ending(nums) {
+  const a = state.sel && state.selEnd ? state.sel.bar : repBar(), z = state.sel && state.selEnd ? state.selEnd.bar : a;
   if (nums === "?") {
-    const v = prompt("Ending numbers, such as 1, 2 or 1-3", state.score.measures[a].volta?.join(", ") || "1, 2");
+    const v = await ask("Ending", "Numbers, such as 1, 2 or 1-3", state.score.measures[a].volta?.join(", ") || "1, 2");
     if (v === null) return;
     nums = M.parseVolta(v);
     if (!nums) { message(`Type ending numbers from 1 to ${M.MAX_REPEAT}, such as 1, 2`, true); return; }
@@ -1356,6 +1375,7 @@ const CMD = {
   "n-layer4": { run: () => setLayer(3) },
   "n-tuplet": { run: () => openTuplet() },
   "n-drum": { run: () => openDrum(), on: () => hasSel() && M.isPerc(state.score.staves[state.sel.staff]) },
+  ...Object.fromEntries([["n-drumup", 1], ["n-drumdown", -1]].map(([id, d]) => [id, { run: () => moveDrums(d), on: () => hasSel() && M.isPerc(state.score.staves[state.sel.staff]) }])),
   "n-untup": { run: () => tupletSel(null), on: () => range().some((p) => lb(state.sel.staff)[p.bar][p.idx].tup) },
   ...Object.fromEntries(M.CLEFS.map((c) => ["c-" + c, { run: () => edit((sc) => M.setClef(sc, state.caret.staff, state.caret.bar, c)) }])),
   "b-addbar": { run: () => edit((sc) => { M.addMeasure(sc, state.caret.bar); state.caret.bar++; return null; }) },
@@ -1756,6 +1776,7 @@ function init() {
   $("tuplet-cancel").onclick = () => $("tuplet").close("cancel");
   $("drum").addEventListener("close", closeDrum);
   $("drum-cancel").onclick = () => $("drum").close("cancel");
+  $("ask-cancel").onclick = () => $("ask").close("cancel");
   setupMenus();
   { // compressed audio: whatever this browser can record, or no item at all
     const t = recordType();

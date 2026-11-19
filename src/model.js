@@ -109,11 +109,12 @@ export function parseTime(v) {
   const m = /^(\d{1,2})\s*\/\s*(\d{1,2})$/.exec(v);
   return m && +m[1] >= 1 && [1, 2, 4, 8, 16, 32].includes(+m[2]) ? { time: [+m[1], +m[2]] } : null;
 }
-// A tuplet typed as "7:4" (or "7,4"): [actual, normal], 2–16 each and not equal, else null.
+// A tuplet typed as "5:3" (or "5,3"): [actual, normal], 1–99 each and not equal, else null.
+// Whether it fits a note value is tupletOk's call, as on import.
 export function parseTuplet(v) {
   const m = /^\s*(\d{1,2})\s*[:,]\s*(\d{1,2})\s*$/.exec(String(v));
   const t = m && [+m[1], +m[2]];
-  return t && t.every((x) => x >= 2 && x <= 16) && t[0] !== t[1] ? t : null;
+  return t && t.every((x) => x >= 1) && t[0] !== t[1] ? t : null;
 }
 // A transposition typed as "-2, -1" (semitones, letter steps, written -> sounding), else null.
 export function parseTranspose(v) {
@@ -386,6 +387,18 @@ export function drumReport(report, r, guessed) {
   if (r.merged) report.count("Notes that became the same drum in a chord (merged)", r.merged);
   if (r.clefs) report.count("Clef changes on drum staves (not imported)", r.clefs);
   if (r.transposed) report.count("Transpositions on drum staves (not imported)");
+}
+
+// Drum staves (DESIGN §28): move every note of event i a line or space, keeping its drum, as a
+// file's own drum map places them. Stays within the ledger range entry allows.
+export function moveDrumNote(score, s, b, i, steps) {
+  const ev = score.staves[s].bars[b][i];
+  if (!isPerc(score.staves[s])) return "Only drum notes move without changing sound";
+  if (!ev.pitches.length) return "Rests have no drum";
+  const np = ev.pitches.map((p) => ({ ...fromDiatonic(diatonic(p) + steps), alter: 0, drum: p.drum }));
+  if (np.some((p) => diatonic(p) < BOTTOM_LINE.percussion - 10 || diatonic(p) > BOTTOM_LINE.percussion + 18)) return "No room further that way";
+  ev.pitches = sortPitches(np);
+  return null;
 }
 
 // Drum staves (DESIGN §27): the top note of event i becomes drum n, at that drum's position.
@@ -709,8 +722,8 @@ export function parseVolta(s) {
 export const voltaLabel = (v) => v.join(", ") + ".";
 
 // The bars in the order they play (DESIGN §28). A section runs from the last |: (or the bar
-// after the last :| or ending, or bar 1) to :|, and plays repEnd times; on pass n only the
-// endings holding n play. D.C./D.S. are taken once, go to bar 1 / the first segno (bar 1 if
+// after the last :| or ending, or bar 1) to :|, and plays repEnd times, or, at a :| inside an
+// ending, until the highest ending number has come; on pass n only the endings holding n play. D.C./D.S. are taken once, go to bar 1 / the first segno (bar 1 if
 // there is none), and repeats are not taken again after them: each run of endings plays only its
 // last one. "al Fine" then stops at the end of a Fine bar; "al Coda" goes from a To Coda bar to
 // the next coda sign (ignored when there is none). Capped, so a broken file can't loop forever.
@@ -719,6 +732,8 @@ export function playOrder(score) {
   const maxV = (m) => m.volta[m.volta.length - 1];
   // after a jump: is bar i in the last ending of its run of endings?
   const lastEnding = (i) => { let j = i; while (j + 1 < n && ms[j + 1].volta) j++; return ms.slice(i, j + 1).every((m) => maxV(m) <= maxV(ms[i])); };
+  // the highest ending number in the run of endings around bar i
+  const runMax = (i) => { let a = i, z = i; while (a > 0 && ms[a - 1].volta) a--; while (z + 1 < n && ms[z + 1].volta) z++; return Math.max(...ms.slice(a, z + 1).map(maxV)); };
   let b = 0, start = 0, pass = 1, back = false, jumped = null;
   while (b < n && out.length < cap) {
     const m = ms[b];
@@ -736,7 +751,8 @@ export function playOrder(score) {
       if (c >= 0) { b = c; continue; }
     }
     if (m.repEnd && !jumped) {
-      if (pass < m.repEnd) { pass++; b = start; back = true; continue; }
+      // an ending's :| goes back while a later ending is still to come ([1. :|] [2. :|] [3.])
+      if (pass < m.repEnd || (m.volta && pass < runMax(b))) { pass++; b = start; back = true; continue; }
       start = b + 1; pass = 1;
     }
     if (m.jump && !jumped) {

@@ -241,6 +241,8 @@
         <button role="menuitem" id="n-dsharp">Double sharp</button>
         <button role="menuitem" id="n-dflat">Double flat</button>
         <button role="menuitem" id="n-drum">Drum sound…</button>
+        <button role="menuitem" id="n-drumup">Drum note up a line (same sound)</button>
+        <button role="menuitem" id="n-drumdown">Drum note down a line (same sound)</button>
         <hr>
         <button role="menuitem" id="n-fermata">Fermata</button>
         <button role="menuitem" id="n-staccato">Staccato</button>
@@ -481,6 +483,17 @@
     <div class="actions">
       <button class="btn" type="button" id="drum-cancel">Cancel</button>
       <button class="btn primary" value="ok">Apply</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="ask">
+  <form method="dialog">
+    <h2 id="ask-head"></h2>
+    <div class="form"><label for="ask-in" id="ask-label"></label><input id="ask-in" autocomplete="off"></div>
+    <div class="actions">
+      <button class="btn" type="button" id="ask-cancel">Cancel</button>
+      <button class="btn primary" value="ok">OK</button>
     </div>
   </form>
 </dialog>

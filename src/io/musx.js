@@ -217,8 +217,9 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
       if (!shown || shown[0] !== time[0] || shown[1] !== time[1]) report.count("Time signatures shown differently from the real meter (real meter used)");
       else sym = symFor(time, { cut: has(m, "abbrvTime"), common: has(m, "abbrvTime") });
     } else sym = symFor(time, { cut: has(tso, "timeSigDoAbrvCut"), common: has(tso, "timeSigDoAbrvCommon") });
-    // repeat barlines (DESIGN §28): the measure's own flags. ponytail: written from musxdom's field
-    // names, no sample file has repeats yet; endings and repeat text are only counted for now.
+    // repeat barlines (DESIGN §28): the measure's own flags, named as in musxdom's field populators
+    // (no sample here has repeats). ponytail: endings (repeatEndingStart) and text repeats
+    // (textRepeatAssign) are only counted; read them when a real file with them turns up.
     if (has(m, "barEnding")) report.count("Repeat endings (not read from .musx yet)");
     if (has(m, "txtRepeats")) report.count("D.C., D.S., segno and coda (not read from .musx yet)");
     return { cmper: m.getAttribute("cmper"), rep: { ...(has(m, "forRepBar") ? { repStart: true } : {}), ...(has(m, "bacRepBar") ? { repEnd: 2 } : {}) },
