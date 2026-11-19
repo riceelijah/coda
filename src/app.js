@@ -168,7 +168,7 @@ function refresh() {
   $("tempo").value = sc.tempo;
   document.title = (sc.title || "Untitled") + " — Coda";
   const layered = state.layer > 0 || sc.staves.some((st) => st.layers);
-  state.hit = render(state.concert ? M.concertView(sc) : sc, $("systems"), state.sel && { ...state.sel, end: state.selEnd }, { layer: state.layer, dim: layered && !printing });
+  state.hit = render(state.concert ? M.concertView(sc) : sc, $("systems"), state.sel && { ...state.sel, end: state.selEnd }, { layer: state.layer, dim: layered && !printing, mmr: !!playOpts.mmr });
   if (state.hit.errors.length) message(state.hit.errors.join("; "), true);
   $("b-undo").disabled = !state.undo.length;
   $("b-redo").disabled = !state.redo.length;
@@ -194,9 +194,12 @@ function place(el, rect) {
   Object.assign(el.style, { display: "block", left: rect.left + "px", top: rect.top + "px", width: rect.width + "px", height: rect.height + "px" });
 }
 
+// Does a hit cell draw this bar? A multi-bar rest's cell draws a run of bars (DESIGN §41).
+const holds = (c, bar) => c.bar <= bar && bar <= (c.last ?? c.bar);
+
 function drawCaret() {
   if (!state.hit) return;
-  const c = state.hit.cells.filter((c) => c.staff === state.caret.staff && c.bar === state.caret.bar);
+  const c = state.hit.cells.filter((c) => c.staff === state.caret.staff && holds(c, state.caret.bar));
   place($("caret-hl"), cellRect(c));
 }
 
@@ -544,7 +547,7 @@ function openLyrics() {
 
 function placeLyricBox() {
   const box = $("lyric-box"), s = state.sel, ev = selEvent();
-  const cell = state.hit.cells.find((c) => c.staff === s.staff && c.bar === s.bar);
+  const cell = state.hit.cells.find((c) => c.staff === s.staff && holds(c, s.bar));
   const n = cell?.notes.find((q) => q.idx === s.idx);
   if (!cell || !n) { box.hidden = true; return; }
   const r = cell.svg.getBoundingClientRect(), sheet = $("sheet").getBoundingClientRect(), k = r.width / SHEET_W;
@@ -1083,10 +1086,11 @@ function togglePlay() { isPlaying() ? stopPlay() : startPlay(); }
 
 // Playback options (DESIGN §39): preferences of this browser, not part of the score.
 const PLAY_OPTS = ["click", "countIn", "loop"];
+const optBtn = (k) => $(k === "mmr" ? "m-mmr" : "p-" + k);
 const playOpts = (() => { try { return JSON.parse(localStorage.getItem(PREFIX + "play")) || {}; } catch { return {}; } })();
 function showPlayOpts() {
-  for (const k of PLAY_OPTS) {
-    const b = $("p-" + k);
+  for (const k of [...PLAY_OPTS, "mmr"]) {
+    const b = optBtn(k);
     b.dataset.label ||= b.textContent;
     b.setAttribute("aria-checked", !!playOpts[k]);
     b.textContent = (playOpts[k] ? "✓ " : "") + b.dataset.label;
@@ -1108,7 +1112,11 @@ function playRange() {
 
 // Where a tick in a bar is drawn: [tick, x] at each note of the bar, on every staff (DESIGN §39).
 function barPoints(bar) {
-  const cells = state.hit.cells.filter((c) => c.bar === bar), pts = [];
+  const cells = state.hit.cells.filter((c) => holds(c, bar)).map((c) => { // a bar's share of a multi-bar rest
+    if (!c.last) return c;
+    const w = (c.x1 - c.x0) / (c.last - c.bar + 1), x0 = c.x0 + w * (bar - c.bar);
+    return { ...c, x0, x1: x0 + w };
+  }), pts = [];
   for (const c of cells) {
     const evs = lb(c.staff)[bar] || [];
     let t = 0;
@@ -1726,6 +1734,12 @@ const CMD = {
   "p-play": { run: () => startPlay() },
   "p-stop": { run: () => stopPlay() },
   ...Object.fromEntries(PLAY_OPTS.map((k) => ["p-" + k, { run: () => togglePlayOpt(k) }])),
+  "m-mmr": { run: () => { // a view preference of this browser (DESIGN §41)
+    playOpts.mmr = !playOpts.mmr;
+    try { localStorage.setItem(PREFIX + "play", JSON.stringify(playOpts)); } catch { /* blocked */ }
+    showPlayOpts();
+    refresh();
+  } },
   "m-concert": { run: () => { // a view, not part of the score or undo (DESIGN §38)
     state.concert = !state.concert;
     $("m-concert").setAttribute("aria-checked", state.concert);

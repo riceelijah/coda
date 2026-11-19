@@ -1582,3 +1582,38 @@ Ceilings:
   refused like any ratio that can't be whole ticks, and imported septuplets keep their written
   lengths and are counted (§14.4). Changing the tick grid would change every stored pickup length.
 - A dotted 64th left alone leaves 15 ticks no rest can fill, as a double-dotted 32nd already does.
+
+## 41. Layout: breaks, beams, cue notes, multi-bar rests, go to bar (Phase 45)
+
+Entry points stay short: Edit ▸ Go to bar…, Score ▸ Breaks ▸ (line, page, none), Notes ▸ Beams and cue
+notes ▸ (break beam, join beam, automatic, cue note), the same four in the palette's "Beams and cue
+notes" group, and View ▸ Multi-bar rests.
+
+**Breaks.** `measures[b].brk` is "line" or "page" (`setBreak`, refused on bar 1; deleting bar 1 clears
+it from the new first bar). `layout()` starts a new system at the bar; a system ended by a break is not
+stretched when it fills under 60%. On screen a small label marks the break; print starts a page break
+on a new page (`break-before: page`). The browser pane can't preview print pages, so page breaks were
+checked by label and print CSS only. MusicXML `<print new-system|new-page>`, MuseScore `LayoutBreak`
+(section breaks become line breaks and are counted). Breaks are read only from Coda's own MusicXML:
+another program's line starts are its layout, not the composer's.
+
+**Beams.** `ev.beam` is "break" (start a new beam here) or "join" (beam to the previous note).
+`beamGroups(bar, time, auto)` copies VexFlow's `generateBeams`, quirks included (a rest splits a
+group; a group holding a quarter or longer is dropped), then applies the overrides, so the page and
+the files agree. A test checks it against VexFlow on samples and 400 random bars. MusicXML writes
+`<beam>` on every bar (a reader that sees any takes them literally); MuseScore `BeamMode` only where
+overridden. Imported begin/continue/end become overrides only where they differ from automatic.
+
+**Cue notes.** `ev.cue` draws the notes small (VexFlow's grace note class) and silent: playback, MIDI
+and audio skip them. MusicXML `<cue/>` and `size="cue"`, MuseScore `<small>` with `<play>0</play>`.
+ponytail: cue rests stay full size; VexFlow has no small rest.
+
+**Multi-bar rests.** A view preference of this browser (stored with the Play options, not in the
+score). `restRuns(score)` merges two or more bars that have no notes in any staff or layer, are full
+length and carry no end-of-bar mark (repeat end, jump, Fine, To Coda, ending); only the run's first bar
+may carry marks (key, time, tempo, rehearsal, break) and no later bar may change clef. The run draws
+as one `MultiMeasureRest` with its count; its hit cell carries `last`, so the caret, lyric box and
+play cursor (which sweeps each bar's share) find it. Typing a note into a run splits it on redraw.
+
+**Go to bar.** Edit ▸ Go to bar… moves the caret and scrolls to the bar number as printed (pickups
+counted as in §11.4).

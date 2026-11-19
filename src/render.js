@@ -78,8 +78,28 @@ export function nameIndent(score) {
   return n.length ? Math.min(170, 30 + Math.max(...n.map((x) => textW(x.name)))) : 0;
 }
 
+// Multi-bar rests (DESIGN §41): runs of 2+ bars with no notes in any staff or layer, as first -> last.
+// Only the first bar may carry marks; a bar with an end-of-bar mark, a short length or a clef change
+// inside the run is never merged.
+const END_MARKS = ["repEnd", "jump", "fine", "toCoda", "volta"];
+export function restRuns(score) {
+  const runs = new Map(), n = score.measures.length;
+  const empty = (b) => score.staves.every((st) => allLayers(st).every((bars) => !bars[b]?.length)) &&
+    barLen(score, b) === barCapacity(attrsAt(score, b).time) && !END_MARKS.some((k) => score.measures[b][k] !== undefined);
+  const plain = (b) => !Object.keys(score.measures[b]).length && !score.staves.some((st) => st.clefs?.[b]);
+  for (let b = 0; b < n; b++) {
+    if (!empty(b)) continue;
+    let e = b;
+    while (e + 1 < n && plain(e + 1) && empty(e + 1)) e++;
+    if (e > b) runs.set(b, e);
+    b = e;
+  }
+  return runs;
+}
+
 // Greedy system breaking + justification (DESIGN §5.2).
-export function layout(score) {
+export function layout(score, mmr = false) {
+  const runs = mmr ? restRuns(score) : new Map();
   const full = SHEET_W - LEFT_PAD - RIGHT_PAD, ind = nameIndent(score);
   const room = () => (systems.length ? full : full - ind); // the first system is indented for part names
   const systems = [];
@@ -87,7 +107,8 @@ export function layout(score) {
   for (let b = 0; b < score.measures.length; b++) {
     const first = !cur;
     const pre = prefixW(widestKey(score, b));
-    const w = minWidth(score, b) + (first ? pre : changeW(score, b)) + (score.staves.some((st) => st.clefs?.[b + 1]) ? 24 : 0);
+    const L = runs.get(b) ?? b;
+    const w = Math.max(minWidth(score, b), L > b ? 160 : 0) + (first ? pre : changeW(score, b)) + (score.staves.some((st) => st.clefs?.[L + 1]) ? 24 : 0);
     const avail = room(), brk = b > 0 && score.measures[b].brk; // DESIGN §41
     if (cur && (cur.used + w > avail || brk)) {
       if (brk) cur.forced = true;
@@ -96,10 +117,12 @@ export function layout(score) {
       b--; // re-measure this bar as the first of a new system
       continue;
     }
-    if (!cur) cur = { bars: [], widths: [], used: 0, page: b > 0 && score.measures[b].brk === "page", line: b > 0 && score.measures[b].brk === "line" };
+    if (!cur) cur = { bars: [], last: [], widths: [], used: 0, page: b > 0 && score.measures[b].brk === "page", line: b > 0 && score.measures[b].brk === "line" };
     cur.bars.push(b);
+    cur.last.push(L);
     cur.widths.push(w);
     cur.used += w;
+    b = L;
   }
   if (cur) systems.push(cur);
   systems.forEach((sys, i) => {
@@ -175,7 +198,7 @@ function makeNote(ev, clef, stem = 0) {
 export function render(score, container, sel, opts = {}) {
   const VFl = VF();
   container.textContent = "";
-  const systems = layout(score);
+  const systems = layout(score, opts.mmr);
   const cells = [];
   const errors = [];
   const noteRef = score.staves.map((st) => allLayers(st).map(() => [])); // [staff][layer][bar][idx] = {note, sys}
@@ -552,6 +575,7 @@ function inSel(sel, b, i) {
 }
 
 function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { layer = 0, dim = false } = {}) {
+  const L = (k) => sys.last[k];
   const VFl = VF();
   // 1. staves
   const staves = []; // [k][s]
@@ -567,16 +591,16 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
       if (firstInSys && si > 0 && s === 0) stave.setMeasure(barNumber(score, b)); // bar number (DESIGN §11.4)
       if (!firstInSys && m.key !== undefined && !isPerc(st)) stave.addKeySignature(keyName(key), keyName(keyAt(score, s, b - 1)));
       // a clef change is drawn small before the barline it starts at, also as the courtesy clef at a line end
-      if (st.clefs?.[b + 1]) stave.setEndClef(st.clefs[b + 1], "small");
+      if (st.clefs?.[L(k) + 1]) stave.setEndClef(st.clefs[L(k) + 1], "small");
       if (b === 0 || (m.time && b > 0)) stave.addTimeSignature(timeLabel(at));
-      if (b === lastBar) stave.setEndBarType(VFl.Barline.type.END);
+      if (L(k) === lastBar) stave.setEndBarType(VFl.Barline.type.END);
       repeatMarks(VFl, score, b, s, stave);
       return stave;
     });
     const start = Math.max(...row.map((r) => r.getNoteStartX()));
     row.forEach((r) => r.setNoteStartX(start));
     staves.push(row);
-    sys.x.push({ bar: b, x0: x, x1: x + sys.widths[k] });
+    sys.x.push({ bar: b, last: L(k), x0: x, x1: x + sys.widths[k] });
     x += sys.widths[k];
   });
   staves.forEach((row) => row.forEach((st) => st.setContext(ctx).draw()));
@@ -613,6 +637,15 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
 
   // 3. notes, per bar across all staves
   sys.bars.forEach((b, k) => {
+    if (L(k) > b) { // a multi-bar rest: one cell spanning the run
+      score.staves.forEach((st, s) => {
+        const stave = staves[k][s];
+        new VFl.MultiMeasureRest(L(k) - b + 1, { number_glyph_point: 32 }).setStave(stave).setContext(ctx).draw();
+        cells.push({ sys: si, staff: s, bar: b, last: L(k), svg, x0: stave.getX(), x1: stave.getX() + stave.getWidth(),
+          yTop: stave.getYForLine(0), yBottom: stave.getYForLine(4), spacing: stave.getSpacingBetweenLines(), notes: [] });
+      });
+      return;
+    }
     const { time } = attrsAt(score, b);
     const voices = [], beams = [], tuplets = [], drawn = [];
     const fmt = new VFl.Formatter();

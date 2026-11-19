@@ -1382,6 +1382,18 @@ export async function run({ check, eq }) {
     return !s.measures[0].brk || "bar 1 kept a break";
   });
 
+  await check("multi-bar rests: runs of empty bars, broken by marks and clef changes", async () => {
+    const { restRuns, layout } = await import("../render.js");
+    const s = M.newScore({ bars: 10 });
+    s.staves[0].bars[3] = [ev("w", "C5")];
+    s.measures[6].rehearsal = "B"; // starts a new run
+    s.measures[8].repEnd = 2; // never merged
+    const runs = JSON.stringify([...restRuns(s)]);
+    if (runs !== "[[0,2],[4,5],[6,7]]") return "runs " + runs;
+    const sys = layout(s, true).flatMap((x) => x.bars.map((b, k) => [b, x.last[k]]));
+    return JSON.stringify(sys) === "[[0,2],[3,3],[4,5],[6,7],[8,8],[9,9]]" || "layout " + JSON.stringify(sys);
+  });
+
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;
