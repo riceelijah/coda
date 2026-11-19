@@ -860,6 +860,24 @@ export async function run({ check, eq }) {
     return (/Chord symbols/.test(b) && /Ornaments/.test(b)) || "MuseScore: " + b;
   });
 
+  await check("short bars: a pickup holds its length, plays short, numbers from 0, round trips MusicXML and MuseScore (DESIGN §33)", () => {
+    const s = M.newScore({ bars: 3, time: [3, 4] });
+    const q = (st) => ({ dur: "q", dots: 0, tie: false, pitches: [{ step: st, oct: 4, alter: 0 }] });
+    if (M.setBarLen(s, 0, 480) || M.barLen(s, 0) !== 480 || M.barNumber(s, 1) !== 1) return "set";
+    if (M.appendEvent(s, 0, 0, q(4)) || !M.appendEvent(s, 0, 0, q(4))) return "a one-beat bar took two beats";
+    if (!M.setBarLen(s, 0, 240)) return "shortened below its notes";
+    M.setBarLen(s, 2, 960);
+    if (M.setAttrs(s, 0, { time: [2, 4] }) || s.measures[2].len !== undefined || s.measures[0].len !== 480) return "time change: " + JSON.stringify(s.measures);
+    M.setAttrs(s, 0, { time: [3, 4] });
+    const t = schedule(s).barStart.map((x) => x.tick);
+    if (t.join() !== "0,480,1920") return "starts " + t;
+    const x = exportMusicXML(s);
+    if (!x.includes('<measure number="0" implicit="yes">') || !x.includes('<measure number="2">')) return "MusicXML numbers";
+    if (importMusicXML(x).score.measures[0].len !== 480 || importMSCX(exportMSCX(s), "p.mscx").score.measures[0].len !== 480) return "round trip";
+    const old = M.newScore({ bars: 1 }); s.measures[1].len = 1920;
+    return (M.isValidScore(old) && !M.isValidScore(s)) || "validation";
+  });
+
   await check("drum notes move a line keeping their drum, as a file's own drum map has them (DESIGN §28)", () => {
     const s = M.newScore({ preset: "drums", bars: 1 });
     s.staves[0].bars[0] = [{ dur: "q", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0, drum: 38 }] }]; // snare, at its kit position

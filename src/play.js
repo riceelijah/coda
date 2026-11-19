@@ -1,6 +1,6 @@
 // Coda playback: sampled General MIDI sounds fetched on demand, with a triangle-wave fallback.
 // See docs/DESIGN.md §7 and §13.3.
-import { attrsAt, barCapacity, eventTicks, midi as midiOf, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder, tempoAt } from "./model.js";
+import { attrsAt, barCapacity, barLen, eventTicks, midi as midiOf, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder, tempoAt } from "./model.js";
 import { drumHit } from "./drumsynth.js";
 import { GM } from "./gm.js";
 import { getSound } from "./usersounds.js";
@@ -16,11 +16,11 @@ export function schedule(score, from = 0) {
   if (!order.includes(from)) seq = score.measures.map((_, b) => b).slice(from);
   const barStart = [], lin = []; // lin[b]: bar b's start in the score as written, for dynamics
   let t = 0;
-  score.measures.forEach((_, b) => { lin.push(t); t += barCapacity(attrsAt(score, b).time); });
+  score.measures.forEach((_, b) => { lin.push(t); t += barLen(score, b); });
   t = 0;
   for (const b of seq) {
     barStart.push({ bar: b, tick: t });
-    t += barCapacity(attrsAt(score, b).time);
+    t += barLen(score, b);
   }
   const total = t;
   // seconds at an unrolled tick, each bar at its own tempo (DESIGN §29)
@@ -85,7 +85,7 @@ export function schedule(score, from = 0) {
 function dynamics(score, from) {
   const starts = [];
   let t = 0;
-  score.measures.forEach((m, b) => { starts.push(t); t += barCapacity(attrsAt(score, b).time); });
+  score.measures.forEach((m, b) => { starts.push(t); t += barLen(score, b); });
   const off = starts[from] || 0, byStaff = [];
   for (const g of partGroups(score)) {
     const levels = [], accents = new Map(), ramps = [];

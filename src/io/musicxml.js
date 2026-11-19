@@ -1,6 +1,6 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
-  attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
+  attrsAt, barCapacity, barLen, setBarLen, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
   tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides,
 } from "../model.js";
 import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
@@ -94,7 +94,7 @@ export function completeTuplet(bar, cap) {
 
 // Notes for one staff in one bar. Returns {xml, ticks written}.
 function barXml(score, s, b, staffNo, voice, v, syl, pid) {
-  const cap = barCapacity(attrsAt(score, b).time);
+  const cap = barLen(score, b);
   const bars = layerBars(score.staves[s], v);
   const bar = completeTuplet(bars[b], cap);
   if (!bar.length) return { xml: restXml(cap, staffNo, voice, true), ticks: cap };
@@ -153,10 +153,11 @@ export function exportMusicXML(score) {
     x.push(`<score-part id="${id}"><part-name>${esc(score.staves[g[0]].name || "")}</part-name>${inst}</score-part>`);
   });
   x.push("</part-list>");
+  const pick = !!score.measures[0].len;
   groups.forEach((g, gi) => {
     x.push(`<part id="P${gi + 1}">`);
     score.measures.forEach((m, b) => {
-      x.push(`<measure number="${b + 1}">`);
+      x.push(pick && !b ? `<measure number="0" implicit="yes">` : `<measure number="${pick ? b : b + 1}">`);
       x.push(leftBarline(score.measures, b));
       const a = attrsAt(score, b);
       const attrs = [];
@@ -292,6 +293,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   const rep = []; // per bar: repeat and navigation marks (DESIGN §28)
   const tempi = []; // per bar: the tempo from its start, in quarters per minute (DESIGN §29)
   let ending = null; // numbers of the ending open in the first part
+  const short = []; // per bar: the length of a bar marked implicit (DESIGN §33)
   kids(root, "part").forEach((part, pi) => {
     const measures = kids(part, "measure");
     let nStaves = 1;
@@ -334,7 +336,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
       for (const el of meas.children) {
         const tag = el.localName;
         if (tag === "attributes") {
-          countUnread(report, el, ATTR_READ);
+          countUnread(report, el, ATTR_READ, { directive: "Text directions in key and time (not imported)" });
           for (const ms of kids(el, "measure-style")) countUnread(report, ms, new Set(["multiple-rest"]), { slash: "Slash notation (not imported)", "beat-repeat": "Repeat-beat signs (not imported)", "measure-repeat": "Repeat-bar signs (not imported)" });
           const d = txt(el, "divisions");
           if (d) divisions = +d || 1;
@@ -379,7 +381,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           if (pi > 0) continue; // every part repeats the same barlines: the first part's are used
           const right = el.getAttribute("location") !== "left" && el.getAttribute("location") !== "middle";
           const r = kid(el, "repeat"), e = kid(el, "ending");
-          countUnread(report, el, BARLINE_READ, { fermata: "Fermatas on barlines (not imported)", "wavy-line": "Trill lines (not imported)" });
+          countUnread(report, el, BARLINE_READ, { fermata: "Fermatas on barlines (not imported)", "wavy-line": "Trill lines (not imported)", segno: "Segno and coda signs on barlines (not imported)", coda: "Segno and coda signs on barlines (not imported)" });
           if (!["regular", "light-heavy", "heavy-light", null].includes(txt(el, "bar-style"))) report.count("Double and special barlines (shown as plain)");
           if (r?.getAttribute("direction") === "forward") (rep[right ? mi + 1 : mi] ||= {}).repStart = true;
           else if (r?.getAttribute("direction") === "backward" && (right || mi > 0)) {
@@ -470,6 +472,8 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
         }
       }
       for (const k in pendGrace) report.count("Grace notes with no note after them in the bar (not imported)", pendGrace[k].notes.length);
+      if (meas.getAttribute("implicit") === "yes") // a pickup or a split bar: as long as its longest staff (DESIGN §33)
+        short[mi] = Math.max(short[mi] || 0, ...staves.flatMap((st) => allLayers(st).map((bars) => barTicks(bars[mi] || []))));
       // the file's key is written; the score keeps concert pitch
       attrs.push({ key: tr ? wrapKey(key + fifthsOf(tr[0], tr[1])) : key, time: [...time], sym });
     });
@@ -495,6 +499,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   padBars(score);
   applyTempi(score, tempi, report);
   rep.forEach((r, b) => { if (b < score.measures.length) Object.assign(score.measures[b], r); else report.count("Repeat marks after the last bar (not imported)"); });
+  short.forEach((len, b) => { if (len && setBarLen(score, b, len)) report.count("Short bars Coda can't show (shown full length)"); });
   const lostClefs = finishClefs(score);
   if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
   report.notes = noteCount(score);
@@ -532,8 +537,8 @@ const DIRECTIONS = {
 // beams, sound hints Coda works out itself). Anything else is counted (countUnread).
 const MEASURE_READ = new Set(["attributes", "barline", "direction", "sound", "backup", "forward", "note", "print", "bookmark", "link", "grouping", "listening"]);
 const MEASURE_NAMES = { harmony: "Chord symbols (not imported)", "figured-bass": "Figured bass (not imported)" };
-const ATTR_READ = new Set(["divisions", "key", "time", "clef", "transpose", "staves", "part-symbol", "instruments", "staff-details", "directive", "measure-style", "footnote", "level", "for-part"]);
-const BARLINE_READ = new Set(["bar-style", "repeat", "ending", "segno", "coda", "footnote", "level"]);
+const ATTR_READ = new Set(["divisions", "key", "time", "clef", "transpose", "staves", "part-symbol", "instruments", "staff-details", "measure-style", "footnote", "level", "for-part"]);
+const BARLINE_READ = new Set(["bar-style", "repeat", "ending", "footnote", "level"]);
 const DIRTYPE_READ = new Set(["words", "rehearsal", "wedge", "dynamics", "segno", "coda", "metronome"]);
 const NOTATIONS_READ = new Set(["fermata", "articulations", "ornaments", "technical", "slur", "slide", "glissando", "tied", "tuplet", "arpeggiate", "footnote", "level"]);
 const NOTE_READ = new Set(["chord", "grace", "pitch", "unpitched", "rest", "duration", "tie", "voice", "type", "dot", "accidental", "time-modification",

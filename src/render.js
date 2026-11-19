@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
+import { attrsAt, barNumber, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
 import { DRUMS } from "./drums.js";
 
 const VF = () => Vex.Flow;
@@ -35,7 +35,7 @@ function minWidth(score, b) {
   // 30 per note, more under a long lyric (DESIGN §24)
   const longest = (e) => Math.max(0, ...(e.lyrics || []).map((l) => l?.text.length || 0));
   const need = (bar) => bar.reduce((w, e) => w + Math.max(30, longest(e) * 8.5 + 12) + (e.grace ? 6 + 10 * e.grace.length : 0), 0);
-  return Math.max(150, 50 + Math.max(30, ...score.staves.flatMap((s) => allLayers(s).map((bars) => need(bars[b])))));
+  return Math.max(score.measures[b].len ? 80 : 150, 50 + Math.max(30, ...score.staves.flatMap((s) => allLayers(s).map((bars) => need(bars[b])))));
 }
 
 // Top of each staff in a system: a staff with lyrics leaves a line for them below it.
@@ -420,7 +420,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
       const stave = new VFl.Stave(x, staffTops(score)[s], sys.widths[k]);
       const key = keyAt(score, s, b);
       if (firstInSys) { stave.addClef(clefAt(st, b)); if (!isPerc(st)) stave.addKeySignature(keyName(key)); }
-      if (firstInSys && si > 0 && s === 0) stave.setMeasure(b + 1); // bar number (DESIGN §11.4)
+      if (firstInSys && si > 0 && s === 0) stave.setMeasure(barNumber(score, b)); // bar number (DESIGN §11.4)
       if (!firstInSys && m.key !== undefined && !isPerc(st)) stave.addKeySignature(keyName(key), keyName(keyAt(score, s, b - 1)));
       // a clef change is drawn small before the barline it starts at, also as the courtesy clef at a line end
       if (st.clefs?.[b + 1]) stave.setEndClef(st.clefs[b + 1], "small");

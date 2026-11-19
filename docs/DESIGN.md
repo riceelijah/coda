@@ -1335,6 +1335,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   | Tempo change | Score ▸ Tempo from this bar… (§29) |
   | Text above a note (dolce, pizz.) | Notes ▸ Text above note… (§30) |
   | Rehearsal mark | Score ▸ Rehearsal mark… (§30) |
+  | Pickup bar, short last bar | File ▸ New (Pickup beats); Score ▸ Bar length (pickup)… (§33) |
 
 ## 29. Tempo changes (Phase 34)
 
@@ -1416,3 +1417,16 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   ponytail: no per-track volume or live mute; a gain bus per track in play.js is the upgrade, and
   where a DAW view's volume and pan would go.
 
+## 33. Short bars: pickups (Phase 39)
+
+- `measures[b].len` (ticks, optional) makes bar b shorter than its time signature: a pickup at the
+  start, or the short bar that completes it at the end. `barLen(score, b)` is the one place bar
+  length comes from; entry, paste, time changes, playback, MIDI and both exports use it.
+- Set in the new-score setup ("Pickup beats", as a setup wizard asks) or on any bar with
+  Score ▸ Bar length (pickup)…, in beats of the bar's time signature. Refused below the bar's
+  notes; a time change clears a length the new time makes full.
+- A pickup is bar 0: printed numbers, MusicXML `number="0" implicit="yes"`, MuseScore
+  `len` + `<irregular>`. Other short bars keep their number (`len` only).
+- Import: MusicXML `implicit="yes"` bars take their longest staff's length; MuseScore `len`.
+  A length Coda can't hold (not whole 32nds) is counted and shown full. MuseScore's
+  `<multiMeasureRest>` summary measures are drawings, not bars, and are skipped.

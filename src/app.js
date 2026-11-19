@@ -352,7 +352,7 @@ function retime(fn) {
       fn(e);
       if (e.tup && !M.tupletOk(e.dur, e.dots, e.tup)) delete e.tup;
     }
-    for (const b of new Set(r.map((p) => p.bar))) if (M.barTicks(bars[b]) > M.barCapacity(M.attrsAt(sc, b).time)) return "Bar is full";
+    for (const b of new Set(r.map((p) => p.bar))) if (M.barTicks(bars[b]) > M.barLen(sc, b)) return "Bar is full";
     return null;
   });
 }
@@ -557,9 +557,9 @@ function enterAtCaret(pitch) {
   edit((sc) => {
     const s = state.caret.staff;
     let b = state.caret.bar;
-    const room = (bb) => M.barCapacity(M.attrsAt(sc, bb).time) - M.barTicks(sc.staves[s].bars[bb]);
+    const room = (bb) => M.barLen(sc, bb) - M.barTicks(sc.staves[s].bars[bb]);
     while (room(b) < need) {
-      if (need > M.barCapacity(M.attrsAt(sc, b).time)) return "That note is longer than a bar";
+      if (need > M.barLen(sc, b)) return "That note is longer than a bar";
       b++;
       if (b >= sc.measures.length) M.addMeasure(sc, sc.measures.length - 1);
     }
@@ -1064,10 +1064,13 @@ function closeSetup() {
   if (d.dataset.mode === "new") {
     const t = M.parseTime($("f-time").value);
     if (!t) { message(`"${$("f-time").value}" isn't a time signature (try 7/8, 5/4, C or C|)`, true); return; }
-    replaceScore(M.newScore({
+    const sc = M.newScore({
       title, composer, tempo, preset: $("f-preset").value, key: +$("f-key").value,
       ...t, bars: +$("f-bars").value || 16, program: +$("f-sound").value,
-    }), { save: false });
+    });
+    const pick = +$("f-pickup").value; // a pickup bar (DESIGN §33), as in a setup wizard
+    if (pick > 0 && pick < t.time[0] && M.setBarLen(sc, 0, Math.round((pick * 1920) / t.time[1]))) message("That pickup isn't a length a bar can have, so bar 1 is full", true);
+    replaceScore(sc, { save: false });
   } else {
     edit((sc) => { sc.title = title; sc.composer = composer; return M.setTempo(sc, 0, tempo); });
   }
@@ -1402,6 +1405,15 @@ async function tempoFrom() {
   if (!M.okBpm(bpm)) { message("A tempo is a whole number from 20 to 400", true); return; }
   if (edit((s) => M.setTempo(s, b, bpm))) message(`Tempo ${bpm} from bar ${b + 1}`);
 }
+// short bars (DESIGN §33): a pickup, or the bar that completes it at the end
+async function barLength() {
+  const b = repBar(), sc = state.score, { time } = M.attrsAt(sc, b), beat = 1920 / time[1];
+  const v = await ask(`Length of bar ${b + 1}`, `Beats, counting in the time signature's ${time[0]}/${time[1]} (empty for a full bar)`, M.barLen(sc, b) / beat);
+  if (v === null) return;
+  const n = v.trim() === "" ? time[0] : +v;
+  if (!(n > 0) || n > time[0]) { message(`A bar holds from a part of a beat up to ${time[0]} beats`, true); return; }
+  if (edit((s) => M.setBarLen(s, b, Math.round(n * beat)))) message(n < time[0] ? `Bar ${b + 1} is ${n} beat${n === 1 ? "" : "s"} long` : `Bar ${b + 1} is a full bar`);
+}
 async function repeatTimes() {
   const b = repBar(), v = await ask(`End repeat at bar ${b + 1}`, `Times the section plays (2–${M.MAX_REPEAT})`, state.score.measures[b].repEnd || 3);
   if (v === null) return;
@@ -1480,6 +1492,7 @@ const CMD = {
   "r-repEnd": { run: () => barMark("repEnd", 2) },
   "r-times": { run: () => repeatTimes() },
   "b-tempo": { run: () => tempoFrom() },
+  "b-len": { run: () => barLength() },
   "b-rehearsal": { run: () => rehearsal() },
   "n-text": { run: () => noteText(), on: hasSel },
   ...Object.fromEntries(Object.keys(M.JUMPS).map((j) => ["r-" + j, { run: () => barMark("jump", j) }])),

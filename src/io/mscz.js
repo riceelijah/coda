@@ -1,6 +1,6 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides } from "../model.js";
+import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides } from "../model.js";
 import { parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
@@ -28,16 +28,16 @@ const txt = (el, name) => { const k = kid(el, name); return k ? k.textContent.tr
 
 // What the importer reads, or can pass over because it is layout, ids or playback detail; anything
 // else is counted (CLAUDE.md: never drop silently). Names give the labels for common losses.
-const LAYOUT = ["eid", "linkedTo", "linkedMain", "visible", "offset", "color", "placement", "track", "Beam", "BeamMode", "StemDirection", "Stem", "Hook", "NoteDot", "noStem", "stemDirection", "mirror", "dotPosition", "headType", "fixed", "fixedLine", "line", "Events", "veloType", "velocity", "tuning", "Accidental", "duration", "autoplace", "minDistance", "userOff", "pos"];
+const LAYOUT = ["eid", "linkedTo", "linkedMain", "visible", "offset", "color", "placement", "track", "Beam", "BeamMode", "StemDirection", "Stem", "Hook", "NoteDot", "noStem", "stemDirection", "mirror", "dotPosition", "headType", "fixed", "fixedLine", "line", "Events", "veloType", "velocity", "veloOffset", "endSpanner", "tick", "tuning", "Accidental", "duration", "autoplace", "minDistance", "userOff", "pos"];
 // Measure-level: repeats are read above; the rest is layout. LayoutBreak passes silently: MuseScore writes one per system.
 const MEASURE_ONLY = ["voice", "startRepeat", "endRepeat", "irregular", "LayoutBreak", "multiMeasureRest", "breakMultiMeasureRest", "vspacer", "vspacerUp", "vspacerDown", "vspacerFixed", "noOffset", "measureNumberMode", "stretch", "MeasureNumber", "MMRest"];
-const VOICE_READ = new Set([...LAYOUT, ...MEASURE_ONLY, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "InstrumentChange", "StaffState"]);
-const VOICE_NAMES = { Harmony: "Chord symbols (not imported)", Breath: "Breath marks and caesuras (not imported)", FiguredBass: "Figured bass (not imported)", Tremolo: "Tremolos (not imported)", TremoloTwoChord: "Tremolos (not imported)", FretDiagram: "Fret diagrams (not imported)", Image: "Images (not imported)" };
+const VOICE_READ = new Set([...LAYOUT, ...MEASURE_ONLY, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "StaffState"]);
+const VOICE_NAMES = { Harmony: "Chord symbols (not imported)", Breath: "Breath marks and caesuras (not imported)", FiguredBass: "Figured bass (not imported)", Tremolo: "Tremolos (not imported)", TremoloTwoChord: "Tremolos (not imported)", FretDiagram: "Fret diagrams (not imported)", InstrumentChange: "Instrument changes (not imported)", Image: "Images (not imported)" };
 const MEASURE_READ = new Set([...LAYOUT, ...MEASURE_ONLY]);
 const CHORD_READ = new Set([...LAYOUT, ...GRACE, "durationType", "dots", "Note", "Articulation", "ChordLine", "Lyrics", "Spanner", "Tuplet"]);
 const CHORD_NAMES = { Ornament: "Ornaments (trills, mordents, turns) (not imported)", Arpeggio: "Arpeggios (not imported)", TremoloSingleChord: "Tremolos (not imported)", Tremolo: "Tremolos (not imported)", small: "Cue notes (shown and played as normal notes)", staffMove: "Cross-staff notes (shown on their own staff)" };
 const NOTE_READ = new Set([...LAYOUT, "pitch", "tpc", "tpc2", "Spanner", "Tie", "play", "small"]);
-const NOTE_NAMES = { Fingering: "Fingering (not imported)", headGroup: "Special noteheads (shown as normal)", Bend: "Bends (not imported)", fret: "Tablature frets and strings (not imported)", string: "Tablature frets and strings (not imported)" };
+const NOTE_NAMES = { Fingering: "Fingering (not imported)", headGroup: "Special noteheads (shown as normal)", head: "Special noteheads (shown as normal)", Bend: "Bends (not imported)", fret: "Tablature frets and strings (not imported)", string: "Tablature frets and strings (not imported)" };
 
 export function importMSCZ(bytes, fileName = "") {
   const files = unzip(bytes, (n) => /\.mscx$/i.test(n) || n === "META-INF/container.xml");
@@ -114,6 +114,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
 
   const firstAttrs = [];
   const rep = []; // per bar: repeats and navigation, from the first staff (DESIGN §28)
+  const short = []; // per bar: the length a short bar has, from the first staff
   const mark = (b, k, v) => { (rep[b] ||= {})[k] = v; };
   const tempi = []; // per bar: tempo from its start (DESIGN §29)
   kids(sc, "Staff").forEach((stEl, si) => {
@@ -146,7 +147,10 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
       }
       return p;
     };
-    kids(stEl, "Measure").forEach((meas, mi) => {
+    // a <multiMeasureRest> measure is MuseScore's drawing of the empty bars after it, not a bar of its own
+    kids(stEl, "Measure").filter((m) => !kid(m, "multiMeasureRest")).forEach((meas, mi) => {
+      const [ln, ld] = (meas.getAttribute("len") || "").split("/").map(Number);
+      if (si === 0 && ln > 0 && ld > 0) short[mi] = Math.round((ln / ld) * 1920); // a pickup or a split bar (DESIGN §33)
       const voices = kids(meas, "voice");
       if (si === 0 && kid(meas, "startRepeat")) mark(mi, "repStart", true);
       if (si === 0 && kid(meas, "endRepeat")) {
@@ -388,6 +392,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   padBars(score);
   applyTempi(score, tempi, report);
   rep.forEach((r, b) => { if (b < score.measures.length) Object.assign(score.measures[b], r); else report.count("Repeat marks after the last bar (not imported)"); });
+  short.forEach((len, b) => { if (len && b < score.measures.length && setBarLen(score, b, len)) report.count("Short bars Coda can't show (shown full length)"); });
   const lostClefs = finishClefs(score);
   if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
   report.notes = noteCount(score);
@@ -449,8 +454,8 @@ export function exportMSCX(score) {
     const ties = layers.map((bars) => tieMap(bars)); // per layer: "b:i" -> {next, prev} locations by midi (drum number on drum staves)
     const spans = layers.map((bars) => spanMap(bars));
     score.measures.forEach((m, b) => {
-      const a = attrsAt(score, b), cap = barCapacity(a.time);
-      x.push("<Measure>");
+      const a = attrsAt(score, b), cap = barLen(score, b);
+      x.push(m.len ? `<Measure len="${frac(m.len)}">${b ? "" : "<irregular>1</irregular>"}` : "<Measure>"); // a pickup isn't counted in bar numbers
       if (m.repStart) x.push("<startRepeat/>");
       if (m.repEnd) x.push(`<endRepeat>${m.repEnd}</endRepeat>`);
       const last = Math.max(0, ...layers.map((bars, v) => (bars[b].length ? v : 0)));

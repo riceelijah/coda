@@ -220,7 +220,23 @@ export function prevEventPos(score, s, b, i, v = 0) {
   return null;
 }
 
-function fits(score, b, bar) { return barTicks(bar) <= barCapacity(attrsAt(score, b).time); }
+function fits(score, b, bar) { return barTicks(bar) <= barLen(score, b); }
+
+// Short bars (DESIGN §33): measures[b].len, in ticks, makes bar b shorter than its time signature
+// says: a pickup (anacrusis) at the start, or the short bar that completes it at the end.
+export function barLen(score, b) { return score.measures[b]?.len ?? barCapacity(attrsAt(score, b).time); }
+// The number printed on bar b: a pickup is bar 0.
+export function barNumber(score, b) { return score.measures[0].len ? b : b + 1; }
+export function setBarLen(score, b, len) {
+  const m = score.measures[b];
+  if (!m) return "No such bar";
+  const cap = barCapacity(attrsAt(score, b).time);
+  if (!len || len >= cap) { delete m.len; return null; }
+  if (!Number.isInteger(len) || len < 0 || len % 60) return "That isn't a length a bar can have";
+  for (const st of score.staves) for (const bars of allLayers(st)) if (barTicks(bars[b]) > len) return "The notes in this bar don't fit in that length";
+  m.len = len;
+  return null;
+}
 
 // ---------- edit commands ----------
 
@@ -231,7 +247,7 @@ export function appendEvent(score, s, b, ev) {
 // Insert ev before index idx of a bar (DESIGN §11.5).
 export function insertEvent(score, s, b, idx, ev) {
   const bar = score.staves[s].bars[b];
-  if (barTicks(bar) + eventTicks(ev) > barCapacity(attrsAt(score, b).time)) return "Bar is full";
+  if (barTicks(bar) + eventTicks(ev) > barLen(score, b)) return "Bar is full";
   if (ev.pitches) sortPitches(ev.pitches);
   bar.splice(Math.max(0, Math.min(idx, bar.length)), 0, ev);
   return null;
@@ -258,12 +274,12 @@ export function pasteEvents(score, s, b, idx, events, placed = []) {
   if (!events.length) return "Nothing to paste";
   for (const src of events) {
     const ev = JSON.parse(JSON.stringify(src));
-    if (barTicks(score.staves[s].bars[b]) + eventTicks(ev) > barCapacity(attrsAt(score, b).time)) {
+    if (barTicks(score.staves[s].bars[b]) + eventTicks(ev) > barLen(score, b)) {
       // carry on only into an empty next bar (added at the end of the score if needed)
       b++; idx = 0;
       if (b >= score.measures.length) addMeasure(score, score.measures.length - 1);
       if (score.staves[s].bars[b].length) return "Not enough room to paste here";
-      if (eventTicks(ev) > barCapacity(attrsAt(score, b).time)) return "A copied note is longer than a bar";
+      if (eventTicks(ev) > barLen(score, b)) return "A copied note is longer than a bar";
     }
     insertEvent(score, s, b, idx, ev);
     placed.push({ bar: b, idx });
@@ -721,6 +737,7 @@ export function setAttrs(score, b, { key, time, sym }) {
     else { m.time = time; if (sym) m.sym = sym; }
     for (let j = b; j < score.measures.length; j++) {
       if (j > b && score.measures[j].time) break;
+      if (score.measures[j].len >= barCapacity(time)) delete score.measures[j].len;
       for (const st of score.staves) for (const bars of allLayers(st)) if (!fits(score, j, bars[j])) return `Bar ${j + 1} would overflow`;
     }
   }
@@ -736,6 +753,7 @@ export function clearAttrs(score, b) {
   delete m.key; delete m.time; delete m.sym;
   if (hadTime) for (let j = b; j < score.measures.length; j++) {
     if (j > b && score.measures[j].time) break;
+    if (score.measures[j].len >= barCapacity(attrsAt(score, j).time)) delete score.measures[j].len;
     for (const st of score.staves) for (const bars of allLayers(st)) if (!fits(score, j, bars[j])) return `Bar ${j + 1} would overflow`;
   }
   return null;
@@ -992,6 +1010,7 @@ export function isValidScore(sc) {
     if (!sc.measures.every(okRepeats)) return false;
     if (!sc.measures.every((m, b) => m.tempo === undefined || (b > 0 && okBpm(m.tempo)))) return false;
     if (!sc.measures.every((m) => m.rehearsal === undefined || okText(m.rehearsal, MAX_REHEARSAL))) return false;
+    if (!sc.measures.every((m, b) => m.len === undefined || (Number.isInteger(m.len) && m.len > 0 && m.len % 60 === 0 && m.len < barCapacity(attrsAt(sc, b).time)))) return false;
     let okPitch;
     const pitched = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2 && p.drum === undefined;
     const drum = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && p.alter === 0 && Number.isInteger(p.drum) && p.drum >= 35 && p.drum <= 81;

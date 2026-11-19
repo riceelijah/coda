@@ -63,7 +63,7 @@ only says what to build in what order and how to know each phase is finished.
 | 36 | Brass effects and slides: scoop, fall, doit, gliss with pitch bends (DESIGN §31) | done (no MIDI pitch bends) |
 | 37 | Tracks: choose the parts that play and export (DESIGN §32); sampled GM drum kit (DESIGN §27) | done |
 | 38 | Importers count every element they don't read, at every level (no silent drops) | done |
-| 39 | Pickup bars (DESIGN §33) | planned |
+| 39 | Pickup bars (DESIGN §33) | done |
 | 40 | Breath marks, caesuras, ornaments, tremolo, arpeggio, fingering; accents/fermatas in playback (DESIGN §34) | planned |
 | 41 | Ottava lines, pedal marks, lyric extenders, nested slurs (DESIGN §35) | planned |
 | 42 | Chord symbols; transpose the score; respell; concert-pitch view (DESIGN §36) | planned |
