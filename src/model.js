@@ -339,7 +339,8 @@ export const soundingMidi = (st, p) => p.drum ?? midi(p) + (st.transpose?.[0] ||
 export function shiftPitch(p, c, d) {
   const np = fromDiatonic(diatonic(p) + d), m = midi(p) + c;
   const alter = m - midi({ ...np, alter: 0 });
-  return Math.abs(alter) <= 2 ? { ...np, alter } : spellMidi(m, 0);
+  const out = Math.abs(alter) <= 2 ? { ...np, alter } : spellMidi(m, 0);
+  return p.finger ? { ...out, finger: p.finger } : out; // fingering stays with its note (DESIGN §34)
 }
 const okTranspose = (t) => Array.isArray(t) && t.length === 2 && t.every(Number.isInteger) && Math.abs(t[0]) <= 36 && Math.abs(t[1]) <= 21;
 // Set a part's transposition, keeping its sound: every written note in every layer moves by
@@ -377,7 +378,7 @@ export function transpose(score, s, b, i, steps) {
     return null;
   }
   const key = keyAt(score, s, b);
-  const move = (p) => { const np = fromDiatonic(diatonic(p) + steps); return { ...np, alter: keyAlter(key, np.step) }; };
+  const move = (p) => { const np = fromDiatonic(diatonic(p) + steps); return { ...np, alter: keyAlter(key, np.step), ...(p.finger ? { finger: p.finger } : {}) }; };
   ev.pitches = ev.pitches.map(move);
   if (ev.grace) ev.grace = ev.grace.map(move); // grace notes move with their note
   sortPitches(ev.pitches);

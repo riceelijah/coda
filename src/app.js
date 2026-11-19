@@ -387,16 +387,18 @@ function buildMarkPalettes(pal) {
       fly.replaceChildren(...ids.map((id) => {
         const t = document.createElement("button");
         t.className = "pal"; t.dataset.cmd = id; t.setAttribute("role", "menuitem");
-        t.title = t.ariaLabel = $(id).textContent.replace(/…$/, "");
+        const label = $(id).childNodes[0].textContent.trim().replace(/…$/, ""), key = $(id).dataset.short;
+        t.ariaLabel = label; t.title = key ? `${label} (${key})` : label;
         t.innerHTML = iconFor(id); // static icon markup, no user data
         t.onclick = () => { CMD[id].run(); enableItems(fly); };
         return t;
       }));
       fly.setAttribute("aria-label", name);
       const r = b.getBoundingClientRect(), row = pal.offsetWidth > pal.offsetHeight;
-      fly.style.left = (row ? r.left : r.right + 6) + "px";
-      fly.style.top = (row ? r.bottom + 6 : r.top) + "px";
       fly.hidden = false;
+      const w = fly.offsetWidth, h = fly.offsetHeight; // kept inside the window
+      fly.style.left = Math.max(4, Math.min(innerWidth - w - 4, row ? r.left : r.right + 6)) + "px";
+      fly.style.top = Math.max(4, Math.min(innerHeight - h - 4, row ? r.bottom + 6 : r.top)) + "px";
       enableItems(fly);
       b.setAttribute("aria-expanded", "true");
       open = b;
@@ -405,6 +407,7 @@ function buildMarkPalettes(pal) {
     pal.appendChild(b);
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && open) close(); });
+  addEventListener("resize", () => { if (open) close(); });
 }
 
 function updatePalette() {

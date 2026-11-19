@@ -35,11 +35,24 @@ export function schedule(score, from = 0) {
   // fermatas (DESIGN §34): a held note or rest takes twice as long, for every part. Seconds
   // stretch, ticks don't. fermatas: unrolled start tick -> its length (the shortest held there).
   const fermatas = new Map();
+  let holds = null; // fermata spans merged where they overlap, each with its extra seconds and the total before it
   const timeOf = (x) => {
-    let t = plain(x);
-    for (const [f, l] of fermatas) if (x > f) t += plain(Math.min(x, f + l)) - plain(f);
-    return t;
+    if (!holds) {
+      holds = [];
+      for (const [a, l] of [...fermatas].sort((p, q) => p[0] - q[0])) {
+        const h = holds[holds.length - 1];
+        if (h && a <= h.z) h.z = Math.max(h.z, a + l); else holds.push({ a, z: a + l });
+      }
+      let sum = 0;
+      for (const h of holds) { h.before = sum; h.pa = plain(h.a); h.extra = plain(h.z) - h.pa; sum += h.extra; }
+    }
+    let t = plain(x), k = holds.length - 1;
+    while (k >= 0 && holds[k].a >= x) k--;
+    if (k < 0) return t;
+    const h = holds[k];
+    return t + h.before + (x >= h.z ? h.extra : t - h.pa);
   };
+  const held = () => { timeOf(0); return holds; };
   const notes = [];
   const linVel = dynamics(score, 0);
   score.staves.forEach((st, si) => allLayers(st).forEach((bars) => {
@@ -78,7 +91,8 @@ export function schedule(score, from = 0) {
           if (ev.tie) nextOpen.set(m, n);
           else if (ev.marks?.includes("staccato")) n.end = (Math.max(n.start, at) + at + len) / 2; // sounds half its length (after any grace notes)
         });
-        if (ev.marks) perform(ev, made.map((n, k) => ({ n, p: ev.pitches[k] })).filter(({ n }) => n.start === on && !n.root && !n.glide), notes, { at, len, perc, tied: !!ev.tie, key: keyAt(score, si, bar), tr });
+        if (ev.marks) perform(ev, made.map((n, k) => ({ n, p: ev.pitches[k] })).filter(({ n }) => n.start === on && !n.root && !n.glide), notes,
+          { at, len, perc, tied: !!ev.tie || !!ev.gliss, top: ev.pitches[ev.pitches.length - 1], key: keyAt(score, si, bar), tr });
         // a slide takes the last half of its note, at most a beat
         slide = ev.gliss && !perc ? { from: made, t0: Math.max(at + len / 2, at + len - PPQ), end: at + len } : null;
         open.clear();
@@ -87,49 +101,56 @@ export function schedule(score, from = 0) {
       }
     });
   }));
-  return { notes, barStart, total, timeOf, fermatas };
+  return { notes, barStart, total, timeOf, held };
 }
 
 // How marks sound (DESIGN §34). `fresh`: this event's newly struck notes, low to high (not tied
 // into, not part of a slide). Ornaments and tremolos split the top note into short notes; a tied
 // note keeps its ornament silent so the tie still holds.
 const SHORT = 60; // a 32nd
-function perform(ev, pairs, list, { at, len, perc, tied, key, tr }) {
+function perform(ev, pairs, list, { at, len, perc, tied, top: evTop, key, tr }) {
   const has = (m) => ev.marks.includes(m), fresh = pairs.map((x) => x.n);
   for (const n of fresh) {
     if (has("accent")) n.vel = Math.min(127, n.vel + 20);
     if (has("marcato")) n.vel = Math.min(127, n.vel + 30);
-    if (has("breath") || has("caesura")) n.end = Math.max(n.start + SHORT, Math.min(n.end, at + len - Math.min(len / 4, PPQ / 2)));
+    if (has("breath") || has("caesura")) n.end = Math.max(n.start + Math.min(SHORT, n.end - n.start), Math.min(n.end, at + len - Math.min(len / 4, PPQ / 2)));
   }
   if (has("arpeggio") && fresh.length > 1) {
-    const step = Math.min(SHORT / 2, len / 2 / fresh.length);
+    const span = Math.min(...fresh.map((n) => n.end - n.start)), step = Math.min(SHORT / 2, span / 2 / fresh.length);
     fresh.forEach((n, k) => { n.start += k * step; });
   }
+  // the ornament is the chord's top note's; none when that note is tied into, tied on, or slides
   const top = fresh[fresh.length - 1], tp = pairs[pairs.length - 1]?.p;
-  if (!top || tied) return;
+  if (!top || tied || tp !== evTop) return;
   const neighbour = (d) => { // the written note a step away, in the written key, as it sounds
     const q = fromDiatonic(diatonic(tp) + d);
     return midiOf({ ...q, alter: keyAlter(key, q.step) }) + tr;
   };
   let seq = null; // [midi, ticks]...
-  const m = top.midi;
-  if (has("tremolo")) seq = Array.from({ length: Math.max(1, Math.floor((top.end - top.start) / SHORT)) }, () => [m, SHORT]);
+  const m = top.midi, avail = top.end - top.start, reps = Math.floor(avail / SHORT);
+  const quick = Math.min(SHORT, avail / 3); // a mordent's two quick notes leave the main note a third at least
+  if (has("tremolo")) seq = reps > 1 ? Array.from({ length: reps }, () => [m, SHORT]) : null;
   else if (perc) return;
-  else if (has("trill")) seq = Array.from({ length: Math.max(1, Math.floor((top.end - top.start) / SHORT)) }, (_, k) => [k % 2 ? neighbour(1) : m, SHORT]);
-  else if (has("mordent")) seq = [[m, SHORT], [neighbour(-1), SHORT]];
-  else if (has("invMordent")) seq = [[m, SHORT], [neighbour(1), SHORT]];
-  else if (has("turn")) { const q = (top.end - top.start) / 4; seq = [[neighbour(1), q], [m, q], [neighbour(-1), q]]; }
-  if (!seq) return;
-  const end = top.end;
+  else if (has("trill")) seq = reps > 1 ? Array.from({ length: reps }, (_, k) => [k % 2 ? neighbour(1) : m, SHORT]) : null;
+  else if (has("mordent")) seq = [[m, quick], [neighbour(-1), quick]];
+  else if (has("invMordent")) seq = [[m, quick], [neighbour(1), quick]];
+  else if (has("turn")) seq = [[neighbour(1), avail / 4], [m, avail / 4], [neighbour(-1), avail / 4]];
+  if (!seq || avail < 4) return;
+  const end = top.end, fall = top.fall;
+  delete top.fall; // a fall or doit belongs to the last piece, a scoop to the first
+  const pieces = [];
   let t = top.start;
-  // the top note becomes the first piece; the rest are new notes, the last one lasting to the end
   seq.forEach(([mm, d], k) => {
+    if (t >= end) return;
     const n = k ? { ...top, midi: mm, start: t } : top;
+    if (k) delete n.scoop;
     n.midi = mm; n.end = Math.min(end, t + d);
-    if (k) list.push(n);
+    pieces.push(n);
     t += d;
   });
-  if (t < end && !has("trill") && !has("tremolo")) list.push({ ...top, midi: m, start: t, end });
+  if (t < end && !has("trill") && !has("tremolo")) { const n = { ...top, midi: m, start: t, end }; delete n.scoop; pieces.push(n); }
+  if (fall) pieces[pieces.length - 1].fall = fall;
+  list.push(...pieces.slice(1));
 }
 
 // Velocity at a tick (relative to bar `from`) for staff si (DESIGN §22). A part's dynamics, from

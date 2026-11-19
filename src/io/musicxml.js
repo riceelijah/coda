@@ -1,7 +1,7 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barLen, setBarLen, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER, ORNAMENTS,
 } from "../model.js";
 import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
@@ -628,6 +628,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
       else countUnread(report, { children: [c] }, NOTATIONS_READ, { dynamics: "Dynamics inside notations (not imported)" });
     }
   }
+  if (new Set(marks.filter((m) => ORNAMENTS.includes(m))).size > 1) report.count("Second ornaments on a note (the last is kept)");
   countUnread(report, el, NOTE_READ, { cue: "Cue notes (shown and played as normal notes)" });
   const head = txt(el, "notehead");
   if (head && head !== "normal" && !kid(el, "unpitched")) report.count("Special noteheads (shown as normal)");

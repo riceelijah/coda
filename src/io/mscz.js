@@ -1,7 +1,7 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
 import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides } from "../model.js";
-import { FINGER, parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
+import { FINGER, ORNAMENTS, parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip, countUnread } from "./util.js";
@@ -342,6 +342,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
               if (!ev.pitches.length) break;
               ev.pitches.sort((a, b) => a.oct * 7 + a.step - (b.oct * 7 + b.step));
             }
+            if (new Set(marks.filter((m) => ORNAMENTS.includes(m))).size > 1) report.count("Second ornaments on a note (the last is kept)");
             for (const m of marks) if (!isRest || m === "fermata") setMark(ev, m, true);
             if (isRest && marks.some((m) => m !== "fermata")) report.count("Marks on rests (not imported)");
             if (pendDyn[vi]) { ev.dyn = pendDyn[vi]; pendDyn[vi] = null; }
@@ -481,7 +482,8 @@ export function exportMSCX(score) {
     const spans = layers.map((bars) => spanMap(bars));
     score.measures.forEach((m, b) => {
       const a = attrsAt(score, b), cap = barLen(score, b);
-      x.push(m.len ? `<Measure len="${frac(m.len)}">${b ? "" : "<irregular>1</irregular>"}` : "<Measure>"); // a pickup isn't counted in bar numbers
+      const short = cap < barCapacity(a.time); // barLen: a stale len past the time signature reads as full
+      x.push(short ? `<Measure len="${frac(cap)}">${b ? "" : "<irregular>1</irregular>"}` : "<Measure>"); // a pickup isn't counted in bar numbers
       if (m.repStart) x.push("<startRepeat/>");
       if (m.repEnd) x.push(`<endRepeat>${m.repEnd}</endRepeat>`);
       const last = Math.max(0, ...layers.map((bars, v) => (bars[b].length ? v : 0)));

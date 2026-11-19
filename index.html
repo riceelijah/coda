@@ -23,7 +23,7 @@
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
-    display: grid; grid-template: "top top" auto "pal desk" 1fr "status status" auto / 56px 1fr;
+    display: grid; grid-template: "top top" auto "pal desk" 1fr "status status" auto / 96px 1fr;
     font: 14px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif;
     background: var(--desk); color: var(--chrome-text);
   }
@@ -76,10 +76,10 @@
   #tempo { width: 4.2em; padding: 3px 4px; border: 1px solid var(--border); border-radius: 5px; background: transparent; }
 
   #palette {
-    grid-area: pal; display: flex; flex-direction: column; align-items: center; gap: 3px;
-    padding: 8px 0; background: var(--chrome); border-right: 1px solid var(--border); overflow-y: auto;
+    grid-area: pal; display: grid; grid-template-columns: repeat(2, 40px); align-content: start; gap: 3px;
+    padding: 8px 4px; background: var(--chrome); border-right: 1px solid var(--border); overflow-y: auto;
   }
-  #palette hr { width: 32px; border: 0; border-top: 1px solid var(--border); margin: 5px 0; }
+  #palette hr { grid-column: 1 / -1; width: 100%; border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
   .pal {
     width: 40px; height: 40px; display: grid; place-items: center; padding: 0;
     background: none; border: 1px solid transparent; border-radius: 7px; cursor: pointer; color: var(--chrome-text);
@@ -176,7 +176,7 @@
 
   @media (max-width: 800px) {
     body { grid-template: "top" auto "pal" auto "desk" 1fr "status" auto / 1fr; }
-    #palette { flex-direction: row; flex-wrap: wrap; justify-content: center; border-right: 0; border-bottom: 1px solid var(--border); padding: 4px; }
+    #palette { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; border-right: 0; border-bottom: 1px solid var(--border); padding: 4px; }
     #palette hr { width: 1px; height: 28px; border: 0; border-left: 1px solid var(--border); margin: 0 4px; }
     #desk { padding: 12px 8px 32px; }
     #sheet { padding: 20px 12px; }

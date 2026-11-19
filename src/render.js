@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, barNumber, partGroups, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
+import { attrsAt, barLen, barCapacity, barNumber, partGroups, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
 import { DRUMS } from "./drums.js";
 
 const VF = () => Vex.Flow;
@@ -38,7 +38,7 @@ function minWidth(score, b) {
   // 30 per note, more under a long lyric (DESIGN §24)
   const longest = (e) => Math.max(0, ...(e.lyrics || []).map((l) => l?.text.length || 0));
   const need = (bar) => bar.reduce((w, e) => w + Math.max(30, longest(e) * 8.5 + 12) + (e.grace ? 6 + 10 * e.grace.length : 0), 0);
-  return Math.max(score.measures[b].len ? 80 : 150, 50 + Math.max(30, ...score.staves.flatMap((s) => allLayers(s).map((bars) => need(bars[b])))));
+  return Math.max(barLen(score, b) < barCapacity(attrsAt(score, b).time) ? 80 : 150, 50 + Math.max(30, ...score.staves.flatMap((s) => allLayers(s).map((bars) => need(bars[b])))));
 }
 
 // Top of each staff in a system: a staff with lyrics leaves a line for them below it.
@@ -71,9 +71,11 @@ const partNames = (score) => {
   return gs.length === 1 && gs[0].name === "Staff" ? [] : gs.filter((x) => x.name);
 };
 const x0Names = (score) => LEFT_PAD + nameIndent(score) - 20; // clear of a brace
+let meter = null;
+const textW = (t) => { meter ||= document.createElement("canvas").getContext("2d"); meter.font = "13px Georgia"; return meter.measureText(t).width; };
 export function nameIndent(score) {
   const n = partNames(score);
-  return n.length ? Math.min(170, 26 + 7.2 * Math.max(...n.map((x) => x.name.length))) : 0;
+  return n.length ? Math.min(170, 30 + Math.max(...n.map((x) => textW(x.name)))) : 0;
 }
 
 // Greedy system breaking + justification (DESIGN §5.2).
@@ -468,7 +470,9 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
     ctx.save(); ctx.setFont("Georgia", 13, "normal");
     for (const { g, name } of partNames(score)) {
       const top = staves[0][g[0]].getYForLine(0), bot = staves[0][g[g.length - 1]].getYForLine(4);
-      ctx.fillText(name, x0Names(score) - ctx.measureText(name).width, (top + bot) / 2 + 4);
+      let t = name; // cut to the indent, with an ellipsis
+      while (t.length > 1 && textW(t) > nameIndent(score) - 30) t = t.slice(0, -2) + "…";
+      ctx.fillText(t, x0Names(score) - textW(t), (top + bot) / 2 + 4);
     }
     ctx.restore();
   }

@@ -935,6 +935,17 @@ export async function run({ check, eq }) {
     const r = schedule(s);
     if (Math.abs(r.timeOf(3840) - 10 * beat) > 1e-9) return "repeat " + r.timeOf(3840);
     delete s.measures[0].repStart; delete s.measures[0].repEnd;
+    // overlapping fermatas in two parts hold once; a downbeat fermata still reads back as held
+    s.staves[1].bars[0] = [{ dur: "w", dots: 0, tie: false, pitches: [{ step: 0, oct: 3, alter: 0 }], marks: ["fermata"] }];
+    const o = schedule(s);
+    if (Math.abs(o.timeOf(1920) - 8 * beat) > 1e-9) return "overlap " + o.timeOf(1920);
+    const down = importMIDI(exportMIDI(s), "d.mid");
+    if (down.score.measures.some((m) => m.tempo) || down.score.tempo !== 100 || down.report.warnings.some((w) => /Tempo/.test(w))) return "downbeat tempo " + JSON.stringify([down.score.tempo, down.score.measures, down.report.warnings]);
+    s.staves[1].bars[0] = [];
+    // ornaments on short notes stay inside them
+    const t = M.newScore({ bars: 1 });
+    t.staves[0].bars[0] = [{ dur: "32", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0 }], marks: ["mordent", "staccato"] }];
+    if (schedule(t).notes.some((x) => !(x.end > x.start) || x.end > 60)) return "short mordent " + JSON.stringify(schedule(t).notes);
     const back = importMIDI(exportMIDI(s), "f.mid");
     if (back.score.measures.some((m) => m.tempo) || back.score.tempo !== 100) return "tempo read " + JSON.stringify(back.score.measures);
     return back.report.warnings.some((w) => /Held notes/.test(w)) || "not counted: " + back.report.warnings;
@@ -950,8 +961,10 @@ export async function run({ check, eq }) {
     for (const [k, r] of [["MusicXML", importMusicXML(exportMusicXML(s), "f.musicxml")], ["MuseScore", importMSCX(exportMSCX(s), "f.mscx")]]) {
       if (JSON.stringify(r.score.staves[0].bars[0][0].pitches) !== want) return k + " " + JSON.stringify(r.score.staves[0].bars[0][0].pitches);
     }
-    M.setFingers(ev, "");
-    return (M.isValidScore(s) && ev.pitches.every((p) => !p.finger)) || "clear";
+    M.transpose(s, 0, 0, 0, 7);
+    if (s.staves[0].bars[0][0].pitches.map((p) => p.finger).join() !== "1,,3-1") return "lost on an octave move";
+    M.setFingers(s.staves[0].bars[0][0], "");
+    return (M.isValidScore(s) && s.staves[0].bars[0][0].pitches.every((p) => !p.finger)) || "clear";
   });
 
   await check("drum notes move a line keeping their drum, as a file's own drum map has them (DESIGN §28)", () => {

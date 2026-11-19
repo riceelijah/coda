@@ -214,7 +214,7 @@ export function importMIDI(bytes, fileName = "") {
   const kept = [];
   for (let i = 0, prev = tempo; i < tempos.length; i++) {
     const [t, bpm] = tempos[i], nx = tempos[i + 1];
-    if (t !== barEnd(t) - L && t !== 0 && nx && nx[0] <= barEnd(t) && Math.round(nx[1]) === Math.round(prev) && bpm < prev) {
+    if (nx && nx[0] <= barEnd(t) && Math.round(nx[1]) === Math.round(prev) && Math.abs(bpm * 2 - prev) < 1) {
       report.count("Held notes (short tempo dips inside a bar) played at the bar's tempo");
       i++; continue;
     }
@@ -238,7 +238,7 @@ export function importMIDI(bytes, fileName = "") {
 // per staff with its name and instrument. MIDI is performance data: marks, spellings and the
 // split into layers are not kept.
 export function exportMIDI(score) {
-  const { notes, barStart, fermatas } = schedule(score);
+  const { notes, barStart, held } = schedule(score);
   const vlq = (n) => { const b = [n & 0x7f]; while ((n >>= 7)) b.unshift((n & 0x7f) | 0x80); return b; };
   const track = (evs) => { // evs: [{tick, bytes}], sorted
     const out = [];
@@ -267,9 +267,7 @@ export function exportMIDI(score) {
   // fermatas (DESIGN §34): half the tempo while the held note lasts
   const tempoAtTick = (t) => { let b = barStart[0]; for (const x of barStart) { if (x.tick > t) break; b = x; } return tempoAt(score, b.bar); };
   const usOf = (bpm) => { const us = Math.round(60000000 / bpm); return meta(0x51, [us >> 16, (us >> 8) & 255, us & 255]); };
-  for (const [f, l] of [...fermatas].sort((a, b) => a[0] - b[0])) {
-    cond.push({ tick: f, bytes: usOf(tempoAtTick(f) / 2) }, { tick: f + l, bytes: usOf(tempoAtTick(f + l)) });
-  }
+  for (const { a, z } of held()) cond.push({ tick: a, bytes: usOf(tempoAtTick(a) / 2) }, { tick: z, bytes: usOf(tempoAtTick(z)) });
   cond.sort((a, b) => a.tick - b.tick);
   const tracks = [track(cond)];
   score.staves.forEach((st, s) => {
