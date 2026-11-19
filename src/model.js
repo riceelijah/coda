@@ -101,11 +101,25 @@ export function attrsAt(score, i) {
 // Common and cut time (DESIGN §17): `measures[b].sym`, only beside a `time` it stands for.
 export const TIME_SYMS = { common: [4, 4], cut: [2, 2] };
 const symOk = (sym, time) => sym === undefined || (TIME_SYMS[sym]?.[0] === time[0] && TIME_SYMS[sym]?.[1] === time[1]);
-// Menu value <-> {time, sym}: "C", "C|" (also what VexFlow draws) or "n/d".
+// Menu value <-> {time, sym}: "C", "C|" (also what VexFlow draws) or "n/d" (any n 1–99 over
+// 1–32, so whatever a file can bring can also be typed). null when it isn't one of those.
 export function parseTime(v) {
+  v = String(v).trim();
   for (const [sym, t] of Object.entries(TIME_SYMS)) if (v === timeLabel({ time: t, sym })) return { time: [...t], sym };
-  const [n, d] = v.split("/").map(Number);
-  return { time: [n, d] };
+  const m = /^(\d{1,2})\s*\/\s*(\d{1,2})$/.exec(v);
+  return m && +m[1] >= 1 && [1, 2, 4, 8, 16, 32].includes(+m[2]) ? { time: [+m[1], +m[2]] } : null;
+}
+// A tuplet typed as "7:4" (or "7,4"): [actual, normal], 2–16 each and not equal, else null.
+export function parseTuplet(v) {
+  const m = /^\s*(\d{1,2})\s*[:,]\s*(\d{1,2})\s*$/.exec(String(v));
+  const t = m && [+m[1], +m[2]];
+  return t && t.every((x) => x >= 2 && x <= 16) && t[0] !== t[1] ? t : null;
+}
+// A transposition typed as "-2, -1" (semitones, letter steps, written -> sounding), else null.
+export function parseTranspose(v) {
+  const m = /^\s*([+-]?\d{1,2})\s*,\s*([+-]?\d{1,2})\s*$/.exec(String(v));
+  const t = m && [+m[1], +m[2]];
+  return t && okTranspose(t) ? t : null;
 }
 export const timeLabel = ({ time, sym }) => (sym === "common" ? "C" : sym === "cut" ? "C|" : `${time[0]}/${time[1]}`);
 // Importers: per-bar {key, time, sym} -> measures holding only the changes.

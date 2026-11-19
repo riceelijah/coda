@@ -979,9 +979,11 @@ function closeSetup() {
   const composer = $("f-composer").value.trim();
   const tempo = Math.max(20, Math.min(400, +$("f-tempo").value || 100));
   if (d.dataset.mode === "new") {
+    const t = M.parseTime($("f-time").value);
+    if (!t) { message(`"${$("f-time").value}" isn't a time signature (try 7/8, 5/4, C or C|)`, true); return; }
     replaceScore(M.newScore({
       title, composer, tempo, preset: $("f-preset").value, key: +$("f-key").value,
-      ...M.parseTime($("f-time").value), bars: +$("f-bars").value || 16, program: +$("f-sound").value,
+      ...t, bars: +$("f-bars").value || 16, program: +$("f-sound").value,
     }), { save: false });
   } else {
     edit((sc) => { sc.title = title; sc.composer = composer; sc.tempo = tempo; return null; });
@@ -1037,8 +1039,19 @@ function partRow({ from, kind, name, value, tr = "0,0" }) {
   const trs = document.createElement("select");
   trs.className = "tr"; trs.setAttribute("aria-label", "Transposition"); trs.title = "Transposition: written notes keep sounding the same";
   for (const [v, label] of TRANSPOSITIONS) trs.appendChild(new Option(label, v));
-  if (!TRANSPOSITIONS.some(([v]) => v === tr)) trs.appendChild(new Option(`Other (${tr.replace(",", " semitones, ")} steps)`, tr));
+  const other = (v) => new Option(`Other (${v.replace(",", " semitones, ")} steps)`, v);
+  if (!TRANSPOSITIONS.some(([v]) => v === tr)) trs.appendChild(other(tr));
+  trs.appendChild(new Option("Other…", "?"));
   trs.value = tr;
+  trs.dataset.was = tr;
+  // any interval a file can carry can be typed here too (DESIGN §21)
+  trs.onchange = () => {
+    if (trs.value !== "?") { trs.dataset.was = trs.value; return; }
+    const t = M.parseTranspose(prompt("Transposition from written to sounding: semitones, letter steps (B♭ is -2, -1; F is -7, -4)", trs.dataset.was.replace(",", ", ")) ?? "");
+    const v = t ? t.join(",") : trs.dataset.was;
+    if (t && ![...trs.options].some((o) => o.value === v)) trs.insertBefore(other(v), trs.lastChild);
+    trs.value = trs.dataset.was = v;
+  };
   row.className = "part-row"; row.setAttribute("role", "listitem");
   row.dataset.from = from ?? ""; row.dataset.kind = kind;
   nm.className = "nm"; nm.maxLength = 60; nm.value = name; nm.placeholder = "Part name"; nm.setAttribute("aria-label", "Part name");
@@ -1201,7 +1214,7 @@ function closeDrum() {
 
 function openTuplet() {
   const has = !!state.sel;
-  $("t-ratio").value = String(state.lastTup);
+  $("t-ratio").value = state.lastTup.join(":");
   $("tuplet-ok").textContent = has ? "Apply to selection" : "Use for next notes";
   $("tuplet").returnValue = "";
   $("tuplet").showModal();
@@ -1209,7 +1222,8 @@ function openTuplet() {
 
 function closeTuplet() {
   if ($("tuplet").returnValue !== "ok") return;
-  const tup = $("t-ratio").value.split(",").map(Number);
+  const tup = M.parseTuplet($("t-ratio").value);
+  if (!tup) { message(`"${$("t-ratio").value}" isn't a group: type it as 5:3 (5 notes in the space of 3)`, true); return; }
   state.lastTup = tup;
   if (state.sel) { tupletSel(tup); return; }
   state.armed.tup = tup;
@@ -1243,9 +1257,7 @@ function openAttrs() {
   $("attrs-head").textContent = `Key and time from bar ${b + 1}`;
   $("a-key").value = at.key;
   $("a-key").previousElementSibling.textContent = sc.staves.some((st) => st.transpose) ? "Key (concert)" : "Key";
-  const ts = $("a-time"), t = M.timeLabel(at);
-  if (![...ts.options].some((o) => o.value === t)) ts.add(new Option(t, t));
-  ts.value = t;
+  $("a-time").value = M.timeLabel(at);
   $("attrs-remove").hidden = b === 0 || (m.key === undefined && !m.time);
   $("attrs").returnValue = "";
   $("attrs").showModal();
@@ -1256,7 +1268,8 @@ function closeAttrs() {
   if (how === "remove") edit((sc) => M.clearAttrs(sc, b));
   else if (how === "ok") {
     const t = M.parseTime($("a-time").value);
-    const changed = $("a-time").value !== M.timeLabel(M.attrsAt(state.score, b));
+    if (!t) { message(`"${$("a-time").value}" isn't a time signature (try 7/8, 5/4, C or C|)`, true); return; }
+    const changed = M.timeLabel(t) !== M.timeLabel(M.attrsAt(state.score, b));
     // only pass time when it changes, so a key change never trips the bar-fit check
     edit((sc) => M.setAttrs(sc, b, changed ? { key: +$("a-key").value, ...t } : { key: +$("a-key").value }));
   }

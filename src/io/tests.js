@@ -670,6 +670,22 @@ export async function run({ check, eq }) {
     } finally { clean(); }
   });
 
+  await check("no import-only values: any time, tuplet and transposition a file holds can be typed (DESIGN §28)", () => {
+    const bad = [];
+    for (const [v, want] of [["7/8", [7, 8]], [" 5 / 4 ", [5, 4]], ["3/2", [3, 2]], ["C", [4, 4]], ["15/16", [15, 16]]])
+      if (!eq(M.parseTime(v)?.time, want)) bad.push(v);
+    for (const v of ["7/6", "0/4", "4/", "x", "100/4"]) if (M.parseTime(v)) bad.push("accepted " + v);
+    if (!eq(M.parseTuplet("7:4"), [7, 4]) || !eq(M.parseTuplet("9,8"), [9, 8])) bad.push("tuplet");
+    for (const v of ["3:3", "1:2", "7", "20:4"]) if (M.parseTuplet(v)) bad.push("accepted tuplet " + v);
+    if (!eq(M.parseTranspose("-2, -1"), [-2, -1]) || !eq(M.parseTranspose("+5,3"), [5, 3]) || M.parseTranspose("40,1")) bad.push("transpose");
+    // a 7/8 bar takes seven eighths
+    const s = M.newScore({ bars: 1, ...M.parseTime("7/8") });
+    for (let i = 0; i < 7; i++) M.appendEvent(s, 0, 0, { dur: "8", dots: 0, tie: false, pitches: [] });
+    if (M.appendEvent(s, 0, 0, { dur: "8", dots: 0, tie: false, pitches: [] }) !== "Bar is full") bad.push("7/8 capacity");
+    if (!M.tupletOk("8", 0, M.parseTuplet("5:3"))) bad.push("5:3 on eighths");
+    return bad.join("; ") || true;
+  });
+
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;

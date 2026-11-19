@@ -354,11 +354,13 @@
       <label class="new-only" for="f-sound">Sound</label><select class="new-only" id="f-sound"></select>
       <label class="new-only" for="f-key">Key</label><select class="new-only" id="f-key"></select>
       <label class="new-only" for="f-time">Time</label>
-      <select class="new-only" id="f-time">
-        <option>2/4</option><option>3/4</option><option selected>4/4</option><option>6/8</option>
-        <option>2/2</option><option>3/8</option><option>9/8</option><option>12/8</option>
-        <option value="C">C (common time)</option><option value="C|">¢ (cut time)</option>
-      </select>
+      <input class="new-only" id="f-time" list="times" pattern="\s*(C\|?|\d{1,2}\s*/\s*(1|2|4|8|16|32))\s*" required value="4/4" autocomplete="off" title="Pick one, or type any time such as 7/8 or 5/4">
+      <datalist id="times">
+        <option value="2/4"></option><option value="3/4"></option><option value="4/4"></option><option value="5/4"></option>
+        <option value="6/8"></option><option value="2/2"></option><option value="3/8"></option><option value="5/8"></option>
+        <option value="7/8"></option><option value="9/8"></option><option value="12/8"></option><option value="3/2"></option>
+        <option value="C">common time</option><option value="C|">cut time</option>
+      </datalist>
       <label class="new-only" for="f-bars">Bars</label><input class="new-only" id="f-bars" type="number" min="1" max="999" value="16">
     </div>
     <div class="actions">
@@ -374,11 +376,7 @@
     <div class="form">
       <label for="a-key">Key</label><select id="a-key"></select>
       <label for="a-time">Time</label>
-      <select id="a-time">
-        <option>2/4</option><option>3/4</option><option>4/4</option><option>5/4</option><option>6/8</option>
-        <option>2/2</option><option>3/8</option><option>9/8</option><option>12/8</option>
-        <option value="C">C (common time)</option><option value="C|">¢ (cut time)</option>
-      </select>
+      <input id="a-time" list="times" pattern="\s*(C\|?|\d{1,2}\s*/\s*(1|2|4|8|16|32))\s*" required autocomplete="off" title="Pick one, or type any time such as 7/8 or 5/4">
     </div>
     <div class="actions">
       <button class="btn" type="button" id="attrs-remove">Remove change</button>
@@ -435,15 +433,14 @@
     <h2>Tuplet</h2>
     <div class="form">
       <label for="t-ratio">Group</label>
-      <select id="t-ratio">
-        <option value="3,2">3 in the space of 2 (triplet)</option>
-        <option value="2,3">2 in the space of 3 (duplet)</option>
-        <option value="4,3">4 in the space of 3 (quadruplet)</option>
-        <option value="5,4">5 in the space of 4 (quintuplet)</option>
-        <option value="6,4">6 in the space of 4 (sextuplet)</option>
-      </select>
+      <input id="t-ratio" list="t-ratios" pattern="\s*\d{1,2}\s*[:,]\s*\d{1,2}\s*" required autocomplete="off" title="Pick one, or type any group such as 5:3 (5 in the space of 3)">
+      <datalist id="t-ratios">
+        <option value="3:2">triplet</option><option value="2:3">duplet</option><option value="4:3">quadruplet</option>
+        <option value="5:4">quintuplet</option><option value="6:4">sextuplet</option><option value="5:3">quintuplet in 3</option>
+        <option value="5:2">quintuplet in 2</option><option value="3:4">triplet in 4</option>
+      </datalist>
     </div>
-    <p class="note">With notes selected, they become one group. Otherwise the next notes you enter are. Press 9 or ; to turn the last group type on or off.</p>
+    <p class="note">"5:3" is 5 notes in the space of 3. With notes selected, they become one group. Otherwise the next notes you enter are. Press 9 or ; to turn the last group type on or off.</p>
     <div class="actions">
       <button class="btn" type="button" id="tuplet-cancel">Cancel</button>
       <button class="btn primary" value="ok" id="tuplet-ok">Apply</button>
