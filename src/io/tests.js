@@ -2,7 +2,7 @@
 import { exportMusicXML, importMusicXML, exportMXL, importMXL } from "./musicxml.js";
 import { exportMIDI, importMIDI } from "./midi.js";
 import { importBytes, sniff, LEGACY_MUS } from "./open.js";
-import { renderAudio, wavBytes, schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES, DRUM_BASES, bendOf } from "../play.js";
+import { renderAudio, wavBytes, schedule, beatsOf, clicks, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES, DRUM_BASES, bendOf } from "../play.js";
 import { GM, gmByName } from "../gm.js";
 import * as M from "../model.js";
 import { drumPitch } from "../drums.js";
@@ -1179,6 +1179,20 @@ export async function run({ check, eq }) {
     const cv = M.concertView(v);
     if (brief(cv.staves[0]) !== "C5:w" || cv.staves[0].transpose || M.chordText(cv.staves[0].bars[0][0].harm) !== "C7" || brief(v.staves[0]) !== "D5:w" || !v.staves[0].transpose) return "concert " + brief(cv.staves[0]);
     return M.concertView(u) === u || "copy without transposing parts";
+  });
+
+  await check("Metronome beats and count-in: compound time, pickups (DESIGN §39)", () => {
+    const s = M.newScore({ bars: 2, time: [6, 8] });
+    if (!eq(beatsOf(s, 0).ticks, [0, 720])) return "6/8 " + beatsOf(s, 0).ticks;
+    const p = M.newScore({ bars: 2 });
+    M.setBarLen(p, 0, 240); // an eighth pickup in 4/4
+    if (!eq(beatsOf(p, 0).ticks, []) || !eq(beatsOf(p, 1).ticks, [0, 480, 960, 1440])) return "pickup beats " + beatsOf(p, 0).ticks;
+    const { barStart, total } = schedule(p);
+    const c = clicks(p, barStart, total, { click: true, countIn: true });
+    const pre = c.filter((n) => n.start < 0).map((n) => n.start), on = c.filter((n) => n.start >= 0).map((n) => n.start);
+    if (!eq(pre, [-1680, -1200, -720, -240])) return "count-in " + pre; // three and a half beats: the pickup is the "and" of 4
+    if (!eq(on, [240, 720, 1200, 1680]) || c.find((n) => n.start === 240).midi !== 76) return "clicks " + on;
+    return true;
   });
 
   // Later phases: MIDI, MuseScore, musx.

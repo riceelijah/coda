@@ -1071,21 +1071,76 @@ function transposeSel(steps) {
 
 function togglePlay() { isPlaying() ? stopPlay() : startPlay(); }
 
+// Playback options (DESIGN §39): preferences of this browser, not part of the score.
+const PLAY_OPTS = ["click", "countIn", "loop"];
+const playOpts = (() => { try { return JSON.parse(localStorage.getItem(PREFIX + "play")) || {}; } catch { return {}; } })();
+function showPlayOpts() {
+  for (const k of PLAY_OPTS) {
+    const b = $("p-" + k);
+    b.dataset.label ||= b.textContent;
+    b.setAttribute("aria-checked", !!playOpts[k]);
+    b.textContent = (playOpts[k] ? "✓ " : "") + b.dataset.label;
+  }
+}
+function togglePlayOpt(k) {
+  playOpts[k] = !playOpts[k];
+  try { localStorage.setItem(PREFIX + "play", JSON.stringify(playOpts)); } catch { /* blocked */ }
+  showPlayOpts();
+  if (isPlaying()) message("Applies the next time you press Play");
+}
+
+// The bars to play: the selection's when Loop is on and notes are selected, else from the caret on.
+function playRange() {
+  const r = range();
+  if (!playOpts.loop || !r.length) return { from: state.caret.bar, to: null };
+  return { from: r[0].bar, to: r[r.length - 1].bar };
+}
+
+// Where a tick in a bar is drawn: [tick, x] at each note of the bar, on every staff (DESIGN §39).
+function barPoints(bar) {
+  const cells = state.hit.cells.filter((c) => c.bar === bar), pts = [];
+  for (const c of cells) {
+    const evs = lb(c.staff)[bar] || [];
+    let t = 0;
+    const at = evs.map((e) => { const a = t; t += M.eventTicks(e); return a; });
+    // a whole-bar rest is drawn mid-bar, so it says nothing about where the beat is
+    for (const n of c.notes) if (at[n.idx] !== undefined && !(evs.length === 1 && !evs[0].pitches.length)) pts.push([at[n.idx], n.x]);
+  }
+  pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const len = M.barLen(state.score, bar), one = pts.filter((p, k) => !k || p[0] !== pts[k - 1][0]); // leftmost per tick
+  if (cells.length) { if (!one.length || one[0][0]) one.unshift([0, (one[0]?.[1] ?? cells[0].x0 + 20) - 4]); one.push([len, cells[0].x1 - 6]); }
+  return { cells, pts: one };
+}
+
 function startPlay() {
-  const hl = $("play-hl"), sc = M.tracksOn(state.score);
+  const hl = $("play-hl"), cur = $("play-cur"), sc = M.tracksOn(state.score);
   if (!sc) { message("Every track is off: turn one on in Tracks", true); return; }
-  play(sc, state.caret.bar, (bar) => {
-    if (bar === null) { hl.style.display = "none"; $("b-play").disabled = false; return; }
-    place(hl, cellRect(state.hit.cells.filter((c) => c.bar === bar)));
-    hl.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, (text) => (text ? message(text, /couldn't/.test(text), text.endsWith("…")) : message(""))).catch((e) => { stopPlay(); message("Audio could not start: " + e.message, true); });
+  const { from, to } = playRange();
+  let shown = -1, bp = null;
+  play(sc, from, (bar, tick) => {
+    if (bar === null) { hl.style.display = cur.style.display = "none"; $("b-play").disabled = false; return; }
+    if (bar !== shown) {
+      shown = bar; bp = barPoints(bar);
+      place(hl, cellRect(bp.cells));
+      hl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+    const r = cellRect(bp.cells), { pts } = bp;
+    if (!r || !pts.length) { cur.style.display = "none"; return; }
+    let k = 0;
+    while (k + 1 < pts.length && pts[k + 1][0] <= tick) k++;
+    const [ta, xa] = pts[k], [tb, xb] = pts[k + 1] || pts[k];
+    const x = tick <= ta || tb === ta ? xa : xa + ((xb - xa) * (tick - ta)) / (tb - ta);
+    const x0 = Math.min(...bp.cells.map((c) => c.x0)), x1 = Math.max(...bp.cells.map((c) => c.x1));
+    place(cur, { left: r.left + ((x - x0) * r.width) / (x1 - x0), top: r.top, width: 2, height: r.height });
+  }, (text) => (text ? message(text, /couldn't/.test(text), text.endsWith("…")) : message("")), { ...playOpts, to })
+    .catch((e) => { stopPlay(); message("Audio could not start: " + e.message, true); });
   $("b-play").disabled = true;
 }
 
 function stopPlay() {
   stop();
   if ($("status-msg").textContent === "Loading sounds…") message("");
-  $("play-hl").style.display = "none";
+  $("play-hl").style.display = $("play-cur").style.display = "none";
   $("b-play").disabled = false;
 }
 
@@ -1601,6 +1656,9 @@ const CMD = {
   "m-zoomin": { run: () => setZoom(zoom * 1.2) },
   "m-zoomout": { run: () => setZoom(zoom / 1.2) },
   "m-zoom1": { run: () => setZoom(1) },
+  "p-play": { run: () => startPlay() },
+  "p-stop": { run: () => stopPlay() },
+  ...Object.fromEntries(PLAY_OPTS.map((k) => ["p-" + k, { run: () => togglePlayOpt(k) }])),
   "m-concert": { run: () => { // a view, not part of the score or undo (DESIGN §38)
     state.concert = !state.concert;
     $("m-concert").setAttribute("aria-checked", state.concert);
@@ -2054,6 +2112,7 @@ function init() {
   $("drum-cancel").onclick = () => $("drum").close("cancel");
   $("ask-cancel").onclick = () => $("ask").close("cancel");
   setupMenus();
+  showPlayOpts();
   { // compressed audio: whatever this browser can record, or no item at all
     const t = recordType();
     $("x-audio").hidden = !t;

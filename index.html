@@ -123,6 +123,7 @@
     border: 1px solid #2563eb; border-radius: 3px; background: #fff; color: #000; z-index: 5; }
   #caret-hl { background: rgba(37, 99, 235, .06); outline: 1px dashed rgba(37, 99, 235, .35); }
   #play-hl { background: rgba(250, 204, 21, .25); display: none; }
+  #play-cur { background: #d97706; width: 2px; display: none; }
 
   #status {
     grid-area: status; display: flex; justify-content: space-between; gap: 16px;
@@ -384,6 +385,15 @@
         <button role="menuitem" id="m-instruments">Parts and instruments…</button>
         <button role="menuitem" id="m-tracks">Tracks to play and export…</button>
       </div></div>
+    <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Play</button>
+      <div class="mlist" role="menu" hidden>
+        <button role="menuitem" id="p-play" data-short="Space">Play from this bar</button>
+        <button role="menuitem" id="p-stop">Stop</button>
+        <hr>
+        <button role="menuitemcheckbox" aria-checked="false" id="p-click">Click</button>
+        <button role="menuitemcheckbox" aria-checked="false" id="p-countIn">Count-in</button>
+        <button role="menuitemcheckbox" aria-checked="false" id="p-loop">Loop the selected bars</button>
+      </div></div>
     <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Help</button>
       <div class="mlist" role="menu" hidden>
         <button role="menuitem" id="b-help" data-short="?">Keyboard shortcuts</button>
@@ -407,6 +417,7 @@
     <div id="systems" aria-label="Score. Click a staff to add a note."></div>
     <div id="caret-hl" class="hl"></div>
     <div id="play-hl" class="hl"></div>
+    <div id="play-cur" class="hl"></div>
     <div id="ghost"></div>
     <div id="sel-box"></div>
     <input id="lyric-box" type="text" hidden autocomplete="off" spellcheck="false" aria-label="Lyric for the selected note. Space or Tab: next note. Hyphen: next syllable. Enter: done.">

@@ -455,10 +455,10 @@ async function prepare(all, waitMs, onStatus = () => {}) {
 // Every note into context `c` from time t0. Play and the audio export share this.
 // ponytail: schedules every note up front; fine for a few thousand notes. Switch to a
 // look-ahead scheduler if long scores stutter.
-function scheduleNotes(c, dest, notes, t0, timeOf) {
+function scheduleNotes(c, dest, notes, t0, timeOf, limit = Infinity) {
   for (const n of notes) {
     if (n.root) continue; // sounded by the note its slide starts from
-    const end = Math.max(n.end, n.ring || 0, ...(n.glide || []).map((s) => s.note.end));
+    const end = Math.min(limit, Math.max(n.end, n.ring || 0, ...(n.glide || []).map((s) => s.note.end))); // a range played stops at its end
     const len = Math.max(0.06, timeOf(end) - timeOf(n.start));
     note(c, dest, n.midi, n.program, t0 + timeOf(n.start), len, n.sound, n.vel, bendOf(n, len, timeOf));
   }
@@ -542,36 +542,70 @@ export function recordCompressed(buf, onProgress = () => {}) {
   });
 }
 
-// Start playback. `onBar(barIndex|null)` is called as each bar starts, and with null at the end.
-// `onStatus(text)` reports loading and missing sounds.
-export async function play(score, from, onBar, onStatus = () => {}) {
+// Metronome beats in bar b (DESIGN §39): ticks from the bar's start. Compound time beats in dotted
+// quarters. A pickup counts from the bar's end, so its beats line up with bar 2's.
+export function beatsOf(score, b) {
+  const { time } = attrsAt(score, b), cap = barCapacity(time), len = barLen(score, b);
+  const beat = time[1] === 8 && time[0] % 3 === 0 && time[0] > 3 ? 720 : 1920 / time[1];
+  const off = b === 0 && len < cap ? cap - len : 0, out = [];
+  for (let t = Math.ceil(off / beat) * beat; t < off + len; t += beat) out.push(t - off);
+  return { beat, off, cap, ticks: out };
+}
+const click = (start, accent) => ({ start, end: start + 60, midi: accent ? 76 : 77, program: -1, vel: accent ? 100 : 75, staff: -1 });
+// Clicks for the bars played, and a count-in before them: the missing beats of a pickup, else a bar.
+export function clicks(score, barStart, total, { click: on, countIn }) {
+  const out = [];
+  if (on) barStart.forEach(({ bar, tick }) => { for (const t of beatsOf(score, bar).ticks) if (tick + t < total) out.push(click(tick + t, t === 0)); });
+  if (countIn && barStart.length) {
+    const { beat, off, cap } = beatsOf(score, barStart[0].bar), n = off || cap;
+    for (let t = -n; t < 0; t += beat) out.push(click(t, t === -n));
+  }
+  return out;
+}
+
+// Start playback. `onPos(bar, tick in bar)` is called each frame while a bar plays, and with null
+// at the end. `onStatus(text)` reports loading and missing sounds. opts (DESIGN §39): {to: last bar
+// to play, loop, click, countIn}.
+export async function play(score, from, onPos, onStatus = () => {}, opts = {}) {
   stop();
-  const me = { master: null, raf: 0, lastBar: -1 };
+  const me = { master: null, raf: 0 };
   current = me; // set before awaiting, so Stop while sounds load works
-  try { await start(me, score, from, onBar, onStatus); }
+  try { await start(me, score, from, onPos, onStatus, opts); }
   catch (e) { if (current === me) stop(); throw e; }
 }
 
-async function start(me, score, from, onBar, onStatus) {
+async function start(me, score, from, onPos, onStatus, opts) {
   audio();
   if (ctx.state === "suspended") await ctx.resume();
   if (current !== me) return;
-  const { notes, barStart, total, timeOf } = schedule(score, from);
-  const msgs = await prepare(notes, 8000, onStatus);
+  let { notes, barStart, total, timeOf } = schedule(score, from);
+  const k = opts.to == null ? -1 : barStart.findIndex((b) => b.bar === opts.to);
+  if (k >= 0) { total = barStart[k + 1]?.tick ?? total; barStart = barStart.slice(0, k + 1); notes = notes.filter((n) => n.start < total); }
+  const ticks = clicks(score, barStart, total, opts), pre = ticks.filter((n) => n.start < 0), beats = ticks.filter((n) => n.start >= 0);
+  const msgs = await prepare([...notes, ...ticks], 8000, onStatus);
   if (current !== me) return;
   if (msgs) onStatus(msgs);
   const master = output(ctx);
   me.master = master;
-  const t0 = ctx.currentTime + 0.1;
-  scheduleNotes(ctx, master, notes, t0, timeOf);
-  const end = timeOf(total), at = barStart.map((b) => timeOf(b.tick));
+  const lead = pre.length ? -timeOf(pre[0].start) : 0, t0 = ctx.currentTime + 0.1 + lead, end = timeOf(total);
+  scheduleNotes(ctx, master, pre, t0, timeOf);
+  let passes = 0;
+  const pass = () => { scheduleNotes(ctx, master, [...notes, ...beats], t0 + passes * end, timeOf, total); passes++; };
+  pass();
+  const at = barStart.map((b) => timeOf(b.tick));
   const tick = () => {
     if (current !== me) return;
-    const now = ctx.currentTime - t0;
-    if (now >= end) { stop(); onBar(null); return; }
-    let bar = barStart[0].bar;
-    barStart.forEach((b, k) => { if (at[k] <= now) bar = b.bar; });
-    if (bar !== me.lastBar) { me.lastBar = bar; onBar(bar); }
+    let now = ctx.currentTime - t0;
+    if (opts.loop && now >= passes * end - 0.2) pass(); // the next time round, queued just ahead
+    if (!opts.loop && now >= end) { stop(); onPos(null); return; }
+    if (now >= 0) {
+      now -= Math.floor(now / end) * end;
+      let j = 0;
+      while (j + 1 < at.length && at[j + 1] <= now) j++;
+      let lo = barStart[j].tick, hi = barStart[j + 1]?.tick ?? total; // the tick sounding now
+      for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (timeOf(m) <= now) lo = m; else hi = m; }
+      onPos(barStart[j].bar, lo - barStart[j].tick);
+    }
     me.raf = requestAnimationFrame(tick);
   };
   me.raf = requestAnimationFrame(tick);
