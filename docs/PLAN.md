@@ -61,6 +61,7 @@ only says what to build in what order and how to know each phase is finished.
 | 34 | Tempo changes from any bar (DESIGN §29) | done (no accel./rit.) |
 | 35 | Text above notes and rehearsal marks (DESIGN §30) | done (`.musx` text not read) |
 | 36 | Brass effects and slides: scoop, fall, doit, gliss with pitch bends (DESIGN §31) | done (no MIDI pitch bends) |
+| 37 | Tracks: choose the parts that play and export (DESIGN §32); sampled GM drum kit (DESIGN §27) | done |
 
 ---
 

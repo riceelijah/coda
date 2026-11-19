@@ -42,6 +42,10 @@
   }
   .tb:hover { background: var(--btn-hover); }
   .tb:disabled { opacity: .4; cursor: default; background: none; }
+  #b-tracks.some { color: var(--accent, #2563eb); font-weight: 600; } /* not every part plays */
+  #track-rows { display: grid; gap: 6px; margin: 12px 0; max-height: 50vh; overflow: auto; }
+  #track-rows .track { display: flex; align-items: center; gap: 8px; }
+  #track-rows label { flex: 1; }
   #menubar { display: flex; gap: 2px; }
   .menu { position: relative; }
   .mb { background: none; border: 1px solid transparent; border-radius: 6px; padding: 5px 9px; cursor: pointer; }
@@ -323,6 +327,7 @@
         <button role="menuitem" id="b-attrs">Key and time…</button>
         <button role="menuitem" id="m-details">Title, composer, tempo…</button>
         <button role="menuitem" id="m-instruments">Parts and instruments…</button>
+        <button role="menuitem" id="m-tracks">Tracks to play and export…</button>
       </div></div>
     <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Help</button>
       <div class="mlist" role="menu" hidden>
@@ -333,6 +338,7 @@
   <span class="sep"></span>
   <button class="tb" id="b-play" title="Play from the current bar (Space)">▶ Play</button>
   <button class="tb" id="b-stop" title="Stop (Space)">■ Stop</button>
+  <button class="tb" id="b-tracks" title="Choose which parts play and export">Tracks: all</button>
   <label id="tempo-wrap" title="Tempo in quarter notes per minute">♩ = <input id="tempo" type="number" min="20" max="400" step="1" aria-label="Tempo"></label>
   <input type="file" id="file" hidden>
 </header>
@@ -478,6 +484,18 @@
     <div class="actions">
       <button class="btn" type="button" id="tuplet-cancel">Cancel</button>
       <button class="btn primary" value="ok" id="tuplet-ok">Apply</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="tracks">
+  <form method="dialog">
+    <h2>Tracks</h2>
+    <p class="note">Ticked parts play and go into exports (audio, MIDI, MusicXML, MuseScore). Save and print always keep every part.</p>
+    <div id="track-rows"></div>
+    <div class="actions">
+      <button class="btn" type="button" id="tracks-all">All on</button>
+      <button class="btn primary" value="ok">Done</button>
     </div>
   </form>
 </dialog>

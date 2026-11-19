@@ -15,7 +15,8 @@ Coda is an independent project and is not affiliated with or endorsed by MakeMus
 - **Type** letters to add notes quickly. Coda picks the octave closest to the previous note and moves to the next bar when one fills up.
 - The **Selection tool** (arrow, top of the left palette, or `V`) selects instead of adding notes: click a note, drag a box around notes, Shift+click to extend. Duration, dot, accidentals, tie, transpose and tuplets then apply to all the selected notes. Right-click a note or bar for a menu of actions.
 - The **Notes** menu adds dynamics, slurs (`S`), crescendo and diminuendo hairpins, articulations, lyrics (`L`, then type: Space moves to the next note, `-` splits a word, ↑/↓ switch between up to 5 verses) and grace notes (the grace button, then click a note or type A–G). Dynamics and hairpins change how loud the part plays.
-- **Drums:** choose *Drums* in New, or add a *Drum staff* in Score ▸ Parts and instruments. Click a line or space (or type A–G) for the drum that goes there: bass drum, snare, toms, hi-hats and cymbals, with x noteheads for cymbals. ↑/↓ move to the next drum; Notes ▸ Drum sound… picks any of the 47 General MIDI drums. Drums play from a kit built into Coda (synthesized, so it works offline).
+- **Drums:** choose *Drums* in New, or add a *Drum staff* in Score ▸ Parts and instruments. Click a line or space (or type A–G) for the drum that goes there: bass drum, snare, toms, hi-hats and cymbals, with x noteheads for cymbals. ↑/↓ move to the next drum; Notes ▸ Drum sound… picks any of the 47 General MIDI drums. Drums play a recorded General MIDI kit (FluidR3), downloaded on first use; offline, a kit built into Coda stands in.
+- **Tracks:** the toolbar's *Tracks* button (or Score ▸ Tracks to play and export…) picks which parts play and go into exports: export just the trumpet part, or an audio file without the piano. Saving always keeps every part.
 - **Falls and slides:** Notes ▸ Scoop, Fall and Doit for brass effects, and Notes ▸ Slide to next for a trombone-style glissando (select a phrase to make every note glide into the next). They play as real pitch bends.
 - **Score ▸ Key and time** changes the key or time signature from the current bar on; **Score ▸ Clef from this bar** changes a staff's clef. **View** zooms the score.
 - **Score ▸ Parts and instruments** adds, removes, renames and reorders parts (treble, bass, alto or tenor staff, or a grand staff), and picks a sound for each part from the 128 General MIDI instruments (New also asks for one). Sounds download the first time a part uses them and are then kept in your browser; without a connection, parts play a plain tone. Each part can also be set to a transposing instrument (B♭ clarinet or trumpet, F horn, E♭ alto sax and others): the notes are then written for that instrument and still sound the same.
@@ -92,7 +93,9 @@ the [LAME](https://lame.sourceforge.io/) encoder (LGPL); see [vendor/README.md](
 Instrument sounds are the FluidR3_GM sound set by Frank Wen (MIT), in the MP3 rendering from
 [gleitz/midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts) (CC BY 3.0). They are not
 in this repository: the browser downloads each one from jsDelivr (or gleitz.github.io) the first time
-a score needs it.
+a score needs it. Drum sounds are FluidR3's GM Standard kit (Copyright (c) 2000-2002, 2008 Frank
+Wen, MIT), as packaged by Sergey Surikov's [webaudiofontdata](https://github.com/surikov/webaudiofontdata)
+(MIT), downloaded the same way from jsDelivr (or surikov.github.io).
 
 The `.musx` test files in `samples/musx/` come from [musxdom](https://github.com/openmusx/musxdom)
 (MIT); see [samples/musx/README.md](samples/musx/README.md).

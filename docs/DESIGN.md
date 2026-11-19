@@ -1249,9 +1249,13 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   don't apply; ties match by drum, not position. A Shift+letter or chord click that snaps to a
   drum already in the chord is refused rather than taking it out. Copy/paste between drum and
   pitched staves is refused.
-- **Sound:** synthesized (no samples needed, works offline and in audio export): a few families
-  (kick, snare, tom, hi-hat, cymbal, hand drum, wood/metal hit, shaker) shaped by the drum number.
-  Dynamics apply. A sampled kit would need a new sound source.
+- **Sound:** FluidR3's GM Standard kit, one recording per drum, fetched like the instrument
+  samples (§13.3, same cache and loading) from surikov/webaudiofontdata at a pinned commit on
+  jsDelivr, else surikov.github.io: `sound/128{N}_0_FluidR3_GM_sf2_file.js`, N the drum number.
+  Each file is a script holding the mp3 as base64; Coda reads the base64 out with a regex and never
+  runs it. A hit plays the whole recording at its own pitch, whatever the written length. Until a
+  drum's recording loads (offline, or a host down) it plays the built-in synth (`src/drumsynth.js`:
+  a few families shaped by the drum number). Dynamics apply.
 - **Files:** MusicXML `<unpitched>` with display step/octave, one `<score-instrument>` +
   `<midi-instrument>` (channel 10, `midi-unpitched` = drum + 1) per drum, `<instrument id>` on
   each note, `<notehead>` for non-normal heads, `<clef><sign>percussion</sign>`. MuseScore:
@@ -1392,3 +1396,22 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   `Glissando` spanner per note. `.musx` SMuFL brass symbols: U+E5D0 scoop, E5D1–E5D6 lifts and
   doits, E5D7–E5DF falls (from the SMuFL table; no `.musx` sample with them yet). Slides that break
   the rules above are counted.
+
+## 32. Tracks: which parts play and export (Phase 37)
+
+- **Model:** a track is a part (`partGroups`: one staff, or a braced pair). `st.off = true` on
+  every staff of a part turns it off; `setTrackOn` sets the whole part, so a pair never splits
+  (hands-separate practice is left out). `tracks(score)` lists `{staves, name, on, perc}` rows (a
+  DAW-style track view would list the same), and `tracksOn(score)` is a copy holding only the
+  parts that are on, every bar kept, so timing, repeats, tempo and bar numbers match the full
+  score; null when every track is off.
+- **Uses:** Play and every Export item (MusicXML, .mxl, MuseScore, MIDI, WAV, MP3, compressed
+  audio) take `tracksOn`, so exporting one part is part extraction. Save, autosave and Print/PDF
+  always keep every part. The export message names the parts left out; with every track off, Play
+  and Export refuse.
+- **UI:** the toolbar's Tracks button ("Tracks: all", or "Tracks: 1 of 3" highlighted) and Score ▸
+  Tracks to play and export… open a dialog: a checkbox per part, "Only this", "All on". Each change
+  is an edit (undoable, saved with the score). Changes while playing apply at the next Play.
+  ponytail: no per-track volume or live mute; a gain bus per track in play.js is the upgrade, and
+  where a DAW view's volume and pan would go.
+

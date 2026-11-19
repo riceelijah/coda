@@ -10,7 +10,8 @@ Rules that are easy to break by accident:
 - No build step, bundler, framework, or `package.json`. Plain ES modules, relative paths only.
 - Only three dependencies, vendored in `vendor/`: VexFlow 4.2.3, fflate 0.8.2, and wasm-media-encoders
   0.7.0 (MP3 export only, loaded on demand). Ask before adding any.
-  Instrument sounds are fetched at run time from cdn.jsdelivr.net (pinned commit) and gleitz.github.io.
+  Instrument sounds are fetched at run time from cdn.jsdelivr.net (pinned commits), gleitz.github.io
+  and surikov.github.io (drum kit fallback).
 - `src/model.js` stays pure: no DOM, no VexFlow.
 - The names "Finale", "NotePad" and "MakeMusic" appear only in the README and in the one
   legacy-file message quoted in DESIGN.md §9.1. Never in UI chrome, titles, or icons.

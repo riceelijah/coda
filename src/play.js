@@ -144,35 +144,51 @@ export const BASES = [
   "https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@044fab8e1456bfafc5776e86dfd6bb8697149aef/FluidR3_GM",
   "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM",
 ];
+// The GM drum kit (DESIGN §27): FluidR3's Standard kit, one hit per drum, packaged as JS with a
+// base64 mp3 by surikov/webaudiofontdata (MIT; FluidR3 MIT). Pinned commit first.
+export const DRUM_BASES = [
+  "https://cdn.jsdelivr.net/gh/surikov/webaudiofontdata@23ca907d4370a04fd89ca483a92915e4d6159ab9/sound",
+  "https://surikov.github.io/webaudiofontdata/sound",
+];
 const CACHE = "coda-sounds-v1";
 const FLATS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 export const noteName = (m) => FLATS[m % 12] + (Math.floor(m / 12) - 1);
 // One recording per 3 semitones, repitched (at most ±1 semitone).
 export const rootFor = (m) => Math.min(108, Math.max(21, Math.round(m / 3) * 3));
-const keyOf = (program, m) => `${program}:${rootFor(m)}`;
+// Drums (program -1) have one recording per drum, played as recorded.
+const keyOf = (program, m) => (program < 0 ? `-1:${m}` : `${program}:${rootFor(m)}`);
+// Where one recording lives: hosts in order, and the path on each.
+const sourceOf = (program, root) => (program < 0 ? { bases: DRUM_BASES, path: `/128${root}_0_FluidR3_GM_sf2_file.js` }
+  : { bases: BASES, path: `/${GM[program].slug}-mp3/${noteName(root)}.mp3` });
+// A drum file is a script holding the mp3 as base64; read it out rather than run it.
+function drumMp3(text) {
+  const b64 = /file:'([A-Za-z0-9+/=]+)'/.exec(text)?.[1];
+  if (!b64) throw new Error("Not a drum sample");
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
+}
 // Instruments whose notes are held (looped past the recording's length) rather than left to ring out.
 export const sustained = (p) => (p >= 16 && p <= 23) || (p >= 40 && p <= 44) || (p >= 48 && p <= 54) || (p >= 56 && p <= 95);
 
 // The sample keys ("program:root") a score's notes need.
 export function needed(score) {
-  return new Set(schedule(score).notes.filter((n) => n.program >= 0 && !n.root).map((n) => keyOf(n.program, n.midi)));
+  return new Set(schedule(score).notes.filter((n) => !n.root).map((n) => keyOf(n.program, n.midi)));
 }
 
 // Bytes of one recording: the browser cache, then each base in turn. Failures are not cached.
 export async function fetchSample(program, root, { fetchFn = fetch, cacheName = CACHE } = {}) {
-  const path = `/${GM[program].slug}-mp3/${noteName(root)}.mp3`;
+  const { bases, path } = sourceOf(program, root);
   let cache = null;
   try {
     cache = await caches.open(cacheName);
-    const hit = await cache.match(BASES[0] + path);
+    const hit = await cache.match(bases[0] + path);
     if (hit) return await hit.arrayBuffer();
   } catch { cache = null; /* no Cache API (private mode, http): fetch every time */ }
-  for (const base of BASES) {
+  for (const base of bases) {
     try {
       const res = await fetchFn(base + path);
       if (!res.ok) continue;
-      const buf = await res.arrayBuffer();
-      try { await cache?.put(BASES[0] + path, new Response(buf.slice(0), { headers: { "content-type": "audio/mpeg" } })); } catch { /* full */ }
+      const buf = program < 0 ? drumMp3(await res.text()) : await res.arrayBuffer(); // cached as the mp3 either way
+      try { await cache?.put(bases[0] + path, new Response(buf.slice(0), { headers: { "content-type": "audio/mpeg" } })); } catch { /* full */ }
       return buf;
     } catch { /* offline or blocked: try the next base */ }
   }
@@ -193,8 +209,8 @@ function getBytes(key) {
 
 // A recording that downloaded but won't decode must not stay cached, or it would never be retried.
 function uncache(key) {
-  const [p, root] = key.split(":").map(Number);
-  caches.open(CACHE).then((c) => c.delete(`${BASES[0]}/${GM[p].slug}-mp3/${noteName(root)}.mp3`)).catch(() => {});
+  const { bases, path } = sourceOf(...key.split(":").map(Number));
+  caches.open(CACHE).then((c) => c.delete(bases[0] + path)).catch(() => {});
 }
 
 function load(key) {
@@ -273,7 +289,11 @@ function userFor(sound, m) {
 // vel: MIDI velocity, 80 (mf) plays at the usual level.
 // fx: pitch bends from bendOf (DESIGN §31), or null.
 function note(c, dest, m, program, start, len, sound, vel = 80, fx = null) {
-  if (program < 0) { drumHit(c, dest, m, start, vel / 80); return; }
+  if (program < 0) { // the sampled kit, or the built-in synth when it isn't loaded (offline)
+    const b = buffers.get(keyOf(-1, m));
+    if (b) sampledVoice(c, dest, b, m, m, start, b.duration, false, vel / 80); else drumHit(c, dest, m, start, vel / 80);
+    return;
+  }
   const u = userFor(sound, m), level = vel / 80;
   if (u) { sampledVoice(c, dest, u.buf, m, u.root, start, len, false, level, fx); return; }
   const buf = buffers.get(keyOf(program, m));
@@ -308,7 +328,7 @@ export function audition(midis, program = 0, sound) {
     setTimeout(() => out.disconnect(), 2000);
     for (const m of midis) {
       note(ctx, out, m, program, t, 0.35, sound);
-      if (program >= 0 && !userFor(sound, m)) load(keyOf(program, m)).catch(() => {});
+      if (!userFor(sound, m)) load(keyOf(program, m)).catch(() => {});
     }
     if (sound) loadUser(sound);
   } catch { /* audio unavailable: editing still works */ }
@@ -322,13 +342,13 @@ async function prepare(all, waitMs, onStatus = () => {}) {
   if (ids.length) await Promise.all(ids.map(loadUser));
   // notes your sound can't play (missing, or outside its range) use the part's instrument instead
   const fell = notes.filter((n) => n.sound && !userFor(n.sound, n.midi)).length;
-  const keys = [...new Set(notes.filter((n) => n.program >= 0 && !userFor(n.sound, n.midi)).map((n) => keyOf(n.program, n.midi)))].filter((k) => !buffers.has(k));
+  const keys = [...new Set(notes.filter((n) => !userFor(n.sound, n.midi)).map((n) => keyOf(n.program, n.midi)))].filter((k) => !buffers.has(k));
   const msgs = fell ? [`${fell} note${fell > 1 ? "s" : ""} outside your sound's range (or a missing sound) play the part's instrument.`] : [];
   if (keys.length) {
     onStatus("Loading sounds…");
     const all = Promise.allSettled(keys.map(load));
     await (waitMs === Infinity ? all : Promise.race([all, new Promise((r) => setTimeout(r, waitMs))]));
-    if (keys.some((k) => !buffers.has(k))) msgs.push("Some instrument sounds couldn't be loaded, so those notes play a plain tone.");
+    if (keys.some((k) => !buffers.has(k))) msgs.push("Some instrument sounds couldn't be loaded, so those notes play a plain tone (drums: the built-in kit).");
     else if (!msgs.length) onStatus("");
   }
   return msgs.join(" ");

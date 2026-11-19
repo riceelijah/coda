@@ -211,6 +211,7 @@ function updateStatus() {
   else parts.push(["", "Dotted ", "Double-dotted "][a.dots] + (a.dots ? DUR_NAMES[a.dur].toLowerCase() : DUR_NAMES[a.dur]) + (a.rest ? " rest" : "") + (a.tup ? ` · ${a.tup[0]}:${a.tup[1]} tuplet` : "") + (a.chord ? " · chord mode" : ""));
   if (a.grace) parts.push("grace notes (Esc to stop)");
   $("status-pos").textContent = parts.join(" · ");
+  updateTracksButton();
 }
 
 let msgTimer = 0;
@@ -966,8 +967,9 @@ function transposeSel(steps) {
 function togglePlay() { isPlaying() ? stopPlay() : startPlay(); }
 
 function startPlay() {
-  const hl = $("play-hl");
-  play(state.score, state.caret.bar, (bar) => {
+  const hl = $("play-hl"), sc = M.tracksOn(state.score);
+  if (!sc) { message("Every track is off: turn one on in Tracks", true); return; }
+  play(sc, state.caret.bar, (bar) => {
     if (bar === null) { hl.style.display = "none"; $("b-play").disabled = false; return; }
     place(hl, cellRect(state.hit.cells.filter((c) => c.bar === bar)));
     hl.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -981,6 +983,49 @@ function stopPlay() {
   $("play-hl").style.display = "none";
   $("b-play").disabled = false;
 }
+
+// ---------- tracks (DESIGN §32) ----------
+// Which parts play and export. Each change is an edit (saved with the score, undoable).
+
+function openTracks() { fillTracks(); $("tracks").showModal(); }
+
+function fillTracks() {
+  $("track-rows").replaceChildren(...M.tracks(state.score).map((t) => {
+    const row = document.createElement("div"), box = document.createElement("input"), lab = document.createElement("label"), only = document.createElement("button");
+    row.className = "track";
+    box.type = "checkbox"; box.checked = t.on; box.id = "trk-" + t.staves[0];
+    box.onchange = () => setTracks((sc) => M.setTrackOn(sc, t.staves[0], box.checked));
+    lab.htmlFor = box.id; lab.textContent = t.name + (t.staves.length > 1 ? " (2 staves)" : "");
+    only.type = "button"; only.className = "btn"; only.textContent = "Only this";
+    only.onclick = () => setTracks((sc) => { for (const u of M.tracks(sc)) M.setTrackOn(sc, u.staves[0], u.staves[0] === t.staves[0]); return null; });
+    row.append(box, lab, only);
+    return row;
+  }));
+}
+
+function setTracks(fn) {
+  edit(fn);
+  fillTracks();
+  if (isPlaying()) message("Track changes apply the next time you press Play");
+}
+
+function updateTracksButton() {
+  const ts = M.tracks(state.score), on = ts.filter((t) => t.on).length, b = $("b-tracks");
+  b.textContent = on === ts.length ? "Tracks: all" : `Tracks: ${on} of ${ts.length}`;
+  b.classList.toggle("some", on < ts.length);
+}
+
+// The score an export uses: the tracks that are on. Throws when none are.
+function exportScore() {
+  const sc = M.tracksOn(state.score);
+  if (!sc) throw new Error("every track is off: turn one on in Tracks");
+  return sc;
+}
+// Said after an export that left parts out.
+const leftOut = () => {
+  const off = M.tracks(state.score).filter((t) => !t.on).map((t) => t.name);
+  return off.length ? `Left out (track off): ${off.join(", ")}.` : "";
+};
 
 // ---------- setup dialog ----------
 
@@ -1383,10 +1428,10 @@ const CMD = {
   "b-open": { run: () => $("file").click() },
   "b-lib": { run: () => openLibrary() },
   "b-save": { run: () => saveFile() },
-  "x-pdf": { run: () => window.print() },
+  "x-pdf": { run: () => { if (leftOut()) message("Print and PDF show every part; tracks that are off only leave playback and exports."); window.print(); } },
   "b-print": { run: () => window.print() },
-  "x-musicxml": { run: () => saveFile() },
-  ...Object.fromEntries(["x-mxl", "x-mscz", "x-midi", "x-wav", "x-mp3", "x-audio"].map((id) => [id, { run: () => exportAs(id), on: () => !exporting && (id !== "x-audio" || !!recordType()) }])),
+  "m-tracks": { run: () => openTracks() },
+  ...Object.fromEntries(["x-musicxml", "x-mxl", "x-mscz", "x-midi", "x-wav", "x-mp3", "x-audio"].map((id) => [id, { run: () => exportAs(id), on: () => !exporting && (id !== "x-audio" || !!recordType()) }])),
   "b-undo": { run: () => undo(), on: () => state.undo.length > 0 },
   "b-redo": { run: () => redo(), on: () => state.redo.length > 0 },
   "m-cut": { run: () => copySel(true), on: hasSel },
@@ -1695,9 +1740,10 @@ const fileBase = () => (state.score.title || "score").replace(/[\\/:*?"<>|]+/g, 
 // ---------- export (DESIGN §19) ----------
 // id -> how to make the file. `note` is said after saving, for formats that leave things out.
 const EXPORTS = {
-  "x-mxl": { ext: "mxl", mime: "application/vnd.recordare.musicxml", make: async () => (await import("./io/musicxml.js")).exportMXL(state.score) },
-  "x-mscz": { ext: "mscz", mime: "application/zip", make: async () => (await import("./io/mscz.js")).exportMSCZ(state.score) },
-  "x-midi": { ext: "mid", mime: "audio/midi", make: async () => (await import("./io/midi.js")).exportMIDI(state.score),
+  "x-musicxml": { ext: "musicxml", mime: "application/vnd.recordare.musicxml+xml", make: async () => (await import("./io/musicxml.js")).exportMusicXML(exportScore()) },
+  "x-mxl": { ext: "mxl", mime: "application/vnd.recordare.musicxml", make: async () => (await import("./io/musicxml.js")).exportMXL(exportScore()) },
+  "x-mscz": { ext: "mscz", mime: "application/zip", make: async () => (await import("./io/mscz.js")).exportMSCZ(exportScore()) },
+  "x-midi": { ext: "mid", mime: "audio/midi", make: async () => (await import("./io/midi.js")).exportMIDI(exportScore()),
     note: "MIDI keeps notes, tempo, key, time and instruments; note spellings, marks and layers are not kept." },
   "x-wav": { ext: "wav", mime: "audio/wav", audio: true, make: async () => wavBytes((await audioBuffer()).buffer) },
   "x-mp3": { ext: "mp3", mime: "audio/mpeg", audio: true, make: async () => (await import("./mp3.js"))
@@ -1709,7 +1755,7 @@ const EXPORTS = {
 };
 let exporting = false, audioNote = "";
 async function audioBuffer() {
-  const r = await renderAudio(state.score, (t) => message(t || "Rendering audio…", false, true));
+  const r = await renderAudio(exportScore(), (t) => message(t || "Rendering audio…", false, true));
   audioNote = r.status;
   return r;
 }
@@ -1724,7 +1770,7 @@ async function exportAs(id) {
     const ext = x.ext || { "audio/ogg": "ogg", "audio/webm": "webm", "audio/mp4": "m4a" }[data.type] || "audio";
     const name = `${fileBase()}.${ext}`;
     download(data instanceof Blob ? data : new Blob([data], { type: x.mime }), name);
-    message([`Exported ${name}.`, x.note, audioNote].filter(Boolean).join(" "));
+    message([`Exported ${name}.`, leftOut(), x.note, audioNote].filter(Boolean).join(" "));
   } catch (e) {
     if (e.message === "Stopped") message("Export stopped");
     else { console.error(e); message("Export failed: " + (e.message || e), true); }
@@ -1823,6 +1869,8 @@ function init() {
   $("tuplet").addEventListener("close", closeTuplet);
   $("tuplet-cancel").onclick = () => $("tuplet").close("cancel");
   $("drum").addEventListener("close", closeDrum);
+  $("b-tracks").onclick = openTracks;
+  $("tracks-all").onclick = () => setTracks((sc) => { for (const t of M.tracks(sc)) M.setTrackOn(sc, t.staves[0], true); return null; });
   $("drum-cancel").onclick = () => $("drum").close("cancel");
   $("ask-cancel").onclick = () => $("ask").close("cancel");
   setupMenus();

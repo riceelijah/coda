@@ -2,7 +2,7 @@
 import { exportMusicXML, importMusicXML, exportMXL, importMXL } from "./musicxml.js";
 import { exportMIDI, importMIDI } from "./midi.js";
 import { importBytes, sniff, LEGACY_MUS } from "./open.js";
-import { renderAudio, wavBytes, schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES, bendOf } from "../play.js";
+import { renderAudio, wavBytes, schedule, noteName, rootFor, needed, fetchSample, sampledVoice, sustained, output, BASES, DRUM_BASES, bendOf } from "../play.js";
 import { GM, gmByName } from "../gm.js";
 import * as M from "../model.js";
 import { drumPitch } from "../drums.js";
@@ -513,6 +513,41 @@ export async function run({ check, eq }) {
     return [...needed(sc)].sort().join() === "40:48,40:60,40:63" || [...needed(sc)].join();
   });
 
+  await check("drum samples: one per drum, read out of the kit's script, needed by a drum score (DESIGN §27)", async () => {
+    const cacheName = "codatest-drums", seen = [];
+    try {
+      const js = async (url) => { seen.push(url); return new Response("var _drum_38_0={zones:[{originalPitch:3800,file:'" + btoa("mp3!") + "'}]}"); };
+      const buf = await fetchSample(-1, 38, { fetchFn: js, cacheName });
+      if (new TextDecoder().decode(buf) !== "mp3!") return "bytes";
+      if (seen[0] !== DRUM_BASES[0] + "/12838_0_FluidR3_GM_sf2_file.js") return "url " + seen[0];
+      let failed = false; // a page with no sample in it is not a sound
+      try { await fetchSample(-1, 40, { fetchFn: async () => new Response("<html>"), cacheName }); } catch { failed = true; }
+      if (!failed) return "bad file accepted";
+    } finally { await caches.delete(cacheName).catch(() => {}); }
+    const s = M.newScore({ preset: "drums", bars: 1 });
+    s.staves[0].bars[0] = [ev("w", null, {})];
+    s.staves[0].bars[0][0].pitches = [drumPitch(38), drumPitch(42)];
+    const got = [...needed(s)].sort().join();
+    return got === "-1:38,-1:42" || got;
+  });
+  await check("tracks: a part turns off whole, plays and exports without it, Save keeps it (DESIGN §32)", () => {
+    const s = M.newScore({ preset: "piano", bars: 2 });
+    M.arrangeParts(s, [{ from: 0, name: "Piano" }, { from: null, kind: "treble", name: "Flute", program: 73 }]);
+    s.staves[0].bars[0] = [ev("w", "C5")]; s.staves[1].bars[0] = [ev("w", "C3")]; s.staves[2].bars[1] = [ev("w", "G5")];
+    s.measures[1].repEnd = 2;
+    const before = exportMusicXML(s);
+    if (M.setTrackOn(s, 1, false) || !s.staves[0].off || !s.staves[1].off || s.staves[2].off) return "the lower staff turns off the pair";
+    if (!M.isValidScore(s) || exportMusicXML(s) !== before) return "Save changed by a track being off";
+    const t = M.tracks(s);
+    if (!eq(t.map((x) => [x.staves, x.name, x.on]), [[[0, 1], "Piano", false], [[2], "Flute", true]])) return JSON.stringify(t);
+    const sub = M.tracksOn(s);
+    if (!M.isValidScore(sub) || sub.staves.length !== 1 || sub.staves[0].name !== "Flute" || s.staves.length !== 3) return "sub-score";
+    if (schedule(sub).total !== schedule(s).total || schedule(sub).notes.some((n) => n.midi !== 79)) return "playback";
+    const mid = importMIDI(exportMIDI(sub), "x.mid").score;
+    if (mid.staves.length !== 1) return "MIDI tracks " + mid.staves.length;
+    M.setTrackOn(s, 2, false);
+    return M.tracksOn(s) === null || "all off";
+  });
   await check("sounds: fetch falls back to the second host, gives up cleanly when both fail", async () => {
     const cacheName = "codatest-sounds", seen = [];
     try {

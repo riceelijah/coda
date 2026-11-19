@@ -926,6 +926,31 @@ export function noteCount(score) {
   return n;
 }
 
+// ---------- tracks (DESIGN §32) ----------
+// A track is a part (partGroups): one staff, or a braced pair. `st.off = true` on each of its
+// staves leaves it out of playback and exports (never out of Save). A DAW-style view would list
+// the same rows.
+export function tracks(score) {
+  return partGroups(score).map((g, k) => {
+    const st = score.staves[g[0]];
+    return { staves: g, name: st.name || `Part ${k + 1}`, on: !st.off, perc: isPerc(st) };
+  });
+}
+// Turn the track holding staff s on or off.
+export function setTrackOn(score, s, on) {
+  for (const i of partGroups(score).find((g) => g.includes(s))) { if (on) delete score.staves[i].off; else score.staves[i].off = true; }
+  return null;
+}
+// The score with only the tracks that are on, every bar kept (so timing, repeats and bar numbers
+// match), or null when they are all off. A copy: the score itself is untouched.
+export function tracksOn(score) {
+  const keep = tracks(score).filter((t) => t.on).flatMap((t) => t.staves);
+  if (!keep.length) return null;
+  const sub = JSON.parse(JSON.stringify({ ...score, staves: keep.map((i) => score.staves[i]) }));
+  for (const st of sub.staves) delete st.off;
+  return sub;
+}
+
 // ---------- tempo changes (DESIGN §29) ----------
 // score.tempo is bar 1's (quarter notes per minute); measures[b].tempo (b ≥ 1) changes it from bar b on.
 export const okBpm = (v) => Number.isInteger(v) && v >= 20 && v <= 400;
@@ -989,6 +1014,7 @@ export function isValidScore(sc) {
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
       (st.transpose === undefined || okTranspose(st.transpose)) &&
       (st.sound === undefined || (typeof st.sound === "string" && st.sound.length > 0 && st.sound.length <= 64)) &&
+      (st.off === undefined || st.off === true) &&
       (st.layers === undefined || (Array.isArray(st.layers) && st.layers.length < MAX_LAYERS && st.layers.every(okBars))));
   } catch { return false; }
 }
