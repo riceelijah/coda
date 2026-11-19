@@ -1,6 +1,6 @@
 // Coda playback: sampled General MIDI sounds fetched on demand, with a triangle-wave fallback.
 // See docs/DESIGN.md §7 and §13.3.
-import { attrsAt, barCapacity, eventTicks, midi as midiOf, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder } from "./model.js";
+import { attrsAt, barCapacity, eventTicks, midi as midiOf, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder, tempoAt } from "./model.js";
 import { drumHit } from "./drumsynth.js";
 import { GM } from "./gm.js";
 import { getSound } from "./usersounds.js";
@@ -23,6 +23,15 @@ export function schedule(score, from = 0) {
     t += barCapacity(attrsAt(score, b).time);
   }
   const total = t;
+  // seconds at an unrolled tick, each bar at its own tempo (DESIGN §29)
+  const secs = [0];
+  barStart.forEach(({ bar, tick }, k) => secs.push(secs[k] + ((barStart[k + 1]?.tick ?? total) - tick) * 60 / tempoAt(score, bar) / PPQ));
+  const timeOf = (x) => {
+    let k = 0;
+    while (k + 1 < barStart.length && barStart[k + 1].tick <= x) k++;
+    if (!barStart.length) return x * 60 / (score.tempo || 100) / PPQ;
+    return secs[k] + (x - barStart[k].tick) * 60 / tempoAt(score, barStart[k].bar) / PPQ;
+  };
   const notes = [];
   const linVel = dynamics(score, 0);
   score.staves.forEach((st, si) => allLayers(st).forEach((bars) => {
@@ -54,7 +63,7 @@ export function schedule(score, from = 0) {
       }
     });
   }));
-  return { notes, barStart, total };
+  return { notes, barStart, total, timeOf };
 }
 
 // Velocity at a tick (relative to bar `from`) for staff si (DESIGN §22). A part's dynamics, from
@@ -310,21 +319,20 @@ async function prepare(notes, waitMs, onStatus = () => {}) {
 // Every note into context `c` from time t0. Play and the audio export share this.
 // ponytail: schedules every note up front; fine for a few thousand notes. Switch to a
 // look-ahead scheduler if long scores stutter.
-function scheduleNotes(c, dest, notes, t0, secPerTick) {
+function scheduleNotes(c, dest, notes, t0, timeOf) {
   for (const n of notes) {
-    const len = Math.max(0.06, (n.end - n.start) * secPerTick);
-    note(c, dest, n.midi, n.program, t0 + n.start * secPerTick, len, n.sound, n.vel);
+    const len = Math.max(0.06, timeOf(n.end) - timeOf(n.start));
+    note(c, dest, n.midi, n.program, t0 + timeOf(n.start), len, n.sound, n.vel);
   }
 }
 
 // The whole score rendered offline (DESIGN §19): {buffer, status}. Waits for every sound.
 export async function renderAudio(score, onStatus = () => {}, rate = 44100, waitMs = Infinity) {
-  const { notes, total } = schedule(score);
+  const { notes, total, timeOf } = schedule(score);
   audio(); // decoding uses the live context
   const status = await prepare(notes, waitMs, onStatus);
-  const secPerTick = 60 / (score.tempo || 100) / PPQ;
-  const c = new OfflineAudioContext(2, Math.ceil((total * secPerTick + 2.5) * rate), rate);
-  scheduleNotes(c, output(c), notes, 0.05, secPerTick);
+  const c = new OfflineAudioContext(2, Math.ceil((timeOf(total) + 2.5) * rate), rate);
+  scheduleNotes(c, output(c), notes, 0.05, timeOf);
   onStatus("Rendering audio…");
   return { buffer: await c.startRendering(), status };
 }
@@ -386,21 +394,21 @@ async function start(me, score, from, onBar, onStatus) {
   audio();
   if (ctx.state === "suspended") await ctx.resume();
   if (current !== me) return;
-  const { notes, barStart, total } = schedule(score, from);
+  const { notes, barStart, total, timeOf } = schedule(score, from);
   const msgs = await prepare(notes, 8000, onStatus);
   if (current !== me) return;
   if (msgs) onStatus(msgs);
-  const secPerTick = 60 / (score.tempo || 100) / PPQ;
   const master = output(ctx);
   me.master = master;
   const t0 = ctx.currentTime + 0.1;
-  scheduleNotes(ctx, master, notes, t0, secPerTick);
+  scheduleNotes(ctx, master, notes, t0, timeOf);
+  const end = timeOf(total), at = barStart.map((b) => timeOf(b.tick));
   const tick = () => {
     if (current !== me) return;
-    const now = (ctx.currentTime - t0) / secPerTick;
-    if (now >= total) { stop(); onBar(null); return; }
+    const now = ctx.currentTime - t0;
+    if (now >= end) { stop(); onBar(null); return; }
     let bar = barStart[0].bar;
-    for (const b of barStart) if (b.tick <= now) bar = b.bar;
+    barStart.forEach((b, k) => { if (at[k] <= now) bar = b.bar; });
     if (bar !== me.lastBar) { me.lastBar = bar; onBar(bar); }
     me.raf = requestAnimationFrame(tick);
   };

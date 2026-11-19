@@ -622,8 +622,11 @@ export function addMeasure(score, after) {
 
 export function deleteMeasure(score, idx) {
   if (score.measures.length <= 1) return "A score needs at least one bar";
-  const a0 = attrsAt(score, 0);
+  const a0 = attrsAt(score, 0), tm = score.measures[idx].tempo;
   score.measures.splice(idx, 1);
+  // a tempo change on the deleted bar moves to the bar after it, like a clef change
+  const nx = score.measures[idx];
+  if (tm && nx && !nx.tempo && tm !== (idx ? tempoAt(score, idx - 1) : score.tempo)) nx.tempo = tm;
   for (const st of score.staves) for (const bars of allLayers(st)) bars.splice(idx, 1);
   // a clef change on the deleted bar moves to the bar after it, so that bar keeps its clef
   for (const st of score.staves) if (st.clefs) {
@@ -637,6 +640,7 @@ export function deleteMeasure(score, idx) {
   }
   if (idx === 0) {
     const m = score.measures[0];
+    if (m.tempo) { score.tempo = m.tempo; delete m.tempo; }
     if (m.key === undefined) m.key = a0.key;
     if (!m.time) { m.time = a0.time; if (a0.sym) m.sym = a0.sym; }
   }
@@ -859,6 +863,27 @@ export function noteCount(score) {
   return n;
 }
 
+// ---------- tempo changes (DESIGN §29) ----------
+// score.tempo is bar 1's (quarter notes per minute); measures[b].tempo (b ≥ 1) changes it from bar b on.
+export const okBpm = (v) => Number.isInteger(v) && v >= 20 && v <= 400;
+export const clampBpm = (v) => Math.max(20, Math.min(400, Math.round(v) || 100));
+export function tempoAt(score, b) {
+  for (let i = b; i > 0; i--) if (score.measures[i]?.tempo) return score.measures[i].tempo;
+  return score.tempo || 100;
+}
+// Set the tempo from bar b on. At bar 1 this is the score's tempo; a change equal to the tempo
+// already in effect is stored as "no change", and a later bar left equal to it loses its change.
+export function setTempo(score, b, bpm) {
+  if (!okBpm(bpm)) return "Tempo must be 20–400";
+  if (!score.measures[b]) return "No such bar";
+  if (b === 0) score.tempo = bpm;
+  else if (tempoAt(score, b - 1) === bpm) delete score.measures[b].tempo;
+  else score.measures[b].tempo = bpm;
+  const n = score.measures.findIndex((m, i) => i > b && m.tempo);
+  if (n > 0 && score.measures[n].tempo === tempoAt(score, n - 1)) delete score.measures[n].tempo;
+  return null;
+}
+
 // Make every staff have the same bar count as score.measures (importers call this).
 export function padBars(score) {
   const n = Math.max(1, score.measures.length, ...score.staves.map((s) => s.bars.length));
@@ -877,6 +902,7 @@ export function isValidScore(sc) {
     if (!n || !sc.measures[0].time) return false;
     if (!sc.measures.every((m) => m.sym === undefined || (m.time && TIME_SYMS[m.sym] && symOk(m.sym, m.time)))) return false;
     if (!sc.measures.every(okRepeats)) return false;
+    if (!sc.measures.every((m, b) => m.tempo === undefined || (b > 0 && okBpm(m.tempo)))) return false;
     let okPitch;
     const pitched = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2 && p.drum === undefined;
     const drum = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && p.alter === 0 && Number.isInteger(p.drum) && p.drum >= 35 && p.drum <= 81;
