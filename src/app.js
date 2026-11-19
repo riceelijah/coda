@@ -1313,6 +1313,20 @@ function barMark(k, val) {
   const b = repBar(), m = state.score.measures[b], on = val === true ? !m[k] : m[k] !== val;
   if (edit((sc) => M.setBarMark(sc, b, k, on && val))) message(`${on ? "" : "Removed: "}${k === "jump" ? M.JUMPS[val] : document.getElementById("r-" + k).textContent} at bar ${b + 1}`);
 }
+// text above a note and rehearsal marks (DESIGN §30): empty removes
+async function noteText() {
+  const s = state.sel, ev = selEvent();
+  if (!ev) { message("Select a note or rest first", true); return; }
+  const v = await ask(`Text above bar ${s.bar + 1}`, "Text, such as dolce or pizz. (empty to remove)", ev.text || "");
+  if (v === null) return;
+  edit(() => M.setText(lb(s.staff)[s.bar][s.idx], v));
+}
+async function rehearsal() {
+  const b = repBar(), sc = state.score;
+  const v = await ask(`Rehearsal mark at bar ${b + 1}`, `Up to ${M.MAX_REHEARSAL} letters or digits (empty to remove)`, sc.measures[b].rehearsal || M.nextRehearsal(sc, b));
+  if (v === null) return;
+  edit((x) => M.setRehearsal(x, b, v));
+}
 // tempo changes (DESIGN §29): empty, or the tempo before, removes the change
 async function tempoFrom() {
   const b = repBar(), sc = state.score;
@@ -1399,6 +1413,8 @@ const CMD = {
   "r-repEnd": { run: () => barMark("repEnd", 2) },
   "r-times": { run: () => repeatTimes() },
   "b-tempo": { run: () => tempoFrom() },
+  "b-rehearsal": { run: () => rehearsal() },
+  "n-text": { run: () => noteText(), on: hasSel },
   ...Object.fromEntries(Object.keys(M.JUMPS).map((j) => ["r-" + j, { run: () => barMark("jump", j) }])),
   "r-volta1": { run: () => ending([1]) },
   "r-volta2": { run: () => ending([2]) },

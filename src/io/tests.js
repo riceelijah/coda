@@ -772,11 +772,11 @@ export async function run({ check, eq }) {
       <direction><direction-type><segno/></direction-type></direction><note><rest/><duration>4</duration></note></measure>
       <measure number="2"><note><rest/><duration>4</duration></note><direction><direction-type><words>Fine</words></direction-type></direction>
       <direction><direction-type><words>dolce</words></direction-type></direction></measure>
-      <measure number="3"><note><rest/><duration>4</duration></note><direction><direction-type><words>D.S. al Fine</words></direction-type></direction>
+      <measure number="3"><note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration><type>whole</type></note><direction><direction-type><words>D.S. al Fine</words></direction-type></direction>
       <barline location="right"><ending number="1" type="stop"/></barline></measure></part></score-partwise>`;
     const y = importMusicXML(xml, "w.xml");
     if (marks(y.score) !== JSON.stringify([{ segno: true }, { fine: true }, { jump: "dsFine", volta: [1] }].map((r) => Object.fromEntries(Object.entries(r).sort())))) return "words " + marks(y.score);
-    return JSON.stringify(y.report).includes("Text directions") || "unknown words not counted";
+    return y.score.staves[0].bars[2][0].text === "dolce" || "other words become text on the next note: " + JSON.stringify(y.score.staves[0].bars);
   });
 
   await check("drum notes move a line keeping their drum, as a file's own drum map has them (DESIGN §28)", () => {
@@ -821,6 +821,30 @@ export async function run({ check, eq }) {
       <note><rest/><duration>2</duration></note></measure></part></score-partwise>`, "m.xml");
     if (t(x.score) !== "120,0,0" || !JSON.stringify(x.report).includes("moved to the bar")) return "metronome " + t(x.score) + JSON.stringify(x.report);
     return true;
+  });
+
+  await check("text above notes and rehearsal marks: model, MusicXML and MuseScore round trips (DESIGN §30)", () => {
+    const s = M.newScore({ bars: 3 });
+    s.staves[0].bars = [[ev("h", "C5"), ev("h", "D5")], [ev("w", "E5")], [ev("w", "F5")]];
+    const e = s.staves[0].bars[0][1];
+    if (M.setText(e, "  a < b \n & \"c\"  ") || e.text !== 'a < b & "c"') return "setText " + e.text;
+    if (!M.setText(e, "D.C. al Fine") || !M.setText(e, "fine") || e.text !== 'a < b & "c"') return "nav words allowed as text";
+    if (M.setText(s.staves[0].bars[1][0], "x".repeat(99)) || s.staves[0].bars[1][0].text.length !== M.MAX_TEXT) return "not cut";
+    if (M.nextRehearsal(s, 1) !== "A") return "first letter";
+    M.setRehearsal(s, 1, "A");
+    if (M.nextRehearsal(s, 2) !== "B" || M.setRehearsal(s, 2, "B") || !M.isValidScore(s)) return "rehearsal";
+    if (M.isValidScore({ ...s, measures: [{ ...s.measures[0], rehearsal: "Fine" }, ...s.measures.slice(1)] })) return "nav rehearsal valid";
+    const sig = (sc) => JSON.stringify([sc.measures.map((m) => m.rehearsal || ""), sc.staves[0].bars.map((b) => b.map((x) => x.text || ""))]);
+    const x = importMusicXML(exportMusicXML(s), "t.musicxml"), ms = importMSCX(exportMSCX(s), "t.mscx");
+    for (const [n, r] of [["MusicXML", x], ["MuseScore", ms]]) {
+      if (sig(r.score) !== sig(s)) return n + " " + sig(r.score);
+      if (/not imported|cut/.test(JSON.stringify(r.report))) return n + " reported " + JSON.stringify(r.report);
+    }
+    // MuseScore text with inline markup; a rehearsal mark too long to show is counted
+    const raw = exportMSCX(s).replace("<StaffText><text>a &lt; b", "<StaffText><text><i>a</i> &lt; b").replace("<RehearsalMark><text>B<", "<RehearsalMark><text>Letter B and more<");
+    const y = importMSCX(raw, "u.mscx");
+    if (y.score.staves[0].bars[0][1].text !== 'a < b & "c"' || y.score.measures[2].rehearsal) return "markup " + sig(y.score);
+    return JSON.stringify(y.report).includes("Rehearsal marks Coda can't show") || JSON.stringify(y.report);
   });
 
   // Later phases: MIDI, MuseScore, musx.

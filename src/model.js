@@ -453,6 +453,37 @@ export function toggleDyn(ev, dyn) {
   if (ev.dyn === dyn || !dyn) delete ev.dyn; else ev.dyn = dyn;
 }
 
+// ---------- text above notes and rehearsal marks (DESIGN §30) ----------
+// ev.text: a short line of text above the note or rest (dolce, pizz., a tempo word); measures[b].rehearsal:
+// a boxed mark at the bar's start (A, B, 12). Words that mean a jump or sign are kept for Repeats and endings.
+export const MAX_TEXT = 60, MAX_REHEARSAL = 8;
+export const NAV_WORDS = /^(d\.\s?c\.?|da capo|d\.\s?s\.?|dal segno|to coda|fine)(\s|$)/i;
+export const cleanText = (s, max) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+const okText = (t, max) => typeof t === "string" && t.length > 0 && t.length <= max && t === cleanText(t, max) && !NAV_WORDS.test(t);
+// Set (or with empty text, remove) one event's text.
+export function setText(ev, s) {
+  const t = cleanText(s, MAX_TEXT);
+  if (NAV_WORDS.test(t)) return `Use Score ▸ Repeats and endings for "${t}"`;
+  if (t) ev.text = t; else delete ev.text;
+  return null;
+}
+export function setRehearsal(score, b, s) {
+  const m = score.measures[b], t = cleanText(s, MAX_REHEARSAL);
+  if (!m) return "No such bar";
+  if (NAV_WORDS.test(t)) return `Use Score ▸ Repeats and endings for "${t}"`;
+  if (t) m.rehearsal = t; else delete m.rehearsal;
+  return null;
+}
+// The next rehearsal letter after the last one before bar b: A, B, … Z, AA, BB, …
+export function nextRehearsal(score, b) {
+  let last = null;
+  for (let i = b - 1; i >= 0 && !last; i--) last = score.measures[i].rehearsal;
+  const m = /^([A-Z])\1*$/.exec(last || "");
+  if (!last) return "A";
+  if (!m) return /^\d+$/.test(last) ? String(+last + 1) : "";
+  return m[1] === "Z" ? "A".repeat(last.length + 1) : String.fromCharCode(m[1].charCodeAt(0) + 1).repeat(last.length);
+}
+
 // ---------- slurs and hairpins (DESIGN §23) ----------
 // A span is a flag on its first event (slur: true, hp: "<" or ">") and one on its last (slurEnd,
 // hpEnd), in the same staff and layer. One of each kind at a time per layer.
@@ -904,6 +935,7 @@ export function isValidScore(sc) {
     if (!sc.measures.every((m) => m.sym === undefined || (m.time && TIME_SYMS[m.sym] && symOk(m.sym, m.time)))) return false;
     if (!sc.measures.every(okRepeats)) return false;
     if (!sc.measures.every((m, b) => m.tempo === undefined || (b > 0 && okBpm(m.tempo)))) return false;
+    if (!sc.measures.every((m) => m.rehearsal === undefined || okText(m.rehearsal, MAX_REHEARSAL))) return false;
     let okPitch;
     const pitched = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2 && p.drum === undefined;
     const drum = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && p.alter === 0 && Number.isInteger(p.drum) && p.drum >= 35 && p.drum <= 81;
@@ -911,7 +943,7 @@ export function isValidScore(sc) {
       DURS.includes(e.dur) && Array.isArray(e.pitches) && e.pitches.every(okPitch) &&
       (e.grace === undefined || (Array.isArray(e.grace) && e.grace.length > 0 && e.grace.length <= MAX_GRACE && e.pitches.length > 0 && e.grace.every(okPitch))) &&
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m)))) &&
-      (e.dyn === undefined || DYNS.includes(e.dyn)) &&
+      (e.dyn === undefined || DYNS.includes(e.dyn)) && (e.text === undefined || okText(e.text, MAX_TEXT)) &&
       (e.slur === undefined || e.slur === true) && (e.slurEnd === undefined || e.slurEnd === true) &&
       (e.hp === undefined || e.hp === "<" || e.hp === ">") && (e.hpEnd === undefined || e.hpEnd === true) &&
       (e.lyrics === undefined || (Array.isArray(e.lyrics) && e.lyrics.length > 0 && e.lyrics.length <= MAX_VERSES &&

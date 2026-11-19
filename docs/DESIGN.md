@@ -1297,7 +1297,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   `<sound tocoda|fine|dacapo|dalsegno>`, in the first part. Import takes barlines from the first
   part and directions from any; `<sound>` attributes decide, else the words ("D.C.", "Da Capo",
   "D.S.", "al Fine", "al Coda", "To Coda", "Fine"). Signs mid-bar move to its start (counted);
-  other words stay counted as text directions; unreadable ending numbers and counts over 10 are
+  other words become text above the next note (§30); unreadable ending numbers and counts over 10 are
   counted.
 - **MuseScore:** `<startRepeat/>`, `<endRepeat>n</endRepeat>` in each staff's `<Measure>`;
   in the first staff, `<Spanner type="Volta">` (`<endings>`, `<next><location><measures>`),
@@ -1325,6 +1325,8 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   | Drum note away from its kit position | Notes ▸ Drum note up / down a line (same sound) |
   | Title, composer, tempo | Score ▸ Title, composer, tempo… |
   | Tempo change | Score ▸ Tempo from this bar… (§29) |
+  | Text above a note (dolce, pizz.) | Notes ▸ Text above note… (§30) |
+  | Rehearsal mark | Score ▸ Rehearsal mark… (§30) |
 
 ## 29. Tempo changes (Phase 34)
 
@@ -1345,3 +1347,20 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   unit and writes a quarter metronome with `<sound tempo>`; MuseScore `<Tempo>` (per second);
   MIDI tempo meta events (export: at each played bar whose tempo differs); `.musx` playback tempo
   expressions.
+
+## 30. Text above notes and rehearsal marks (Phase 35)
+
+- **Model:** `ev.text` is one line (whitespace collapsed, at most 60 characters) above a note or
+  rest of its staff; `measures[b].rehearsal` (at most 8) is a boxed mark at the bar's start, drawn
+  on the top staff. Words that read as a jump or sign (D.C., D.S., Da Capo, Dal Segno, To Coda,
+  Fine) are refused with a pointer to Repeats and endings, so a file never turns them into a jump.
+- **Editing:** Notes ▸ Text above note… (the first selected note or rest) and Score ▸ Rehearsal
+  mark… (the caret bar; suggests the next letter or number after the last one). Empty removes.
+- **Drawing:** text is drawn after layout, starting at the note, above the staff or the note,
+  in italic; it takes no room between notes. A bar's top-staff marks rise above any text in it.
+  At a bar's start, left to right: rehearsal mark, segno or coda, tempo; all above an ending.
+- **Files:** MusicXML `<words>` (not read as a jump) and MuseScore `<StaffText>`, `<SystemText>`,
+  `<Expression>`, `<PlayTechAnnotation>` go on the staff's next note or rest (several before one
+  note are joined); `<rehearsal>` and `<RehearsalMark>` from the first part or staff (later
+  ones that differ, ones inside a bar, longer than 8 or after the last note are counted). Both
+  are written back. MIDI keeps neither. `.musx` text expressions stay counted.

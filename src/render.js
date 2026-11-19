@@ -206,6 +206,22 @@ export function render(score, container, sel, opts = {}) {
     }));
   }));
 
+  // Text above notes (DESIGN §30): drawn after layout so it takes no room between notes; it starts
+  // at the note and sits above the staff, or above the note when that's higher.
+  score.staves.forEach((st, s) => allLayers(st).forEach((bars, v) => bars.forEach((bar, b) => bar.forEach((ev, i) => {
+    const ref = noteRef[s][v][b]?.[i];
+    if (!ev.text || !ref) return;
+    const ctx = ctxs[ref.sys], note = ref.note, bb = note.getBoundingBox();
+    const y = Math.min(note.checkStave().getYForLine(0) - 10, bb ? bb.y - 8 : Infinity);
+    try {
+      tintedAll([ctx], opts.dim && v !== (opts.layer || 0), () => {
+        ctx.save(); ctx.setFont("Georgia", 13, "normal", "italic");
+        ctx.fillText(ev.text, note.getAbsoluteX() - 4, y);
+        ctx.restore();
+      });
+    } catch (e) { console.error(e); }
+  }))));
+
   // Slurs and hairpins (DESIGN §23)
   // Lyrics: a line per verse for each staff and system, below its notes and dynamics (DESIGN §24).
   // lyricY["sys:staff"] = verse 1's baseline, for the app's lyric box.
@@ -336,7 +352,8 @@ function repeatMarks(VFl, score, b, s, stave) {
   const upOf = (i) => {
     const top = BOTTOM_LINE[clefAt(st, i)] + 8;
     const hi = Math.max(top, ...allLayers(st).flatMap((bars) => bars[i].flatMap((e) => [...e.pitches, ...(e.grace || [])].map(diatonic))));
-    return -Math.max(0, (hi - top - 2) * 5);
+    const text = allLayers(st).some((bars) => bars[i].some((e) => e.text)) ? 18 : 0; // above text on its notes (DESIGN §30)
+    return -Math.max(0, (hi - top - 2) * 5) - text;
   };
   const up = upOf(b);
   if (m.volta) {
@@ -350,12 +367,16 @@ function repeatMarks(VFl, score, b, s, stave) {
   }
   // signs at the bar's start go above an ending's number, the tempo beside them
   const lift = m.volta ? 25 : 0;
-  for (const key of ["segno", "coda"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]], up - lift);
+  // left to right at the bar's start: rehearsal mark, segno or coda, tempo
+  const dx = m.rehearsal ? 18 + 8 * m.rehearsal.length : 0;
+  for (const key of ["segno", "coda"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]], up - lift).getModifiers().at(-1).setShiftX(dx);
   for (const key of ["toCoda", "fine"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]], up);
   if (m.jump) stave.setRepetitionType(VFl.Repetition.type[REP_VF[m.jump]], up);
   // tempo changes (DESIGN §29); bar 1's tempo is shown only when the score has changes
   const bpm = b ? m.tempo : ms.some((x) => x.tempo) && score.tempo;
-  if (bpm) stave.setTempo({ duration: "q", bpm }, up - (m.volta ? 38 : 0)).getModifiers().at(-1).setShiftX(m.segno || m.coda ? 35 : 10);
+  if (bpm) stave.setTempo({ duration: "q", bpm }, up - (m.volta ? 42 : 0)).getModifiers().at(-1).setShiftX(dx + (m.segno ? 35 : m.coda ? 60 : 10));
+  // a rehearsal mark (DESIGN §30): boxed, at the barline, above all of these
+  if (m.rehearsal) stave.setSection(m.rehearsal, up - lift - (m.segno || m.coda || bpm ? 26 : m.volta ? 6 : 0), -6, 13);
 }
 
 // Is (b, i) selected? sel may carry `end` for a range (DESIGN §11.7).

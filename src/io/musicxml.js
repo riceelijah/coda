@@ -3,7 +3,7 @@ import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
   tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport,
 } from "../model.js";
-import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm } from "../model.js";
+import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -108,6 +108,7 @@ function barXml(score, s, b, staffNo, voice, v, syl, pid) {
     const flags = { staffNo, voice, tupStart: starts.has(i), tupStop: stops.has(i), syl: syl.get(ev), pid };
     const dir = (body) => `<direction placement="below"><direction-type>${body}</direction-type><voice>${voice}</voice>${staffNo ? `<staff>${staffNo}</staff>` : ""}</direction>`;
     if (ev.dyn) out.push(dir(`<dynamics><${ev.dyn}/></dynamics>`));
+    if (ev.text) out.push(dir(`<words>${esc(ev.text)}</words>`).replace('placement="below"', 'placement="above"')); // DESIGN §30
     if (ev.hp) out.push(dir(`<wedge type="${ev.hp === "<" ? "crescendo" : "diminuendo"}" number="${voice}"/>`));
     if (ev.grace) out.push(graceXml(ev.grace, staffNo, voice, pid));
     if (!ev.pitches.length) out.push(noteXml(ev, null, flags));
@@ -180,6 +181,7 @@ export function exportMusicXML(score) {
       if (bpm && gi === 0) {
         x.push(`<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${bpm}</per-minute></metronome></direction-type><sound tempo="${bpm}"/></direction>`);
       }
+      if (gi === 0 && score.measures[b].rehearsal) x.push(`<direction placement="above"><direction-type><rehearsal>${esc(score.measures[b].rehearsal)}</rehearsal></direction-type></direction>`);
       if (gi === 0) x.push(...navXml(score.measures[b], true));
       // every layer bar with notes, as voice staff×4 + layer + 1, separated by <backup> (DESIGN §15)
       const chunks = [];
@@ -301,6 +303,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     let divisions = 1, key = 0, time = [4, 4], sym, tr = null;
     const attrs = [], drums = drumMaps[part.getAttribute("id")] || null;
     const pend = {}; // staff -> dynamic waiting for its note
+    const pendText = {}; // staff -> text waiting for its note (DESIGN §30)
     const pendHp = {}, lastAny = {}; // staff -> hairpin waiting for its note; last event read
     const openHp = {}, openSlur = {}; // staff -> {ev: where the open hairpin starts, prev: one still open before it}; staff:layer -> open slur number
     // staff -> MusicXML voice ids in layer order: numeric order, so voice 1 is always layer 1
@@ -397,6 +400,21 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           for (const dt of tag === "direction" ? kids(el, "direction-type") : []) {
             for (const c of dt.children) {
               if (nav && ["words", "segno", "coda"].includes(c.localName)) continue;
+              if (c.localName === "words") { // text above the staff's next note or rest (DESIGN §30)
+                const sn = +(txt(el, "staff") || 1), t = cleanText(c.textContent, 1e4);
+                if (t) pendText[sn] = { text: cleanText([pendText[sn]?.text, t].filter(Boolean).join(" "), 1e4), at: pos.t, mi };
+                continue;
+              }
+              if (c.localName === "rehearsal") { // on the bar, from the first part (DESIGN §30)
+                const t = cleanText(c.textContent, 1e4);
+                if (pi > 0) { if (t && t !== rep[mi]?.rehearsal) report.count("Rehearsal marks in later parts (not imported)"); continue; }
+                const at = pos.t >= barCapacity(time) ? mi + 1 : mi;
+                if (at === mi && pos.t > 0) report.count("Rehearsal marks inside a bar moved to its start");
+                const r = { measures: [{}] };
+                if (t.length > MAX_REHEARSAL || setRehearsal(r, 0, t)) report.count("Rehearsal marks Coda can't show (not imported)");
+                else if (r.measures[0].rehearsal) (rep[at] ||= {}).rehearsal = r.measures[0].rehearsal;
+                continue;
+              }
               if (c.localName === "wedge") { // hairpins (DESIGN §23): start on the next note, stop on the last one
                 const t = c.getAttribute("type"), sn = +(txt(el, "staff") || 1);
                 if (t === "crescendo" || t === "diminuendo") pendHp[sn] = { hp: t === "crescendo" ? "<" : ">", at: pos.t, mi };
@@ -436,7 +454,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
         } else if (tag === "note") {
           const start = pos.t;
-          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums });
+          readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums });
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
         }
       }
@@ -445,6 +463,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
       attrs.push({ key: tr ? wrapKey(key + fifthsOf(tr[0], tr[1])) : key, time: [...time], sym });
     });
     for (const k in pend) if (pend[k]) report.count("Dynamics after the last note (not imported)");
+    for (const k in pendText) if (pendText[k]) report.count("Text after the last note (not imported)");
     for (const k in pendHp) if (pendHp[k]) report.count("Hairpins with no notes (not imported)");
     staves.forEach((st) => { if (!st.clef) st.clef = "treble"; });
     finishDrums(staves, report);
@@ -493,8 +512,7 @@ const BEAT_Q = { whole: 4, half: 2, quarter: 1, eighth: 0.5, "16th": 0.25, "32nd
 export const DYN_IN = { ppp: "ppp", pp: "pp", p: "p", mp: "mp", mf: "mf", f: "f", ff: "ff", fff: "fff", fp: "fp", sf: "sf", sfz: "sfz", fz: "fz",
   pppp: "ppp", ppppp: "ppp", pppppp: "ppp", ffff: "fff", fffff: "fff", ffffff: "fff", sfp: "fp", sfpp: "fp", sffz: "sfz", rfz: "sfz", rf: "sf", sfzp: "fp" };
 const DIRECTIONS = {
-  words: "Text directions (not imported)",
-  rehearsal: "Rehearsal marks (not imported)", segno: "Segno and coda signs (not imported)", coda: "Segno and coda signs (not imported)",
+  segno: "Segno and coda signs (not imported)", coda: "Segno and coda signs (not imported)",
   pedal: "Pedal marks (not imported)", "octave-shift": "Octave lines (not imported)",
 };
 const MARKS = {
@@ -513,7 +531,7 @@ function finishDrums(staves, report) {
   });
 }
 
-function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums }) {
+function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums }) {
   const isRest = !!kid(el, "rest");
   const grace = kid(el, "grace");
   if (grace && isRest) { report.count("Grace rests (not imported)"); return; }
@@ -636,6 +654,12 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   addMarks(ev);
   const pd = pend[staffNo];
   if (pd && (pd.mi < mi || start >= pd.at)) { ev.dyn = pd.dyn; pend[staffNo] = null; }
+  const pt = pendText[staffNo];
+  if (pt && (pt.mi < mi || start >= pt.at)) {
+    if (pt.text.length > MAX_TEXT) report.count(`Text cut to ${MAX_TEXT} characters`);
+    if (setText(ev, pt.text)) report.count("Text directions (not imported)");
+    pendText[staffNo] = null;
+  }
   const ph = pendHp[staffNo];
   if (ph && (ph.mi < mi || start >= ph.at)) { ev.hp = ph.hp; pendHp[staffNo] = null; openHp[staffNo] = { ev, prev: openHp[staffNo] || null }; }
   if (slur.start) ev.slur = true;
