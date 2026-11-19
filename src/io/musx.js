@@ -219,7 +219,12 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
       if (!shown || shown[0] !== time[0] || shown[1] !== time[1]) report.count("Time signatures shown differently from the real meter (real meter used)");
       else sym = symFor(time, { cut: has(m, "abbrvTime"), common: has(m, "abbrvTime") });
     } else sym = symFor(time, { cut: has(tso, "timeSigDoAbrvCut"), common: has(tso, "timeSigDoAbrvCommon") });
-    return { cmper: m.getAttribute("cmper"), attrs: { key: Math.max(-7, Math.min(7, k.fifths)), time, sym } };
+    // repeat barlines (DESIGN §28): the measure's own flags. ponytail: written from musxdom's field
+    // names, no sample file has repeats yet; endings and repeat text are only counted for now.
+    if (has(m, "barEnding")) report.count("Repeat endings (not read from .musx yet)");
+    if (has(m, "txtRepeats")) report.count("D.C., D.S., segno and coda (not read from .musx yet)");
+    return { cmper: m.getAttribute("cmper"), rep: { ...(has(m, "forRepBar") ? { repStart: true } : {}), ...(has(m, "bacRepBar") ? { repEnd: 2 } : {}) },
+      attrs: { key: Math.max(-7, Math.min(7, k.fifths)), time, sym } };
   });
 
   // staff order from the score's instrument list
@@ -249,7 +254,7 @@ export function importEnigmaXML(text, fileName = "", format = "EnigmaXML") {
     title: fileInfo("title") || fileName.replace(/\.[^.]+$/, "") || "Untitled",
     composer: fileInfo("composer"),
     tempo: 100,
-    measures: measuresFrom(measures.map((m) => m.attrs)),
+    measures: measuresFrom(measures.map((m) => m.attrs)).map((x, i) => Object.assign(x, measures[i].rep)),
     staves: [],
   };
 

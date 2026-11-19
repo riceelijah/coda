@@ -1,6 +1,7 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
 import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides } from "../model.js";
+import { parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
@@ -99,6 +100,8 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   };
 
   const firstAttrs = [];
+  const rep = []; // per bar: repeats and navigation, from the first staff (DESIGN §28)
+  const mark = (b, k, v) => { (rep[b] ||= {})[k] = v; };
   kids(sc, "Staff").forEach((stEl, si) => {
     const d = decl[si] || { name: "", brace: false };
     const staff = { name: d.name, clef: null, brace: d.brace, bars: [], ...(d.program !== undefined ? { program: d.program } : {}),
@@ -130,6 +133,12 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
     };
     kids(stEl, "Measure").forEach((meas, mi) => {
       const voices = kids(meas, "voice");
+      if (si === 0 && kid(meas, "startRepeat")) mark(mi, "repStart", true);
+      if (si === 0 && kid(meas, "endRepeat")) {
+        const n = parseInt(txt(meas, "endRepeat"), 10) || 2;
+        if (n > MAX_REPEAT) report.count(`Repeats played more than ${MAX_REPEAT} times (play ${MAX_REPEAT})`);
+        mark(mi, "repEnd", Math.max(2, Math.min(MAX_REPEAT, n)));
+      }
       for (const L of staff.layers || []) L.push([]);
       // MuseScore 2 files have no <voice> wrapper. Voices become layers 1–4 (DESIGN §15).
       (voices.length ? voices : [meas]).forEach((vEl, vi) => {
@@ -187,7 +196,27 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (type === "HairPin") {
               if (kid(el, "next")) pendHp[vi] = ["<", ">", "<", ">"][+txt(kid(el, "HairPin"), "subtype") || 0] || "<";
               else if (kid(el, "prev") && (bar.length ? bar[bar.length - 1] : lastEv[vi])) (bar.length ? bar[bar.length - 1] : lastEv[vi]).hpEnd = true;
+            } else if (type === "Volta") { // the first staff's: an ending over the next `measures` bars
+              if (si > 0 || !kid(el, "next")) break;
+              const nums = parseVolta(txt(kid(el, "Volta"), "endings") || "");
+              const len = Math.max(1, parseInt(txt(kid(kid(el, "next"), "location"), "measures"), 10) || 1);
+              if (!nums) report.count("Endings with unusual numbers (not imported)");
+              else for (let b = mi; b < mi + len; b++) mark(b, "volta", nums);
             } else if (kid(el, "next")) report.count(`Lines (${type}) not imported`);
+            break;
+          }
+          case "Marker": { // signs at the bar's start, To Coda and Fine at its end
+            if (si > 0) break;
+            const k = MARKER_IN[txt(el, "label") || txt(el, "subtype") || ""];
+            if (k) mark(mi, k, true); else report.count("Repeat text (not imported)");
+            break;
+          }
+          case "Jump": {
+            if (si > 0) break;
+            const to = txt(el, "jumpTo"), until = txt(el, "playUntil") || "";
+            const j = (to === "start" ? "dc" : /segno/.test(to || "") ? "ds" : null);
+            if (j) mark(mi, "jump", j + (/fine/.test(until) ? "Fine" : /coda/.test(until) ? "Coda" : ""));
+            else report.count("Jumps to a named place (not imported)");
             break;
           }
           case "Dynamic": {
@@ -310,6 +339,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
   if (slides) report.count("Slides not to the very next note, or between chords of different sizes (not imported)", slides);
   score.tempo = Math.max(20, Math.min(400, score.tempo || 100));
   padBars(score);
+  rep.forEach((r, b) => { if (b < score.measures.length) Object.assign(score.measures[b], r); else report.count("Repeat marks after the last bar (not imported)"); });
   const lostClefs = finishClefs(score);
   if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
   report.notes = noteCount(score);
@@ -373,6 +403,8 @@ export function exportMSCX(score) {
     score.measures.forEach((m, b) => {
       const a = attrsAt(score, b), cap = barCapacity(a.time);
       x.push("<Measure>");
+      if (m.repStart) x.push("<startRepeat/>");
+      if (m.repEnd) x.push(`<endRepeat>${m.repEnd}</endRepeat>`);
       const last = Math.max(0, ...layers.map((bars, v) => (bars[b].length ? v : 0)));
       for (let v = 0; v <= last; v++) {
         x.push("<voice>");
@@ -380,11 +412,13 @@ export function exportMSCX(score) {
           if (b === 0) x.push(`<Clef><concertClefType>${CLEF_OUT[st.clef]}</concertClefType><transposingClefType>${CLEF_OUT[st.clef]}</transposingClefType><isHeader>1</isHeader></Clef>`);
           if (b === 0 || m.key !== undefined) x.push(`<KeySig><concertKey>${a.key}</concertKey>${st.transpose ? `<actualKey>${keyAt(score, s, b)}</actualKey>` : ""}</KeySig>`);
           if (b === 0 || m.time) x.push(`<TimeSig>${a.sym ? `<subtype>${a.sym === "common" ? 1 : 2}</subtype>` : ""}<sigN>${a.time[0]}</sigN><sigD>${a.time[1]}</sigD></TimeSig>`);
+          if (s === 0) x.push(...navStart(score.measures, b));
           if (b === 0 && s === 0) x.push(`<Tempo><tempo>${score.tempo / 60}</tempo><followText>1</followText><text><sym>metNoteQuarterUp</sym> = ${score.tempo}</text></Tempo>`);
         }
         const bar = layers[v][b];
         if (v === 0 && !bar.length) x.push(`<Rest><durationType>measure</durationType><duration>${frac(cap)}</duration></Rest>`);
         else x.push(voiceXml(v === 0 ? completeTuplet(bar, cap) : bar, ties[v], b, v === 0 ? cap : 0, st, spans[v], syl));
+        if (v === 0 && s === 0) x.push(...navEnd(score.measures, b, cap));
         const nc = v === 0 && st.clefs?.[b + 1]; // a clef change goes at the end of the bar before, as MuseScore writes it
         if (nc) x.push(`<Clef><concertClefType>${CLEF_OUT[nc]}</concertClefType><transposingClefType>${CLEF_OUT[nc]}</transposingClefType></Clef>`);
         x.push("</voice>");
@@ -395,6 +429,36 @@ export function exportMSCX(score) {
   });
   x.push("</Score>", "</museScore>");
   return x.join("\n");
+}
+
+// ---------- repeats and navigation (DESIGN §28) ----------
+// Marker labels as MuseScore writes them: "codab" is the coda sign, "coda" the To Coda.
+const MARKER_IN = { segno: "segno", varsegno: "segno", codab: "coda", varcoda: "coda", coda: "toCoda", fine: "fine" };
+const MARKER_OUT = { segno: ["segno", "Repeat Text Left", "<sym>segno</sym>"], coda: ["codab", "Repeat Text Left", "<sym>coda</sym>"],
+  toCoda: ["coda", "Repeat Text Right", "To Coda"], fine: ["fine", "Repeat Text Right", "Fine"] };
+const JUMP_OUT = { dc: ["start", "end", ""], dcFine: ["start", "fine", ""], dcCoda: ["start", "coda", "codab"],
+  ds: ["segno", "end", ""], dsFine: ["segno", "fine", ""], dsCoda: ["segno", "coda", "codab"] };
+const markerXml = (k) => `<Marker><style>${MARKER_OUT[k][1]}</style><text>${MARKER_OUT[k][2]}</text><label>${MARKER_OUT[k][0]}</label></Marker>`;
+// At the start of bar b's first voice: segno and coda signs, and an ending that begins here (its end
+// is written where the next bar starts, or at the end of the last bar).
+function navStart(ms, b) {
+  const m = ms[b], out = ["segno", "coda"].filter((k) => m[k]).map(markerXml);
+  const endsHere = b > 0 && ms[b - 1].volta && !sameVolta(ms[b - 1].volta, m.volta);
+  if (endsHere) { let a = b - 1; while (a > 0 && sameVolta(ms[a - 1].volta, ms[b - 1].volta)) a--; out.unshift(`<Spanner type="Volta"><prev><location><measures>${a - b}</measures></location></prev></Spanner>`); }
+  if (m.volta && !sameVolta(ms[b - 1]?.volta, m.volta)) {
+    let z = b; while (z + 1 < ms.length && sameVolta(ms[z + 1].volta, m.volta)) z++;
+    out.push(`<Spanner type="Volta"><Volta><endHookType>${ms[z].repEnd ? 1 : 0}</endHookType><beginText>${voltaLabel(m.volta)}</beginText><endings>${m.volta.join(", ")}</endings></Volta><next><location><measures>${z - b + 1}</measures></location></next></Spanner>`);
+  }
+  return out;
+}
+function navEnd(ms, b, cap) {
+  const m = ms[b], out = ["toCoda", "fine"].filter((k) => m[k]).map(markerXml);
+  if (m.jump) { const [to, until, at] = JUMP_OUT[m.jump]; out.push(`<Jump><text>${JUMPS[m.jump]}</text><jumpTo>${to}</jumpTo><playUntil>${until}</playUntil><continueAt>${at}</continueAt></Jump>`); }
+  if (b === ms.length - 1 && m.volta) { // an ending that runs to the last bar ends after its notes
+    let a = b; while (a > 0 && sameVolta(ms[a - 1].volta, m.volta)) a--;
+    out.push(`<Spanner type="Volta"><prev><location>${a < b ? `<measures>${a - b}</measures>` : ""}<fractions>-${frac(cap)}</fractions></location></prev></Spanner>`);
+  }
+  return out;
 }
 
 // Where each tied note's partner is: for event b:i, {next: {midi: loc}, prev: {midi: loc}}.

@@ -1,6 +1,6 @@
 // Standard MIDI File import. See docs/DESIGN.md §9.4.
 // MIDI holds performance data, not notation, so the result is a transcription.
-import { barCapacity, splitTicks, spellMidi, padBars, noteCount, PPQ, isPerc } from "../model.js";
+import { barCapacity, splitTicks, spellMidi, padBars, noteCount, PPQ, isPerc, attrsAt } from "../model.js";
 import { isDrum, drumPitch } from "../drums.js";
 import { Report } from "./util.js";
 import { schedule } from "../play.js";
@@ -220,10 +220,12 @@ export function exportMIDI(score) {
   const usPerQ = Math.round(60000000 / (score.tempo || 100));
   const cond = [{ tick: 0, bytes: meta(0x51, [usPerQ >> 16, (usPerQ >> 8) & 255, usPerQ & 255]) }];
   if (score.title) cond.unshift({ tick: 0, bytes: meta(0x03, text(score.title)) });
+  let was = null; // bars play unrolled (DESIGN §28): after a repeat the key or time may differ with no change marked
   for (const { bar, tick } of barStart) {
-    const m = score.measures[bar];
-    if (m.time) cond.push({ tick, bytes: meta(0x58, [m.time[0], Math.log2(m.time[1]), 24, 8]) });
-    if (m.key !== undefined) cond.push({ tick, bytes: meta(0x59, [m.key & 255, 0]) });
+    const a = attrsAt(score, bar);
+    if (!was || a.time.join() !== was.time.join()) cond.push({ tick, bytes: meta(0x58, [a.time[0], Math.log2(a.time[1]), 24, 8]) });
+    if (!was || a.key !== was.key) cond.push({ tick, bytes: meta(0x59, [a.key & 255, 0]) });
+    was = a;
   }
   const tracks = [track(cond)];
   score.staves.forEach((st, s) => {

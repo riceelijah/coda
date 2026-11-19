@@ -692,6 +692,95 @@ export function clearAttrs(score, b) {
   return null;
 }
 
+// ---------- repeats and navigation (DESIGN §28) ----------
+// On measures[b], beside key and time: repStart (|: at the bar's start), repEnd (:| at its end,
+// the number of times the section plays, 2–10), volta (the ending numbers this bar belongs to;
+// a run of bars with the same numbers is one bracket), segno and coda (signs at the bar's start:
+// D.S. and To Coda targets), toCoda, fine and jump (at the bar's end).
+export const JUMPS = { dc: "D.C.", dcFine: "D.C. al Fine", dcCoda: "D.C. al Coda", ds: "D.S.", dsFine: "D.S. al Fine", dsCoda: "D.S. al Coda" };
+export const BAR_FLAGS = ["repStart", "segno", "coda", "toCoda", "fine"];
+export const MAX_REPEAT = 10;
+const okVolta = (v) => Array.isArray(v) && v.length > 0 && v.every((n, i) => Number.isInteger(n) && n >= 1 && n <= MAX_REPEAT && (i === 0 || n > v[i - 1]));
+export const sameVolta = (a, b) => !!a && !!b && a.join() === b.join();
+function okRepeats(m) {
+  return BAR_FLAGS.every((k) => m[k] === undefined || m[k] === true) &&
+    (m.repEnd === undefined || (Number.isInteger(m.repEnd) && m.repEnd >= 2 && m.repEnd <= MAX_REPEAT)) &&
+    (m.volta === undefined || okVolta(m.volta)) && (m.jump === undefined || m.jump in JUMPS);
+}
+// Set (or with a falsy value, clear) one mark on bar b: a BAR_FLAGS name with true, repEnd with a
+// count, jump with a JUMPS key.
+export function setBarMark(score, b, k, val) {
+  const m = score.measures[b];
+  if (!m) return "No such bar";
+  if (!val) { delete m[k]; return null; }
+  if (BAR_FLAGS.includes(k)) m[k] = true;
+  else if (k === "repEnd" && Number.isInteger(val) && val >= 2 && val <= MAX_REPEAT) m.repEnd = val;
+  else if (k === "jump" && val in JUMPS) m.jump = val;
+  else return "Unknown repeat mark";
+  return null;
+}
+// Bars a..z become one ending with these numbers (sorted, deduplicated); null or [] clears them.
+export function setVolta(score, a, z, nums) {
+  const v = [...new Set(nums || [])].sort((x, y) => x - y);
+  if (v.length && !okVolta(v)) return `Endings are numbered 1 to ${MAX_REPEAT}`;
+  for (let b = Math.min(a, z); b <= Math.max(a, z); b++) { if (v.length) score.measures[b].volta = v; else delete score.measures[b].volta; }
+  return null;
+}
+// "1, 2" or "1-3" -> [1, 2] / [1, 2, 3]; null when it isn't a list of ending numbers.
+export function parseVolta(s) {
+  const out = [];
+  for (const part of String(s).split(/[,\s]+/).filter(Boolean)) {
+    const m = /^(\d{1,2})\.?(?:[-–](\d{1,2})\.?)?$/.exec(part);
+    if (!m) return null;
+    for (let n = +m[1]; n <= +(m[2] || m[1]); n++) out.push(n);
+  }
+  const v = [...new Set(out)].sort((x, y) => x - y);
+  return v.length && okVolta(v) ? v : null;
+}
+export const voltaLabel = (v) => v.join(", ") + ".";
+
+// The bars in the order they play (DESIGN §28). A section runs from the last |: (or the bar
+// after the last :| or ending, or bar 1) to :|, and plays repEnd times; on pass n only the
+// endings holding n play. D.C./D.S. are taken once, go to bar 1 / the first segno (bar 1 if
+// there is none), and repeats are not taken again after them: each run of endings plays only its
+// last one. "al Fine" then stops at the end of a Fine bar; "al Coda" goes from a To Coda bar to
+// the next coda sign (ignored when there is none). Capped, so a broken file can't loop forever.
+export function playOrder(score) {
+  const ms = score.measures, n = ms.length, out = [], cap = n * (MAX_REPEAT + 2) + 100;
+  const maxV = (m) => m.volta[m.volta.length - 1];
+  // after a jump: is bar i in the last ending of its run of endings?
+  const lastEnding = (i) => { let j = i; while (j + 1 < n && ms[j + 1].volta) j++; return ms.slice(i, j + 1).every((m) => maxV(m) <= maxV(ms[i])); };
+  let b = 0, start = 0, pass = 1, back = false, jumped = null;
+  while (b < n && out.length < cap) {
+    const m = ms[b];
+    if (m.repStart && !back) { start = b; pass = 1; }
+    back = false;
+    const leaving = m.volta && !ms[b + 1]?.volta; // the end of a run of endings closes the section
+    if (m.volta && (jumped ? !lastEnding(b) : !m.volta.includes(pass))) {
+      if (leaving) { start = b + 1; pass = 1; }
+      b++; continue;
+    }
+    out.push(b);
+    if (jumped && m.fine && /Fine/.test(jumped)) break;
+    if (jumped && m.toCoda && /Coda/.test(jumped)) {
+      const c = ms.findIndex((x, i) => i > b && x.coda);
+      if (c >= 0) { b = c; continue; }
+    }
+    if (m.repEnd && !jumped) {
+      if (pass < m.repEnd) { pass++; b = start; back = true; continue; }
+      start = b + 1; pass = 1;
+    }
+    if (m.jump && !jumped) {
+      jumped = m.jump;
+      b = jumped.startsWith("ds") ? Math.max(0, ms.findIndex((x) => x.segno)) : 0;
+      continue;
+    }
+    if (leaving) { start = b + 1; pass = 1; }
+    b++;
+  }
+  return out;
+}
+
 // Staves grouped into parts: a braced staff and the one after it share a part.
 export function partGroups(score) {
   const groups = [];
@@ -802,6 +891,7 @@ export function isValidScore(sc) {
     const n = sc.measures.length;
     if (!n || !sc.measures[0].time) return false;
     if (!sc.measures.every((m) => m.sym === undefined || (m.time && TIME_SYMS[m.sym] && symOk(m.sym, m.time)))) return false;
+    if (!sc.measures.every(okRepeats)) return false;
     let okPitch;
     const pitched = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2 && p.drum === undefined;
     const drum = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && p.alter === 0 && Number.isInteger(p.drum) && p.drum >= 35 && p.drum <= 81;
