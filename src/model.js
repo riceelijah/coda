@@ -337,6 +337,13 @@ export function keyAt(score, s, b) {
   const t = score.staves[s]?.transpose, k = attrsAt(score, b).key;
   return t ? wrapKey(k - fifthsOf(t[0], t[1])) : k;
 }
+// A key played on a MIDI keyboard sounds m: the note staff s writes for it at bar b, spelled in that
+// staff's key (DESIGN §42). On a drum staff, the drum on that key, or null when there is none.
+export function pitchFromMidi(score, s, b, m) {
+  const st = score.staves[s];
+  if (isPerc(st)) return DRUMS.has(m) ? drumPitch(m) : null;
+  return spellMidi(m - (st.transpose?.[0] || 0), keyAt(score, s, b));
+}
 export const soundingMidi = (st, p) => p.drum ?? midi(p) + (st.transpose?.[0] || 0);
 // p moved by an interval, spelled by its letter; past a double accidental, respelled.
 export function shiftPitch(p, c, d) {

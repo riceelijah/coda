@@ -1617,3 +1617,27 @@ play cursor (which sweeps each bar's share) find it. Typing a note into a run sp
 
 **Go to bar.** Edit ▸ Go to bar… moves the caret and scrolls to the bar number as printed (pickups
 counted as in §11.4).
+
+## 42. Input: MIDI keyboard, touch (Phase 46)
+
+**MIDI keyboard.** Edit ▸ MIDI keyboard (a check item) asks the browser for MIDI access (no sysex) from
+that click, which also wakes the sound, since MIDI messages are not user gestures. It is step entry:
+each key enters a note of the armed duration at the caret, through the same path as typing a letter
+(insert after a selected note, else append and move on). A key pressed while others are held joins
+the selected note as a chord tone, never removing one. `pitchFromMidi(score, s, b, m)` takes the key
+as the sounding pitch: the written note for a transposing part, spelled in that staff's key (sharps in
+sharp keys, flats in flat keys). On a drum staff the key picks the drum with that number; a key with
+none is refused with a message. Note-off and every other message are ignored; keys are ignored while a
+dialog or the lyric box is open. Hot-plugged keyboards are attached on `statechange`. The choice is
+kept in this browser and reconnects after a reload when the permission is already granted.
+Ceilings, ponytail: no real-time recording (durations come from the palette); the armed accidental and
+grace mode don't apply to played keys; Safari has no Web MIDI and says so; after a reload the sound
+starts with the first click on the page. Tested with a stubbed `requestMIDIAccess`, not a real keyboard.
+
+**Touch.** Taps are clicks, so note entry, the palette and its flyouts, and the menus work. Two fixes:
+a tapped submenu heading takes focus, so it opens where the browser doesn't focus tapped buttons
+(Safari); with the Selection tool a finger drag scrolls the page rather than drawing a selection box
+(a mouse or pen still draws one). Ceilings: no hover preview of the note under a finger; long-press
+opens the right-click menu only where the browser sends `contextmenu` (not iOS), and every item there
+is also in a menu; pitch is set by the tap position, then nudged with Notes ▸ Up/Down a step. Checked
+with synthetic pointer events, not on a touch device.

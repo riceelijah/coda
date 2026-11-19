@@ -463,10 +463,11 @@ function voice(c, dest, m, start, len, level = 1, fx = null) {
 // Sound a chord briefly while editing (DESIGN §11.2). Silent during playback.
 // Uses the sample if it's loaded; otherwise the tone now, and the sample is fetched for next time.
 export function audition(midis, program = 0, sound) {
-  if (current || !midis.length) return;
+  if (current) return;
   try {
     audio();
     if (ctx.state === "suspended") ctx.resume();
+    if (!midis.length) return; // only wakes the sound, from a click
     const t = ctx.currentTime + 0.02, out = output(ctx);
     setTimeout(() => out.disconnect(), 2000);
     for (const m of midis) {

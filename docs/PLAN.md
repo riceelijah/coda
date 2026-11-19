@@ -71,7 +71,7 @@ only says what to build in what order and how to know each phase is finished.
 | 43 | Playback: swing, accel./rit., metronome and count-in, loop and play selection, note cursor (DESIGN §39) | done |
 | 44 | 64th notes (7-tuplets: not possible on a 480-tick grid) (DESIGN §40) | done |
 | 45 | Layout: system/page breaks, beam control, multi-bar rests, cue notes, go to bar (DESIGN §41) | done |
-| 46 | Input: MIDI keyboard, touch (DESIGN §42) | planned |
+| 46 | Input: MIDI keyboard, touch (DESIGN §42) | done |
 | 47 | One-click PDF (needs a dependency: ask first) | planned |
 
 ---

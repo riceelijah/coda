@@ -701,6 +701,57 @@ function hear(ev) {
 }
 
 // Shift+A–G: add that letter above the selected note's top pitch (DESIGN §11.1).
+// ---------- MIDI keyboard (DESIGN §42) ----------
+// Step entry: each key enters a note of the armed duration at the caret; keys pressed while others
+// are held join that chord. Real-time recording is out of scope.
+const held = new Set();
+let midiOn = false, midiAccess = null;
+function onMidi([st, m, vel]) {
+  const type = st & 0xf0;
+  if (type === 0x80 || (type === 0x90 && !vel)) { held.delete(m); return; }
+  if (type !== 0x90 || document.querySelector("dialog[open]") || !$("lyric-box").hidden) return;
+  const chord = held.size > 0 && state.sel;
+  held.add(m);
+  const s = chord ? state.sel.staff : state.caret.staff, b = chord ? state.sel.bar : state.caret.bar;
+  const p = M.pitchFromMidi(state.score, s, b, m);
+  if (!p) { message(`No drum on that key (${m})`, true); return; }
+  if (!chord) { enterAtCaret(p); return; }
+  if (selEvent()?.pitches.some((q) => M.soundingMidi(state.score.staves[s], q) === M.soundingMidi(state.score.staves[s], p))) return;
+  if (edit((sc) => M.toggleChordPitch(sc, s, b, state.sel.idx, p))) hear(selEvent());
+}
+function listenMidi(access) {
+  midiAccess = access;
+  const attach = () => { for (const input of access.inputs.values()) input.onmidimessage = (e) => onMidi(e.data); };
+  attach();
+  access.onstatechange = attach;
+  midiOn = true;
+  showMidi();
+  return access.inputs.size;
+}
+function showMidi() { $("m-midi").setAttribute("aria-checked", midiOn); $("m-midi").textContent = (midiOn ? "✓ " : "") + "MIDI keyboard"; }
+async function toggleMidi(quiet = false) {
+  if (midiOn) {
+    midiOn = false; showMidi();
+    try { localStorage.removeItem(PREFIX + "midi"); } catch { /* blocked */ }
+    midiAccess.onstatechange = null;
+    midiAccess.inputs.forEach((i) => { i.onmidimessage = null; });
+    return;
+  }
+  if (!navigator.requestMIDIAccess) { if (!quiet) message("This browser can't read a MIDI keyboard: try Chrome, Edge or Firefox", true); return; }
+  audition([]); // this click starts the sound, so keys played later are heard
+  try {
+    const n = listenMidi(await navigator.requestMIDIAccess());
+    try { localStorage.setItem(PREFIX + "midi", "1"); } catch { /* blocked */ }
+    if (!quiet) message(n ? "MIDI keyboard on: play a key to enter a note at the caret" : "MIDI on: no keyboard found yet, plug one in");
+  } catch { if (!quiet) message("MIDI access wasn't allowed", true); }
+}
+// After a reload, reconnect without asking when the browser already allows it.
+async function resumeMidi() {
+  try {
+    if (localStorage.getItem(PREFIX + "midi") && (await navigator.permissions.query({ name: "midi" })).state === "granted") toggleMidi(true);
+  } catch { /* no MIDI or no permissions API */ }
+}
+
 // ---------- grace notes (DESIGN §26) ----------
 function graceMode(on) {
   state.armed.grace = on;
@@ -956,7 +1007,8 @@ function onDown(e) {
   e.preventDefault();
   const L = locate(e), sh = $("sheet").getBoundingClientRect();
   // any drag past 4 px draws a selection box, wherever it starts
-  if (!e.shiftKey) drag = { x: e.clientX - sh.left, y: e.clientY - sh.top, staff: L?.staff, moved: false };
+  // a finger dragging scrolls the page, so only a mouse or pen draws a box (DESIGN §42)
+  if (!e.shiftKey && e.pointerType !== "touch") drag = { x: e.clientX - sh.left, y: e.clientY - sh.top, staff: L?.staff, moved: false };
   if (!L) return;
   state.caret = { staff: L.staff, bar: L.bar };
   const idx = nearestIdx(L);
@@ -1725,6 +1777,7 @@ const CMD = {
   "m-zoomout": { run: () => setZoom(zoom / 1.2) },
   "m-zoom1": { run: () => setZoom(1) },
   "m-goto": { run: () => goToBar() },
+  "m-midi": { run: () => toggleMidi() },
   "n-beamBreak": { run: () => setBeam("break"), on: hasSel },
   "n-beamJoin": { run: () => setBeam("join"), on: hasSel },
   "n-beamAuto": { run: () => setBeam(null), on: hasSel },
@@ -1968,6 +2021,8 @@ function setupMenus() {
     };
     // after an item's own onclick runs: close, and take focus off the menu so Space plays again
     list.addEventListener("click", (e) => {
+      const h = e.target.closest(".subhead");
+      if (h) { h.focus(); return; } // a tap opens a submenu: Safari doesn't focus a tapped button (DESIGN §42)
       if (!e.target.closest("button") || e.target.closest("[aria-haspopup]")) return;
       closeMenus();
       if (document.activeElement?.closest?.("#menubar")) document.activeElement.blur();
@@ -2197,6 +2252,7 @@ function init() {
   $("ask-cancel").onclick = () => $("ask").close("cancel");
   setupMenus();
   showPlayOpts();
+  resumeMidi();
   { // compressed audio: whatever this browser can record, or no item at all
     const t = recordType();
     $("x-audio").hidden = !t;
@@ -2224,7 +2280,7 @@ function init() {
   let rt = 0;
   window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(drawCaret, 100); });
   refresh();
-  window.coda = { state, edit, M, locate }; // debugging aid
+  window.coda = { state, edit, M, locate, onMidi }; // debugging aid
 }
 
 init();

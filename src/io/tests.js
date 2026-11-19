@@ -1394,6 +1394,19 @@ export async function run({ check, eq }) {
     return JSON.stringify(sys) === "[[0,2],[3,3],[4,5],[6,7],[8,8],[9,9]]" || "layout " + JSON.stringify(sys);
   });
 
+  check("MIDI keyboard: a played key as the written note, in the staff's key", () => {
+    const s = M.newScore({ bars: 2, preset: "satb" });
+    const name = (p) => p && "CDEFGAB"[p.step] + ["bb", "b", "", "#", "x"][p.alter + 2] + p.oct;
+    const got = () => [M.pitchFromMidi(s, 0, 0, 61), M.pitchFromMidi(s, 0, 1, 61), M.pitchFromMidi(s, 1, 0, 60), M.pitchFromMidi(s, 1, 1, 70)].map(name).join(" ");
+    s.measures[1].key = -3; // E flat major from bar 2
+    s.staves[1].transpose = [-2, -1]; // B flat clarinet: sounds a tone lower than written
+    if (got() !== "C#4 Db4 D4 C5") return got();
+    s.staves[2].clef = "percussion";
+    if (M.pitchFromMidi(s, 2, 0, 38)?.drum !== 38 || M.pitchFromMidi(s, 2, 0, 20) !== null) return "drums";
+    for (let m = 40; m < 90; m++) if (M.soundingMidi(s.staves[1], M.pitchFromMidi(s, 1, 0, m)) !== m) return "clarinet " + m;
+    return true;
+  });
+
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;
