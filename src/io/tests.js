@@ -71,6 +71,19 @@ export function roundTripFixture() {
 }
 
 export async function run({ check, eq }) {
+  await check("drum staves: entry snaps to the kit, arrows step drums, no accidentals or clef changes (DESIGN §27)", () => {
+    const sc = M.newScore({ preset: "drums", bars: 2, key: -3 }), st = sc.staves[0];
+    const snare = M.fitPitch(st, { step: 0, oct: 5, alter: 1 }); // C♯5: the snare, with no sharp
+    if (snare.drum !== 38 || snare.alter !== 0) return "snap " + JSON.stringify(snare);
+    st.bars[0] = [{ dur: "q", dots: 0, tie: false, pitches: [snare] }];
+    if (M.transpose(sc, 0, 0, 0, 1) || st.bars[0][0].pitches[0].drum !== 47) return "up a drum " + JSON.stringify(st.bars[0][0].pitches);
+    if (!M.setAlter(sc, 0, 0, 0, 1) || !M.setClef(sc, 0, 1, "bass") || !M.setStaffProgram(sc, 0, 5)) return "should refuse";
+    if (M.setDrum(sc, 0, 0, 0, 46) || st.bars[0][0].pitches[0].step !== 4 || M.pitchName(st.bars[0][0].pitches[0]) !== "Open Hi-Hat") return "setDrum";
+    if (!M.isValidScore(sc) || st.program !== undefined) return "valid drum score";
+    const bad = JSON.parse(JSON.stringify(sc)); bad.staves[0].clef = "treble";
+    const bad2 = JSON.parse(JSON.stringify(sc)); delete bad2.staves[0].bars[0][0].pitches[0].drum;
+    return (!M.isValidScore(bad) && !M.isValidScore(bad2)) || "drum on a pitched staff, or a drum note without a drum, passed";
+  });
   await check("instrument sound from a part name", () => {
     const got = ["Trumpet in B♭ 2", "Alto Saxophone", "Horn in F", "Violin I", "Piano", "Kazoo"].map((n) => gmByName(n)?.name ?? null);
     return eq(got, ["Trumpet", "Alto Sax", "French Horn", "Violin", null, null]) || JSON.stringify(got);

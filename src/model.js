@@ -1,4 +1,5 @@
 // Coda score model. PURE: no DOM, no VexFlow. See docs/DESIGN.md §3.
+import { drumName, drumNear, drumStep, drumPitch, DRUMS } from "./drums.js";
 //
 // Edit commands mutate the score they are given and return null on success or a
 // reason string on failure. Callers (app.js `edit()`) work on a snapshot and roll back
@@ -15,7 +16,11 @@ const STEP_SEMIS = [0, 2, 4, 5, 7, 9, 11];
 const SHARP_ORDER = [3, 0, 4, 1, 5, 2, 6];
 const FLAT_ORDER = [6, 2, 5, 1, 4, 0, 3];
 // diatonic number (oct*7+step) of each clef's bottom line
-export const BOTTOM_LINE = { treble: 30, bass: 18, alto: 24, tenor: 22 };
+export const BOTTOM_LINE = { treble: 30, bass: 18, alto: 24, tenor: 22, percussion: 30 };
+// A drum staff (DESIGN §27): unpitched, positions read as treble, each pitch carries its GM drum.
+export const isPerc = (st) => st?.clef === "percussion";
+// A pitch as staff s takes it: on a drum staff, the nearest entry drum.
+export const fitPitch = (st, p) => (isPerc(st) ? drumNear(p) : p);
 
 // ---------- ticks ----------
 
@@ -129,6 +134,7 @@ export function keyAlter(key, step) {
 }
 
 export function pitchName(p) {
+  if (p.drum) return drumName(p.drum);
   return STEP_NAMES[p.step] + ({ "-2": "𝄫", "-1": "♭", 0: "", 1: "♯", 2: "𝄪" })[p.alter] + p.oct;
 }
 
@@ -149,7 +155,7 @@ export function yToPitch(yBottom, spacing, clef, y) {
   return fromDiatonic(BOTTOM_LINE[clef] + pos);
 }
 
-function samePitch(a, b) { return a.step === b.step && a.oct === b.oct; }
+function samePitch(a, b) { return a.step === b.step && a.oct === b.oct && a.drum === b.drum; }
 function sortPitches(ps) { ps.sort((a, b) => diatonic(a) - diatonic(b)); return ps; }
 
 // ---------- navigation ----------
@@ -291,7 +297,7 @@ export function keyAt(score, s, b) {
   const t = score.staves[s]?.transpose, k = attrsAt(score, b).key;
   return t ? wrapKey(k - fifthsOf(t[0], t[1])) : k;
 }
-export const soundingMidi = (st, p) => midi(p) + (st.transpose?.[0] || 0);
+export const soundingMidi = (st, p) => p.drum ?? midi(p) + (st.transpose?.[0] || 0);
 // p moved by an interval, spelled by its letter; past a double accidental, respelled.
 export function shiftPitch(p, c, d) {
   const np = fromDiatonic(diatonic(p) + d), m = midi(p) + c;
@@ -303,6 +309,7 @@ const okTranspose = (t) => Array.isArray(t) && t.length === 2 && t.every(Number.
 // old − new. null or [0, 0] = concert pitch.
 export function setStaffTranspose(score, s, t) {
   if (t && !okTranspose(t)) return "Unknown transposition";
+  if (isPerc(score.staves[s])) return t && (t[0] || t[1]) ? "Drum parts don't transpose" : null;
   const nt = t && (t[0] || t[1]) ? [...t] : null;
   const group = partGroups(score).find((g) => g.includes(s));
   const dc = (score.staves[s].transpose?.[0] || 0) - (nt?.[0] || 0);
@@ -322,6 +329,14 @@ export function setStaffTranspose(score, s, t) {
 export function transpose(score, s, b, i, steps) {
   const ev = score.staves[s].bars[b][i];
   if (!ev.pitches.length) return "Rests have no pitch";
+  if (isPerc(score.staves[s])) { // ↑/↓ move to the next drum position (DESIGN §27)
+    const move = (p) => drumStep(p, Math.sign(steps)) || p;
+    const np = ev.pitches.map(move);
+    if (np.every((p, k) => p === ev.pitches[k])) return steps > 0 ? "No drum higher up" : "No drum lower down";
+    ev.pitches = sortPitches(np).filter((p, k, a) => k === 0 || !samePitch(p, a[k - 1]));
+    if (ev.grace) ev.grace = ev.grace.map(move);
+    return null;
+  }
   const key = keyAt(score, s, b);
   const move = (p) => { const np = fromDiatonic(diatonic(p) + steps); return { ...np, alter: keyAlter(key, np.step) }; };
   ev.pitches = ev.pitches.map(move);
@@ -332,9 +347,20 @@ export function transpose(score, s, b, i, steps) {
   return null;
 }
 
+// Drum staves (DESIGN §27): the top note of event i becomes drum n, at that drum's position.
+export function setDrum(score, s, b, i, n) {
+  const ev = score.staves[s].bars[b][i];
+  if (!isPerc(score.staves[s])) return "Only drum parts have drum sounds";
+  if (!ev.pitches.length) return "Rests have no drum";
+  ev.pitches[ev.pitches.length - 1] = drumPitch(n);
+  ev.pitches = sortPitches(ev.pitches).filter((p, k, a) => k === 0 || !samePitch(p, a[k - 1]));
+  return null;
+}
+
 export function setAlter(score, s, b, i, alter) {
   const ev = score.staves[s].bars[b][i];
   if (!ev.pitches.length) return "Rests have no pitch";
+  if (isPerc(score.staves[s])) return "Drum notes have no sharps or flats";
   ev.pitches.forEach((p) => (p.alter = alter));
   return null;
 }
@@ -413,7 +439,7 @@ export const MAX_GRACE = 8;
 export function addGrace(ev, pitch) {
   if (!ev.pitches.length) return "Grace notes go before a note, not a rest";
   if ((ev.grace || []).length >= MAX_GRACE) return `At most ${MAX_GRACE} grace notes before a note`;
-  ev.grace = [...(ev.grace || []), { step: pitch.step, oct: pitch.oct, alter: pitch.alter || 0 }]; // a new array: pasted copies share none
+  ev.grace = [...(ev.grace || []), { step: pitch.step, oct: pitch.oct, alter: pitch.alter || 0, ...(pitch.drum ? { drum: pitch.drum } : {}) }]; // a new array: pasted copies share none
   return null;
 }
 
@@ -527,6 +553,7 @@ export function finishClefs(score) {
 export function setClef(score, s, b, clef) {
   const st = score.staves[s];
   if (!st || !CLEFS.includes(clef) || !(b >= 0 && b < score.measures.length)) return "Can't change the clef there";
+  if (isPerc(st)) return "Drum parts keep the percussion clef";
   if (b === 0) st.clef = clef; else (st.clefs ||= {})[b] = clef;
   tidyClefs(st, score.measures.length);
   return null;
@@ -606,6 +633,7 @@ export function partGroups(score) {
 // Set the General MIDI program (0–127) of a staff's whole part (DESIGN §13.2).
 export function setStaffProgram(score, s, program) {
   if (!Number.isInteger(program) || program < 0 || program > 127) return "Unknown instrument";
+  if (isPerc(score.staves[s])) return "Drum parts play the drum kit";
   const g = partGroups(score).find((grp) => grp.includes(s));
   for (const i of g) score.staves[i].program = program;
   return null;
@@ -623,7 +651,7 @@ export function setStaffSound(score, s, id) {
 // Kinds of part the Instruments dialog can add (DESIGN §20).
 export const PART_KINDS = {
   treble: [{ clef: "treble" }], bass: [{ clef: "bass" }], alto: [{ clef: "alto" }], tenor: [{ clef: "tenor" }],
-  grand: [{ clef: "treble", brace: true }, { clef: "bass" }],
+  grand: [{ clef: "treble", brace: true }, { clef: "bass" }], percussion: [{ clef: "percussion" }],
 };
 
 // Rebuild the part list (DESIGN §20). rows, in the new order: {from, name, kind?, program?}, where
@@ -643,7 +671,7 @@ export function arrangeParts(score, rows) {
     let part;
     if (r.from === null || r.from === undefined) {
       const program = Number.isInteger(r.program) && r.program > 0 && r.program <= 127 ? r.program : 0;
-      part = PART_KINDS[r.kind].map((k) => ({ name, clef: k.clef, brace: !!k.brace, ...(program ? { program } : {}),
+      part = PART_KINDS[r.kind].map((k) => ({ name, clef: k.clef, brace: !!k.brace, ...(program && k.clef !== "percussion" ? { program } : {}),
         bars: score.measures.map(() => []) }));
     } else part = groups.find((x) => x[0] === r.from).map((i) => score.staves[i]);
     for (const st of part) st.name = name;
@@ -663,6 +691,7 @@ export const PRESETS = {
     { name: "Soprano", clef: "treble" }, { name: "Alto", clef: "treble" },
     { name: "Tenor", clef: "treble" }, { name: "Bass", clef: "bass" },
   ],
+  drums: [{ name: "Drums", clef: "percussion" }],
 };
 
 export function newScore({ title = "Untitled", composer = "", tempo = 100, preset = "treble",
@@ -672,7 +701,7 @@ export function newScore({ title = "Untitled", composer = "", tempo = 100, prese
     title, composer, tempo,
     measures: Array.from({ length: n }, (_, i) => (i === 0 ? { key, time, ...(symOk(sym, time) && sym ? { sym } : {}) } : {})),
     staves: PRESETS[preset].map((st) => ({
-      name: st.name, clef: st.clef, brace: !!st.brace, ...(program ? { program } : {}),
+      name: st.name, clef: st.clef, brace: !!st.brace, ...(program && st.clef !== "percussion" ? { program } : {}),
       bars: Array.from({ length: n }, () => []),
     })),
   };
@@ -701,7 +730,9 @@ export function isValidScore(sc) {
     const n = sc.measures.length;
     if (!n || !sc.measures[0].time) return false;
     if (!sc.measures.every((m) => m.sym === undefined || (m.time && TIME_SYMS[m.sym] && symOk(m.sym, m.time)))) return false;
-    const okPitch = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2;
+    let okPitch;
+    const pitched = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2 && p.drum === undefined;
+    const drum = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && p.alter === 0 && Number.isInteger(p.drum) && p.drum >= 35 && p.drum <= 81;
     const okBars = (bars) => Array.isArray(bars) && bars.length === n && bars.every((bar) => Array.isArray(bar) && bar.every((e) =>
       DURS.includes(e.dur) && Array.isArray(e.pitches) && e.pitches.every(okPitch) &&
       (e.grace === undefined || (Array.isArray(e.grace) && e.grace.length > 0 && e.grace.length <= MAX_GRACE && e.pitches.length > 0 && e.grace.every(okPitch))) &&
@@ -714,7 +745,8 @@ export function isValidScore(sc) {
         (typeof l.text === "string" && l.text.length > 0 && l.text.length <= MAX_LYRIC && (l.hyph === undefined || l.hyph === true)))))));
     const okClefs = (c) => c === undefined || (c && typeof c === "object" && Object.keys(c).length > 0 &&
       Object.entries(c).every(([k, v]) => /^[1-9]\d*$/.test(k) && +k < n && CLEFS.includes(v)));
-    return sc.staves.every((st) => CLEFS.includes(st.clef) && okBars(st.bars) && okClefs(st.clefs) &&
+    return sc.staves.every((st) => (okPitch = isPerc(st) ? drum : pitched) && (CLEFS.includes(st.clef) || isPerc(st)) && okBars(st.bars) && okClefs(st.clefs) &&
+      (!isPerc(st) || (st.clefs === undefined && st.program === undefined && st.transpose === undefined && !st.brace)) &&
       (st.program === undefined || (Number.isInteger(st.program) && st.program >= 0 && st.program <= 127)) &&
       (st.transpose === undefined || okTranspose(st.transpose)) &&
       (st.sound === undefined || (typeof st.sound === "string" && st.sound.length > 0 && st.sound.length <= 64)) &&

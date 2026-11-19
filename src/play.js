@@ -1,6 +1,7 @@
 // Coda playback: sampled General MIDI sounds fetched on demand, with a triangle-wave fallback.
 // See docs/DESIGN.md §7 and §13.3.
-import { attrsAt, barCapacity, eventTicks, midi, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL } from "./model.js";
+import { attrsAt, barCapacity, eventTicks, midi as midiOf, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc } from "./model.js";
+import { drumHit } from "./drumsynth.js";
 import { GM } from "./gm.js";
 import { getSound } from "./usersounds.js";
 
@@ -24,7 +25,9 @@ export function schedule(score, from = 0) {
       let at = tick;
       for (const ev of bars[bar]) {
         const len = eventTicks(ev);
-        const nextOpen = new Map(), tr = st.transpose?.[0] || 0, base = { vel: velAt(si, at), program: st.program ?? 0, staff: si, ...(st.sound ? { sound: st.sound } : {}) };
+        // a drum staff plays its drum numbers on the kit, program -1 (DESIGN §27)
+        const perc = isPerc(st), nextOpen = new Map(), tr = st.transpose?.[0] || 0, base = { vel: velAt(si, at), program: perc ? -1 : st.program ?? 0, staff: si, ...(st.sound && !perc ? { sound: st.sound } : {}) };
+        const midi = (p) => (perc ? p.drum - tr : midiOf(p));
         // grace notes (DESIGN §26) take a 32nd each, at most half the note, from the start of the beat
         const g = ev.grace ? Math.min(60, Math.floor(len / 2 / ev.grace.length)) : 0;
         (ev.grace || []).forEach((p, k) => notes.push({ start: at + k * g, end: at + (k + 1) * g, midi: midi(p) + tr, ...base }));
@@ -121,7 +124,7 @@ export const sustained = (p) => (p >= 16 && p <= 23) || (p >= 40 && p <= 44) || 
 
 // The sample keys ("program:root") a score's notes need.
 export function needed(score) {
-  return new Set(schedule(score).notes.map((n) => keyOf(n.program, n.midi)));
+  return new Set(schedule(score).notes.filter((n) => n.program >= 0).map((n) => keyOf(n.program, n.midi)));
 }
 
 // Bytes of one recording: the browser cache, then each base in turn. Failures are not cached.
@@ -237,6 +240,7 @@ function userFor(sound, m) {
 // A note with whatever is available now: your sound, the sample if loaded, else the triangle voice.
 // vel: MIDI velocity, 80 (mf) plays at the usual level.
 function note(c, dest, m, program, start, len, sound, vel = 80) {
+  if (program < 0) { drumHit(c, dest, m, start, vel / 80); return; }
   const u = userFor(sound, m), level = vel / 80;
   if (u) { sampledVoice(c, dest, u.buf, m, u.root, start, len, false, level); return; }
   const buf = buffers.get(keyOf(program, m));
@@ -270,7 +274,7 @@ export function audition(midis, program = 0, sound) {
     setTimeout(() => out.disconnect(), 2000);
     for (const m of midis) {
       note(ctx, out, m, program, t, 0.35, sound);
-      if (!userFor(sound, m)) load(keyOf(program, m)).catch(() => {});
+      if (program >= 0 && !userFor(sound, m)) load(keyOf(program, m)).catch(() => {});
     }
     if (sound) loadUser(sound);
   } catch { /* audio unavailable: editing still works */ }
@@ -283,7 +287,7 @@ async function prepare(notes, waitMs, onStatus = () => {}) {
   if (ids.length) await Promise.all(ids.map(loadUser));
   // notes your sound can't play (missing, or outside its range) use the part's instrument instead
   const fell = notes.filter((n) => n.sound && !userFor(n.sound, n.midi)).length;
-  const keys = [...new Set(notes.filter((n) => !userFor(n.sound, n.midi)).map((n) => keyOf(n.program, n.midi)))].filter((k) => !buffers.has(k));
+  const keys = [...new Set(notes.filter((n) => n.program >= 0 && !userFor(n.sound, n.midi)).map((n) => keyOf(n.program, n.midi)))].filter((k) => !buffers.has(k));
   const msgs = fell ? [`${fell} note${fell > 1 ? "s" : ""} outside your sound's range (or a missing sound) play the part's instrument.`] : [];
   if (keys.length) {
     onStatus("Loading sounds…");

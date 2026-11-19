@@ -1,5 +1,6 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt } from "./model.js";
+import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc } from "./model.js";
+import { DRUMS } from "./drums.js";
 
 const VF = () => Vex.Flow;
 
@@ -11,9 +12,12 @@ const LEFT_PAD = 20;
 const RIGHT_PAD = 4;     // keeps the closing barline inside the drawing, which print clips to
 const KEY_NAMES = ["Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#"];
 const MARK_VF = { fermata: "a@", staccato: "a.", accent: "a>", tenuto: "a-", marcato: "a^" };
-const REST_KEY = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3" };
+const REST_KEY = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3", percussion: "b/4" };
 // rests above / below the middle when two layers share a bar
-const REST_KEY_LAYER = { treble: ["e/5", "f/4"], bass: ["g/3", "a/2"], alto: ["f/4", "g/3"], tenor: ["d/4", "e/3"] };
+const REST_KEY_LAYER = { treble: ["e/5", "f/4"], bass: ["g/3", "a/2"], alto: ["f/4", "g/3"], tenor: ["d/4", "e/3"], percussion: ["e/5", "f/4"] };
+// drum noteheads (DESIGN §27) as VexFlow key suffixes
+const HEAD = { x: "/X", cx: "/CX", d: "/D", t: "/TU" };
+const keyOf = (p) => "cdefgab"[p.step] + (p.drum ? "" : ACC[p.alter]) + "/" + p.oct + (p.drum ? HEAD[DRUMS.get(p.drum)?.head] || "" : "");
 const ACC = { "-2": "bb", "-1": "b", 0: "n", 1: "#", 2: "##" };
 const ACCENT = "#2563eb";
 const DIM = "#9aa0a6"; // layers other than the one being edited (screen only)
@@ -91,14 +95,14 @@ function makeNote(ev, clef, stem = 0) {
   const VFl = VF();
   const rest = !ev.pitches.length;
   const keys = rest ? [stem ? REST_KEY_LAYER[clef][stem > 0 ? 0 : 1] : REST_KEY[clef]]
-    : ev.pitches.map((p) => "cdefgab"[p.step] + ACC[p.alter] + "/" + p.oct);
+    : ev.pitches.map(keyOf);
   const duration = ev.dur + "d".repeat(ev.dots || 0) + (rest ? "r" : "");
   const note = stem ? new VFl.StaveNote({ clef, keys, duration, stem_direction: stem })
     : new VFl.StaveNote({ clef, keys, duration, auto_stem: true });
   if (ev.dots) VFl.Dot.buildAndAttach([note], { all: true });
   if (ev.grace) { // DESIGN §26: one is a slashed eighth, more are beamed sixteenths; accidentals come from applyAccidentals
     const one = ev.grace.length === 1;
-    const gs = ev.grace.map((p) => new VFl.GraceNote({ keys: ["cdefgab"[p.step] + ACC[p.alter] + "/" + p.oct], duration: one ? "8" : "16", slash: one, clef }));
+    const gs = ev.grace.map((p) => new VFl.GraceNote({ keys: [keyOf(p)], duration: one ? "8" : "16", slash: one, clef }));
     const group = new VFl.GraceNoteGroup(gs, true);
     if (!one) group.beamNotes();
     note.addModifier(group, 0);
@@ -338,9 +342,9 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
     const row = score.staves.map((st, s) => {
       const stave = new VFl.Stave(x, staffTops(score)[s], sys.widths[k]);
       const key = keyAt(score, s, b);
-      if (firstInSys) stave.addClef(clefAt(st, b)).addKeySignature(keyName(key));
+      if (firstInSys) { stave.addClef(clefAt(st, b)); if (!isPerc(st)) stave.addKeySignature(keyName(key)); }
       if (firstInSys && si > 0 && s === 0) stave.setMeasure(b + 1); // bar number (DESIGN §11.4)
-      if (!firstInSys && m.key !== undefined) stave.addKeySignature(keyName(key), keyName(keyAt(score, s, b - 1)));
+      if (!firstInSys && m.key !== undefined && !isPerc(st)) stave.addKeySignature(keyName(key), keyName(keyAt(score, s, b - 1)));
       // a clef change is drawn small before the barline it starts at, also as the courtesy clef at a line end
       if (st.clefs?.[b + 1]) stave.setEndClef(st.clefs[b + 1], "small");
       if (b === 0 || (m.time && b > 0)) stave.addTimeSignature(timeLabel(at));
@@ -414,7 +418,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
       }
       // accidentals look across all layers of the staff
       const withNotes = staffVoices.filter((_, i) => used[i].bar.length);
-      if (withNotes.length) VFl.Accidental.applyAccidentals(withNotes, keyName(keyAt(score, s, b)));
+      if (withNotes.length && !isPerc(st)) VFl.Accidental.applyAccidentals(withNotes, keyName(keyAt(score, s, b)));
       fmt.joinVoices(staffVoices);
       voices.push(...staffVoices);
     });

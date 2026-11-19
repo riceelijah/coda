@@ -1227,3 +1227,28 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   or `<grace16/>` chords. Imported groups drawn differently (unslashed single, other values) are
   counted as redrawn; grace chords keep their first note; graces after a note, before a rest or
   at a bar end are counted. `.musx` grace notes are still skipped and counted.
+
+## 27. Unpitched percussion (Phase 32)
+
+- **Model:** a drum part is a staff with `clef: "percussion"` (the only flag). It has no
+  `program`, `transpose`, `brace` or `clefs`, and no key signature. Each pitch on it is
+  `{step, oct, alter: 0, drum}`: `step`/`oct` is the staff position (read as treble), `drum` the
+  General MIDI drum number 35–81. `drum` appears only on drum staves; `isValidScore` checks both.
+- **Kit** (`src/drums.js`): the 47 GM drums with name, default position and notehead (normal,
+  x, circled x, diamond, triangle), after MuseScore's drum kit (line 0 = top line, F5).
+  Entry positions: D4 pedal hi-hat, E4 bass drum 2, F4 bass drum, G4/A4 floor toms, B4 low tom,
+  C5 snare, D5/E5 toms, F5 ride, G5 closed hi-hat, A5 crash, B5 crash 2, C6 splash.
+- **Entry:** a click or typed letter snaps to the nearest entry position and takes its drum;
+  ↑/↓ move to the next one. Notes ▸ Drum sound (and the context menu) sets any kit drum on the
+  selected notes, which also moves them to that drum's position. Accidentals, transposition
+  and ties don't apply. Copy/paste between drum and pitched staves is refused.
+- **Sound:** synthesized (no samples needed, works offline and in audio export): a few families
+  (kick, snare, tom, hi-hat, cymbal, hand drum, wood/metal hit, shaker) shaped by the drum number.
+  Dynamics apply. A sampled kit would need a new sound source.
+- **Files:** MusicXML `<unpitched>` with display step/octave, one `<score-instrument>` +
+  `<midi-instrument>` (channel 10, `midi-unpitched` = drum + 1) per drum, `<instrument id>` on
+  each note, `<notehead>` for non-normal heads, `<clef><sign>percussion</sign>`. MuseScore:
+  `useDrumset` with a `<Drum>` per kit drum, note `<pitch>` = drum, clef `PERC`. MIDI: channel 10
+  imports as one drum staff (keys outside 35–81 counted); drum staves export on channel 10.
+  `.musx` percussion maps are not read yet: those staves import at their staff positions as
+  pitched notes, and the report says so.

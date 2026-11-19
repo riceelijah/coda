@@ -238,6 +238,7 @@
         <button role="menuitem" id="n-tie" data-short="T">Tie to next</button>
         <button role="menuitem" id="n-tuplet" data-short="9">Tuplet…</button>
         <button role="menuitem" id="n-untup">Remove tuplet</button>
+        <button role="menuitem" id="n-drum">Drum sound…</button>
         <hr>
         <button role="menuitem" id="n-fermata">Fermata</button>
         <button role="menuitem" id="n-staccato">Staccato</button>
@@ -348,6 +349,7 @@
         <option value="piano">Piano (grand staff)</option>
         <option value="trebleBass">Treble + Bass</option>
         <option value="satb">SATB (4 staves)</option>
+        <option value="drums">Drums</option>
       </select>
       <label class="new-only" for="f-sound">Sound</label><select class="new-only" id="f-sound"></select>
       <label class="new-only" for="f-key">Key</label><select class="new-only" id="f-key"></select>
@@ -396,6 +398,7 @@
         <option value="treble">Treble staff</option><option value="bass">Bass staff</option>
         <option value="alto">Alto staff</option><option value="tenor">Tenor staff</option>
         <option value="grand">Grand staff (two staves)</option>
+        <option value="percussion">Drum staff</option>
       </select>
       <button class="btn" type="button" id="inst-add">Add</button>
     </div>
@@ -444,6 +447,18 @@
     <div class="actions">
       <button class="btn" type="button" id="tuplet-cancel">Cancel</button>
       <button class="btn primary" value="ok" id="tuplet-ok">Apply</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="drum">
+  <form method="dialog">
+    <h2>Drum sound</h2>
+    <div class="form"><label for="drum-pick">Drum</label><select id="drum-pick"></select></div>
+    <p class="note">Sets the drum of every selected note (the top note of a chord) and moves it to that drum's place on the staff.</p>
+    <div class="actions">
+      <button class="btn" type="button" id="drum-cancel">Cancel</button>
+      <button class="btn primary" value="ok">Apply</button>
     </div>
   </form>
 </dialog>

@@ -6,6 +6,7 @@ import * as usnd from "./usersounds.js";
 import { GM, FAMILIES } from "./gm.js";
 import { demoScore } from "./demo.js";
 import * as store from "./store.js";
+import { DRUMS } from "./drums.js";
 
 const $ = (id) => document.getElementById(id);
 const PREFIX = "coda."; // library keys: coda.doc.<id>, coda.current (DESIGN §12)
@@ -513,7 +514,7 @@ function makeEvent(pitch) {
 
 function withAlter(step, oct) {
   const key = M.keyAt(state.score, state.caret.staff, state.caret.bar);
-  return { step, oct, alter: state.armed.alter ?? M.keyAlter(key, step) };
+  return M.fitPitch(state.score.staves[state.caret.staff], { step, oct, alter: state.armed.alter ?? M.keyAlter(key, step) });
 }
 
 // Append at the caret, auto-advancing to (or creating) the next bar with room.
@@ -553,7 +554,7 @@ function enterAtCaret(pitch) {
 // Sound the pitches of an event (DESIGN §11.2).
 function hear(ev) {
   const st = state.score.staves[state.sel?.staff ?? 0];
-  if (ev && ev.pitches.length) audition(ev.pitches.map((p) => M.soundingMidi(st, p)), st.program ?? 0, st.sound);
+  if (ev && ev.pitches.length) audition(ev.pitches.map((p) => M.soundingMidi(st, p)), M.isPerc(st) ? -1 : st.program ?? 0, st.sound);
 }
 
 // Shift+A–G: add that letter above the selected note's top pitch (DESIGN §11.1).
@@ -565,6 +566,7 @@ function graceMode(on) {
 }
 
 function addGrace(s, pitch) {
+  pitch = M.fitPitch(state.score.staves[s.staff], pitch);
   if (edit((sc) => M.addGrace(sc.staves[s.staff].bars[s.bar][s.idx], pitch))) { hear({ pitches: [pitch] }); message(M.pitchName(pitch) + " grace note added"); }
 }
 
@@ -597,7 +599,7 @@ function chordLetter(letter) {
   }
   const p = M.chordAbove(base, step);
   const key = M.keyAt(state.score, s.staff, s.bar);
-  const pitch = { ...p, alter: state.armed.alter ?? M.keyAlter(key, p.step) };
+  const pitch = M.fitPitch(state.score.staves[s.staff], { ...p, alter: state.armed.alter ?? M.keyAlter(key, p.step) });
   if (edit((sc) => M.toggleChordPitch(sc, s.staff, s.bar, s.idx, pitch))) { hear(selEvent()); message(M.pitchName(pitch) + " added"); }
 }
 
@@ -646,6 +648,7 @@ function copySel(cut) {
   const bars = lb(state.sel.staff);
   state.clip = JSON.parse(JSON.stringify(r.map((p) => bars[p.bar][p.idx])));
   state.clipTr = state.score.staves[state.sel.staff].transpose || [0, 0]; // to keep the sound in another part
+  state.clipPerc = M.isPerc(state.score.staves[state.sel.staff]);
   message(`${r.length} note${r.length > 1 ? "s" : ""} copied`);
   if (cut) deleteSel();
   return true;
@@ -657,6 +660,8 @@ function paste() {
   const staff = s ? s.staff : state.caret.staff;
   const bar = last ? last.bar : state.caret.bar;
   const idx = last ? last.idx + 1 : lb(staff)[bar].length;
+  const hasNotes = state.clip.some((e) => e.pitches.length);
+  if (hasNotes && !!state.clipPerc !== M.isPerc(state.score.staves[staff])) { message(state.clipPerc ? "Drum notes paste only into a drum part" : "Pitched notes don't paste into a drum part", true); return true; }
   edit((sc) => {
     const placed = [], [c, d] = state.clipTr || [0, 0], [c2, d2] = sc.staves[staff].transpose || [0, 0];
     const clip = c === c2 && d === d2 ? state.clip
@@ -753,7 +758,7 @@ function onClick(e) {
     state.sel = { staff: L.staff, bar: L.bar, idx: target };
     if (chord) {
       const key = M.keyAt(state.score, L.staff, L.bar);
-      const pitch = { ...L.pitch, alter: state.armed.alter ?? M.keyAlter(key, L.pitch.step) };
+      const pitch = M.fitPitch(state.score.staves[L.staff], { ...L.pitch, alter: state.armed.alter ?? M.keyAlter(key, L.pitch.step) });
       if (edit((sc) => M.toggleChordPitch(sc, L.staff, L.bar, target, pitch))) hear(selEvent());
     } else {
       refresh();
@@ -1003,7 +1008,7 @@ const soundValue = (st) => (st.sound ? "u:" + st.sound : String(st.program ?? 0)
 // Your sounds as an extra group in each part's menu; `picks` keeps choices made before a refresh.
 async function fillOwnSounds(picks = null) {
   const own = await usnd.listSounds();
-  for (const sel of $("inst-rows").querySelectorAll("select.snd")) {
+  for (const sel of $("inst-rows").querySelectorAll("select.snd:not(:disabled)")) {
     const keep = picks?.get(sel) ?? sel.value;
     sel.querySelector("optgroup.own")?.remove();
     const g = document.createElement("optgroup");
@@ -1024,7 +1029,7 @@ const TRANSPOSITIONS = [
 ];
 const trValue = (st) => (st.transpose ? st.transpose.join(",") : "0,0");
 
-const KIND_LABEL = { treble: "Treble staff", bass: "Bass staff", alto: "Alto staff", tenor: "Tenor staff", grand: "Grand staff" };
+const KIND_LABEL = { treble: "Treble staff", bass: "Bass staff", alto: "Alto staff", tenor: "Tenor staff", grand: "Grand staff", percussion: "Drum staff" };
 
 // One row of the parts list (DESIGN §20). The rows are the draft: Apply reads them in order.
 function partRow({ from, kind, name, value, tr = "0,0" }) {
@@ -1040,6 +1045,9 @@ function partRow({ from, kind, name, value, tr = "0,0" }) {
   sel.className = "snd"; sel.setAttribute("aria-label", "Sound");
   fillSounds(sel, 0);
   sel.dataset.want = value;
+  if (kind === "percussion") { // the built-in kit (DESIGN §27): no instrument or transposition to choose
+    sel.replaceChildren(new Option("Drum kit (built in)", "0")); sel.disabled = true; trs.disabled = true;
+  }
   const btn = (text, label, fn) => {
     const b = document.createElement("button");
     b.type = "button"; b.className = "btn"; b.textContent = text; b.title = label; b.setAttribute("aria-label", label);
@@ -1103,6 +1111,7 @@ function closeInstruments() {
     // sounds, by position in the new order
     let s = 0;
     for (const r of rows) {
+      if (r.kind === "percussion") { s++; continue; }
       const err = r.value.startsWith("u:") ? M.setStaffSound(score, s, r.value.slice(2))
         : M.setStaffSound(score, s, null) || M.setStaffProgram(score, s, +r.value);
       if (err) return err;
@@ -1166,6 +1175,26 @@ async function addOwnSound() {
   say(`Added "${name}". Pick it for a part in the Instruments list.`);
   $("us-file").value = ""; $("us-name").value = "";
   listOwnSounds();
+}
+
+// ---------- drum sound (DESIGN §27) ----------
+
+function openDrum() {
+  const s = state.sel;
+  if (!s || !M.isPerc(state.score.staves[s.staff])) { message("Select notes in a drum part first", true); return; }
+  const pick = $("drum-pick");
+  if (!pick.options.length) for (const d of DRUMS.values()) pick.appendChild(new Option(`${d.name} (${d.n})`, d.n));
+  const top = selEvent()?.pitches.slice(-1)[0];
+  if (top) pick.value = top.drum;
+  $("drum").returnValue = "";
+  $("drum").showModal();
+}
+
+function closeDrum() {
+  if ($("drum").returnValue !== "ok" || !state.sel) return;
+  const s = state.sel, n = +$("drum-pick").value, r = range().filter((p) => lb(s.staff)[p.bar][p.idx].pitches.length);
+  if (!r.length) { message("Rests have no drum", true); return; }
+  if (edit((sc) => { for (const p of r) { const e = M.setDrum(sc, s.staff, p.bar, p.idx, n); if (e) return e; } return null; })) hear(selEvent());
 }
 
 // ---------- tuplets (DESIGN §14.4) ----------
@@ -1275,6 +1304,7 @@ const CMD = {
   "n-layer3": { run: () => setLayer(2) },
   "n-layer4": { run: () => setLayer(3) },
   "n-tuplet": { run: () => openTuplet() },
+  "n-drum": { run: () => openDrum(), on: () => hasSel() && M.isPerc(state.score.staves[state.sel.staff]) },
   "n-untup": { run: () => tupletSel(null), on: () => range().some((p) => lb(state.sel.staff)[p.bar][p.idx].tup) },
   ...Object.fromEntries(M.CLEFS.map((c) => ["c-" + c, { run: () => edit((sc) => M.setClef(sc, state.caret.staff, state.caret.bar, c)) }])),
   "b-addbar": { run: () => edit((sc) => { M.addMeasure(sc, state.caret.bar); state.caret.bar++; return null; }) },
@@ -1328,7 +1358,7 @@ function selectAll() {
 
 // ---------- context menu (DESIGN §14.3) ----------
 
-const CTX_NOTE = ["m-cut", "m-copy", "m-paste", "m-delete", "-", "n-up", "n-down", "n-tie", "n-tuplet", "n-untup", "-", "n-fermata", "n-staccato", "n-accent", "-", "b-attrs", "m-instruments"];
+const CTX_NOTE = ["m-cut", "m-copy", "m-paste", "m-delete", "-", "n-up", "n-down", "n-tie", "n-tuplet", "n-untup", "n-drum", "-", "n-fermata", "n-staccato", "n-accent", "-", "b-attrs", "m-instruments"];
 const CTX_STAFF = ["m-paste", "-", "b-addbar", "b-delbar", "-", "b-attrs", "m-instruments"];
 
 function openCtx(x, y, ids) {
@@ -1659,12 +1689,14 @@ function init() {
   $("us-add").onclick = () => addOwnSound();
   $("usounds").addEventListener("close", () => fillOwnSounds());
   fillSounds($("f-sound"), 0);
-  $("f-preset").onchange = (e) => ($("f-sound").value = e.target.value === "satb" ? 52 : 0);
+  $("f-preset").onchange = (e) => { $("f-sound").value = e.target.value === "satb" ? 52 : 0; $("f-sound").disabled = e.target.value === "drums"; };
   setupCommands();
   document.querySelectorAll("#layers button").forEach((b, i) => (b.onclick = () => setLayer(i)));
   setupCtx();
   $("tuplet").addEventListener("close", closeTuplet);
   $("tuplet-cancel").onclick = () => $("tuplet").close("cancel");
+  $("drum").addEventListener("close", closeDrum);
+  $("drum-cancel").onclick = () => $("drum").close("cancel");
   setupMenus();
   { // compressed audio: whatever this browser can record, or no item at all
     const t = recordType();
