@@ -1181,6 +1181,22 @@ export async function run({ check, eq }) {
     return M.concertView(u) === u || "copy without transposing parts";
   });
 
+  await check("Phase 42 review: transposing part's key, first chord symbol kept, x for double sharp", () => {
+    const s = M.newScore({ key: 4, bars: 1 });
+    s.staves[0].transpose = [-2, -1];
+    s.staves[0].bars[0] = [ev("w", "A#4")];
+    if (M.transposeScore(s, 2, 1) || M.keyAt(s, 0, 0) !== 8 - 12 || brief(s.staves[0]) !== "C5:w") return "written key " + M.keyAt(s, 0, 0) + " " + brief(s.staves[0]);
+    const h = M.parseChord("B#7/Fx");
+    if (!h || h.kind !== "7" || h.bass?.alter !== 2) return "Fx bass";
+    const x = (body) => `<score-partwise><part-list><score-part id="P1"/></part-list><part id="P1"><measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>${body}</measure></part></score-partwise>`;
+    const { score, report } = importMusicXML(x(`<harmony><root><root-step>C</root-step></root><kind>major</kind></harmony>
+      <harmony><root><root-step>F</root-step></root><kind>major</kind><offset>2</offset></harmony>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>`), "h.xml");
+    if (M.chordText(score.staves[0].bars[0][0].harm || { root: { step: 0, alter: 0 }, kind: "?" }) !== "C" || !JSON.stringify(report).includes("already has one")) return "first kept";
+    return true;
+  });
+
   await check("Metronome beats and count-in: compound time, pickups (DESIGN §39)", () => {
     const s = M.newScore({ bars: 2, time: [6, 8] });
     if (!eq(beatsOf(s, 0).ticks, [0, 720])) return "6/8 " + beatsOf(s, 0).ticks;

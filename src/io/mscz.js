@@ -261,8 +261,9 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (+(txt(el, "harmonyType") || 0)) report.count("Roman numerals and Nashville numbers (not imported)");
             else if (!Number.isFinite(root) || !note(root)) report.count(/^n\.?c\.?$/i.test(name) ? "No-chord symbols (N.C.) (not imported)" : "Chord symbols without a root note (not imported)");
             else {
-              if (pendHarm[vi]) report.count("Chord symbols over a bar or note that already has one (not imported)");
+              if (pendHarm[vi]) { report.count("Chord symbols over a bar or note that already has one (not imported)"); break; }
               if (name.length > MAX_KIND) report.count(`Chord symbols cut to ${MAX_KIND} characters after the root`);
+              if (Number.isFinite(bass) && !note(bass)) report.count("Chord symbol bass notes that can't be read (left off)");
               pendHarm[vi] = { root: note(root), kind: cleanText(name, MAX_KIND), ...(Number.isFinite(bass) && note(bass) ? { bass: note(bass) } : {}) };
             }
             break;
@@ -332,6 +333,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             if (dt === "measure") { // whole-bar rest = empty bar
               if (marks.length) report.count("Fermatas on whole-bar rests (not imported)");
               if (pendText[vi]) report.count("Text over a bar with no notes moved to the next note");
+              if (pendHarm[vi]) report.count("Chord symbols inside a note or over an empty bar moved to the next note");
               cur += (short[mi] ?? barCapacity(time)); break;
             }
             let dur = DUR[dt];

@@ -455,7 +455,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           const h = harmIn(el, divisions, report), sn = +(txt(el, "staff") || 1);
           if (h) {
             if (pendHarm[sn]) report.count("Chord symbols over a bar or note that already has one (not imported)");
-            pendHarm[sn] = { harm: h.harm, at: pos.t + h.at, mi };
+            else pendHarm[sn] = { harm: h.harm, at: pos.t + h.at, mi };
           }
         } else if (tag === "direction" || tag === "sound") {
           const nav = navOf(el);

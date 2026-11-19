@@ -503,7 +503,7 @@ export const MAX_KIND = 12;
 const ACC = { "": 0, "#": 1, "♯": 1, b: -1, "♭": -1, "##": 2, x: 2, "𝄪": 2, bb: -2, "𝄫": -2 };
 // "Bbm7/F" -> {root: {step: 6, alter: -1}, kind: "m7", bass: {step: 3, alter: 0}}, or null
 export function parseChord(s) {
-  const m = /^([A-Ga-g])(##|bb|#|b|♯|♭|𝄪|𝄫)?(.*?)(?:\/([A-Ga-g])(##|bb|#|b|♯|♭|𝄪|𝄫)?)?$/u.exec(cleanText(s, 40));
+  const m = /^([A-Ga-g])(##|bb|#|b|x|♯|♭|𝄪|𝄫)?(.*?)(?:\/([A-Ga-g])(##|bb|#|b|x|♯|♭|𝄪|𝄫)?)?$/u.exec(cleanText(s, 40));
   if (!m || m[3].length > MAX_KIND || /[<>]/.test(m[3])) return null;
   const note = (l, a) => ({ step: STEP_NAMES.indexOf(l.toUpperCase()), alter: ACC[a || ""] });
   return { root: note(m[1], m[2]), kind: m[3].trim(), ...(m[4] ? { bass: note(m[4], m[5]) } : {}) };
@@ -538,7 +538,11 @@ export function transposeScore(score, c, d) {
   if (Math.abs(k0 + fifthsOf(c, d)) > 7) d = [d - 1, d + 1].find((x) => Math.abs(k0 + fifthsOf(c, x)) <= 7) ?? d;
   const staves = score.staves.filter((st) => !isPerc(st)), evs = staves.flatMap((st) => allLayers(st).flatMap((bars) => bars.flat()));
   if (evs.some((ev) => [...ev.pitches, ...(ev.grace || [])].some((p) => midi(p) + c < 0 || midi(p) + c > 127))) return "Some notes would go off the keyboard";
-  for (const ev of evs) shiftEvent(ev, c, d);
+  for (const st of staves) { // a transposing part's own key can pass 7 where the score's doesn't: spell its notes the other way
+    const k = k0 + fifthsOf(c, d) - (st.transpose ? fifthsOf(st.transpose[0], st.transpose[1]) : 0);
+    const ds = Math.abs(k) <= 7 ? d : [d - 1, d + 1].find((x) => Math.abs(k + fifthsOf(c, x) - fifthsOf(c, d)) <= 7) ?? d;
+    for (const ev of allLayers(st).flatMap((bars) => bars.flat())) shiftEvent(ev, c, ds);
+  }
   for (const m of score.measures) if (m.key !== undefined) m.key = wrapKey(m.key + fifthsOf(c, d));
   return null;
 }

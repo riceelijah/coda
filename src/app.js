@@ -703,11 +703,10 @@ function addGrace(s, pitch) {
 function graceLetter(letter) {
   const s = state.sel, ev = selEvent();
   if (!s || !ev?.pitches.length) { message("Select the note the grace note goes before", true); return; }
-  const ref = M.diatonic(ev.grace?.[ev.grace.length - 1] || ev.pitches[ev.pitches.length - 1]);
+  const ref = M.diatonic(shown(s.staff, ev.grace?.[ev.grace.length - 1] || ev.pitches[ev.pitches.length - 1]));
   const step = "CDEFGAB".indexOf(letter);
   let d = Math.round((ref - step) / 7) * 7 + step;
-  const p = M.fromDiatonic(d);
-  addGrace(s, { ...p, alter: state.armed.alter ?? M.keyAlter(M.keyAt(state.score, s.staff, s.bar), p.step) });
+  addGrace(s, entered(s.staff, s.bar, M.fromDiatonic(d))); // in concert view the letter is the sounding note
 }
 
 function clearGrace() {
@@ -1064,7 +1063,7 @@ function transposeSel(steps) {
   if (!edit((sc) => { for (const p of r) M.transpose(sc, s.staff, p.bar, p.idx, steps); return null; })) return;
   if (r.length > 1) return;
   const ev = selEvent();
-  if (ev && ev.pitches.length) { message(ev.pitches.map(M.pitchName).join(" ")); hear(ev); }
+  if (ev && ev.pitches.length) { message(ev.pitches.map((p) => M.pitchName(shown(s.staff, p))).join(" ")); hear(ev); }
 }
 
 // ---------- playback ----------
@@ -1487,7 +1486,7 @@ function closeTranspose() {
   if ($("transpose").returnValue !== "ok") return;
   const [name, c0, d0] = M.INTERVALS[+$("x-int").value], o = +$("x-oct").value, dir = +$("x-dir").value;
   if (edit((sc) => M.transposeScore(sc, dir * (c0 + 12 * o), dir * (d0 + 7 * o))))
-    message(`Transposed ${dir > 0 ? "up" : "down"} a ${name.toLowerCase()}${o ? ` and ${o} octave${o > 1 ? "s" : ""}` : ""}`);
+    message(`Transposed ${dir > 0 ? "up" : "down"} ${/^[AEIO]/.test(name) ? "an" : "a"} ${name.toLowerCase()}${o ? ` and ${o} octave${o > 1 ? "s" : ""}` : ""}`);
 }
 
 function closeTuplet() {
@@ -1578,11 +1577,14 @@ async function noteText() {
 async function chordSymbol() {
   const s = state.sel, ev = selEvent();
   if (!ev) { message("Select a note or rest first", true); return; }
-  const now = ev.harm ? M.chordText(ev.harm).replace(/𝄫/g, "bb").replace(/𝄪/g, "##").replace(/♭/g, "b").replace(/♯/g, "#") : "";
+  const t = concertOf(s.staff), move = (h, k) => { const e = { pitches: [], harm: h }; M.shiftEvent(e, k * t[0], k * t[1]); return e.harm; };
+  const seen = ev.harm && t ? move(ev.harm, 1) : ev.harm; // in concert view, as it sounds
+  const now = seen ? M.chordText(seen).replace(/𝄫/g, "bb").replace(/𝄪/g, "##").replace(/♭/g, "b").replace(/♯/g, "#") : "";
   const v = await ask(`Chord symbol, bar ${M.barNumber(state.score, s.bar)}`, "Such as C, Am7, Bb7, F#m7b5 or C/E (empty to remove)", now);
   if (v === null) return;
-  const h = v.trim() ? M.parseChord(v) : null;
+  let h = v.trim() ? M.parseChord(v) : null;
   if (v.trim() && !h) { message(`"${v.trim().slice(0, 20)}" isn't a chord symbol Coda can read`, true); return; }
+  if (h && t) h = move(h, -1);
   edit((sc) => { const e = sc.staves[s.staff].bars[s.bar][s.idx]; if (h) e.harm = h; else delete e.harm; return null; });
 }
 async function fingering() {
