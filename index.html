@@ -237,6 +237,8 @@
         <button role="menuitem" id="m-zoomin">Zoom in</button>
         <button role="menuitem" id="m-zoomout">Zoom out</button>
         <button role="menuitem" id="m-zoom1">Actual size</button>
+        <hr>
+        <button role="menuitemcheckbox" aria-checked="false" id="m-concert">Concert pitch</button>
       </div></div>
     <div class="menu"><button class="mb" role="menuitem" aria-haspopup="menu" aria-expanded="false">Notes</button>
       <div class="mlist" role="menu" hidden>
@@ -246,10 +248,11 @@
         <button role="menuitem" id="n-down" data-short="↓">Down a step</button>
         <button role="menuitem" id="n-octup" data-short="Shift+↑">Up an octave</button>
         <button role="menuitem" id="n-octdown" data-short="Shift+↓">Down an octave</button>
-        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Double sharp and flat<span aria-hidden="true">▸</span></button>
+        <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Accidentals<span aria-hidden="true">▸</span></button>
           <div class="mlist submenu" role="menu">
             <button role="menuitem" id="n-dsharp">Double sharp</button>
             <button role="menuitem" id="n-dflat">Double flat</button>
+            <button role="menuitem" id="n-respell">Respell (C♯ ↔ D♭)</button>
           </div></div>
         <hr>
         <button role="menuitem" id="n-tie" data-short="T">Tie to next</button>
@@ -349,6 +352,7 @@
             <button role="menuitem" id="c-tenor">Tenor</button>
           </div></div>
         <button role="menuitem" id="b-tempo">Tempo from this bar…</button>
+        <button role="menuitem" id="b-transpose">Transpose…</button>
         <div class="sub"><button role="menuitem" aria-haspopup="menu" class="subhead">Repeats and endings<span aria-hidden="true">▸</span></button>
           <div class="mlist submenu" role="menu">
             <button role="menuitem" id="r-repStart">Start repeat ‖: here</button>
@@ -537,6 +541,25 @@
     <div class="actions">
       <button class="btn" type="button" id="tuplet-cancel">Cancel</button>
       <button class="btn primary" value="ok" id="tuplet-ok">Apply</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="transpose">
+  <form method="dialog">
+    <h2>Transpose</h2>
+    <div class="form">
+      <label for="x-dir">Direction</label>
+      <select id="x-dir"><option value="1">Up</option><option value="-1">Down</option></select>
+      <label for="x-int">Interval</label>
+      <select id="x-int"></select>
+      <label for="x-oct">Plus octaves</label>
+      <select id="x-oct"><option>0</option><option>1</option><option>2</option></select>
+    </div>
+    <p class="note">Moves every note, chord symbol and key signature in the score. Drum parts stay as they are.</p>
+    <div class="actions">
+      <button class="btn" type="button" id="transpose-cancel">Cancel</button>
+      <button class="btn primary" value="ok">Transpose</button>
     </div>
   </form>
 </dialog>

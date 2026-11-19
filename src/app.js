@@ -167,7 +167,7 @@ function refresh() {
   $("tempo").value = sc.tempo;
   document.title = (sc.title || "Untitled") + " — Coda";
   const layered = state.layer > 0 || sc.staves.some((st) => st.layers);
-  state.hit = render(sc, $("systems"), state.sel && { ...state.sel, end: state.selEnd }, { layer: state.layer, dim: layered && !printing });
+  state.hit = render(state.concert ? M.concertView(sc) : sc, $("systems"), state.sel && { ...state.sel, end: state.selEnd }, { layer: state.layer, dim: layered && !printing });
   if (state.hit.errors.length) message(state.hit.errors.join("; "), true);
   $("b-undo").disabled = !state.undo.length;
   $("b-redo").disabled = !state.redo.length;
@@ -207,7 +207,7 @@ function updateStatus() {
   const ev = selEvent();
   const n = range().length;
   if (n > 1) parts.push(`${n} notes selected`);
-  else if (ev) parts.push("Selected: " + (ev.pitches.length ? ev.pitches.map(M.pitchName).join(" ") : "rest") + " " + DUR_NAMES[ev.dur].toLowerCase());
+  else if (ev) parts.push("Selected: " + (ev.pitches.length ? ev.pitches.map((p) => M.pitchName(shown(state.sel.staff, p))).join(" ") : "rest") + " " + DUR_NAMES[ev.dur].toLowerCase());
   else parts.push(["", "Dotted ", "Double-dotted "][a.dots] + (a.dots ? DUR_NAMES[a.dur].toLowerCase() : DUR_NAMES[a.dur]) + (a.rest ? " rest" : "") + (a.tup ? ` · ${a.tup[0]}:${a.tup[1]} tuplet` : "") + (a.chord ? " · chord mode" : ""));
   if (a.grace) parts.push("grace notes (Esc to stop)");
   $("status-pos").textContent = parts.join(" · ");
@@ -634,10 +634,17 @@ function makeEvent(pitch) {
   return ev;
 }
 
-function withAlter(step, oct) {
-  const key = M.keyAt(state.score, state.caret.staff, state.caret.bar);
-  return M.fitPitch(state.score.staves[state.caret.staff], { step, oct, alter: state.armed.alter ?? M.keyAlter(key, step) });
+function withAlter(step, oct) { return entered(state.caret.staff, state.caret.bar, { step, oct }); }
+// A note entered at a line or space (DESIGN §38): its accidental from the key shown, then, in the
+// concert-pitch view, moved to where a transposing part writes it. Every entry path comes here.
+const concertOf = (staff) => { const st = state.score.staves[staff]; return state.concert && !M.isPerc(st) && st.transpose ? st.transpose : null; };
+function entered(staff, bar, p) {
+  const t = concertOf(staff), key = t ? M.attrsAt(state.score, bar).key : M.keyAt(state.score, staff, bar);
+  const shown = { step: p.step, oct: p.oct, alter: state.armed.alter ?? M.keyAlter(key, p.step) };
+  return M.fitPitch(state.score.staves[staff], t ? M.shiftPitch(shown, -t[0], -t[1]) : shown);
 }
+// A written pitch as the view shows it.
+function shown(staff, p) { const t = concertOf(staff); return p && t ? M.shiftPitch(p, t[0], t[1]) : p; }
 
 // Append at the caret, auto-advancing to (or creating) the next bar with room.
 function enterAtCaret(pitch) {
@@ -689,7 +696,7 @@ function graceMode(on) {
 
 function addGrace(s, pitch) {
   pitch = M.fitPitch(state.score.staves[s.staff], pitch);
-  if (edit((sc) => M.addGrace(sc.staves[s.staff].bars[s.bar][s.idx], pitch))) { hear({ pitches: [pitch] }); message(M.pitchName(pitch) + " grace note added"); }
+  if (edit((sc) => M.addGrace(sc.staves[s.staff].bars[s.bar][s.idx], pitch))) { hear({ pitches: [pitch] }); message(M.pitchName(shown(s.staff, pitch)) + " grace note added"); }
 }
 
 // A–G in grace mode: the nearest such note to the last grace note, else to the note's top
@@ -714,16 +721,15 @@ function chordLetter(letter) {
   if (!s) { message("Select a note first, then Shift+letter adds to it", true); return; }
   const step = "CDEFGAB".indexOf(letter);
   const ev = selEvent();
-  let base = ev.pitches[ev.pitches.length - 1];
+  let base = shown(s.staff, ev.pitches[ev.pitches.length - 1]);
   if (!base) { // a rest: start from the nearest such letter to the previous note
-    const prev = lastPitchBefore() || { step: 0, oct: 4 };
+    const prev = shown(s.staff, lastPitchBefore()) || { step: 0, oct: 4 };
     base = M.fromDiatonic(M.diatonic(prev) - 4);
   }
   const p = M.chordAbove(base, step);
-  const key = M.keyAt(state.score, s.staff, s.bar);
-  const pitch = M.fitPitch(state.score.staves[s.staff], { ...p, alter: state.armed.alter ?? M.keyAlter(key, p.step) });
+  const pitch = entered(s.staff, s.bar, p);
   if (inChordAlready(ev, p, pitch)) return;
-  if (edit((sc) => M.toggleChordPitch(sc, s.staff, s.bar, s.idx, pitch))) { hear(selEvent()); message(M.pitchName(pitch) + " added"); }
+  if (edit((sc) => M.toggleChordPitch(sc, s.staff, s.bar, s.idx, pitch))) { hear(selEvent()); message(M.pitchName(shown(s.staff, pitch)) + " added"); }
 }
 
 // On a drum staff a position with no drum of its own snaps to one that may already be in the
@@ -747,7 +753,7 @@ function lastPitchBefore() {
 
 function typeLetter(letter) {
   const step = "CDEFGAB".indexOf(letter);
-  const prev = lastPitchBefore();
+  const prev = shown(state.caret.staff, lastPitchBefore());
   const target = prev ? M.diatonic(prev) : M.BOTTOM_LINE[M.clefAt(state.score.staves[state.caret.staff], state.caret.bar)] + 4;
   let best = null;
   for (let oct = 0; oct <= 8; oct++) {
@@ -887,8 +893,7 @@ function onClick(e) {
   if (target !== null && (chord || L.near)) {
     state.sel = { staff: L.staff, bar: L.bar, idx: target };
     if (chord) {
-      const key = M.keyAt(state.score, L.staff, L.bar);
-      const pitch = M.fitPitch(state.score.staves[L.staff], { ...L.pitch, alter: state.armed.alter ?? M.keyAlter(key, L.pitch.step) });
+      const pitch = entered(L.staff, L.bar, L.pitch);
       if (inChordAlready(selEvent(), L.pitch, pitch)) return;
       if (edit((sc) => M.toggleChordPitch(sc, L.staff, L.bar, target, pitch))) hear(selEvent());
     } else {
@@ -905,7 +910,7 @@ function onClick(e) {
     state.sel = { staff: L.staff, bar: L.bar, idx: at };
     return null;
   });
-  if (ok && pitch) { message(M.pitchName(pitch)); hear(selEvent()); }
+  if (ok && pitch) { message(M.pitchName(shown(L.staff, pitch))); hear(selEvent()); }
 }
 
 function onMove(e) {
@@ -1417,6 +1422,19 @@ function openTuplet() {
   $("tuplet").showModal();
 }
 
+// Score ▸ Transpose… (DESIGN §38): the whole score by an interval, up or down, plus octaves.
+function openTranspose() {
+  if (!$("x-int").options.length) { M.INTERVALS.forEach(([name], k) => $("x-int").add(new Option(name, k))); $("x-int").value = "2"; }
+  $("transpose").returnValue = "";
+  $("transpose").showModal();
+}
+function closeTranspose() {
+  if ($("transpose").returnValue !== "ok") return;
+  const [name, c0, d0] = M.INTERVALS[+$("x-int").value], o = +$("x-oct").value, dir = +$("x-dir").value;
+  if (edit((sc) => M.transposeScore(sc, dir * (c0 + 12 * o), dir * (d0 + 7 * o))))
+    message(`Transposed ${dir > 0 ? "up" : "down"} a ${name.toLowerCase()}${o ? ` and ${o} octave${o > 1 ? "s" : ""}` : ""}`);
+}
+
 function closeTuplet() {
   if ($("tuplet").returnValue !== "ok") return;
   const tup = M.parseTuplet($("t-ratio").value);
@@ -1583,6 +1601,13 @@ const CMD = {
   "m-zoomin": { run: () => setZoom(zoom * 1.2) },
   "m-zoomout": { run: () => setZoom(zoom / 1.2) },
   "m-zoom1": { run: () => setZoom(1) },
+  "m-concert": { run: () => { // a view, not part of the score or undo (DESIGN §38)
+    state.concert = !state.concert;
+    $("m-concert").setAttribute("aria-checked", state.concert);
+    $("m-concert").textContent = (state.concert ? "✓ " : "") + "Concert pitch";
+    refresh();
+    message(state.concert ? "Showing concert pitch: transposing parts as they sound" : "Showing transposing parts as written");
+  } },
   "n-selall": { run: () => selectAll() },
   "n-up": { run: () => transposeSel(1), on: hasSel },
   "n-down": { run: () => transposeSel(-1), on: hasSel },
@@ -1628,6 +1653,8 @@ const CMD = {
   "b-rehearsal": { run: () => rehearsal() },
   "n-text": { run: () => noteText(), on: hasSel },
   "n-chord": { run: () => chordSymbol(), on: hasSel },
+  "b-transpose": { run: () => openTranspose() },
+  "n-respell": { run: () => { const s = state.sel, r = range(); edit((sc) => M.respell(sc, s.staff, r.map((p) => ({ bar: p.bar, idx: p.idx })))); }, on: hasSel },
   "n-finger": { run: () => fingering(), on: hasSel },
   ...Object.fromEntries(Object.keys(M.JUMPS).map((j) => ["r-" + j, { run: () => barMark("jump", j) }])),
   "r-volta1": { run: () => ending([1]) },
@@ -2018,6 +2045,8 @@ function init() {
   document.querySelectorAll("#layers button").forEach((b, i) => (b.onclick = () => setLayer(i)));
   setupCtx();
   $("tuplet").addEventListener("close", closeTuplet);
+  $("transpose").addEventListener("close", closeTranspose);
+  $("transpose-cancel").onclick = () => $("transpose").close("cancel");
   $("tuplet-cancel").onclick = () => $("tuplet").close("cancel");
   $("drum").addEventListener("close", closeDrum);
   $("b-tracks").onclick = openTracks;

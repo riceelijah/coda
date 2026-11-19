@@ -1150,6 +1150,37 @@ export async function run({ check, eq }) {
     return ["Added or altered notes", "N.C.", "moved to the next note", "already has one", "after the last note"].every((k) => w.includes(k)) || w;
   });
 
+  await check("transpose the score, respell, concert-pitch view (DESIGN §38)", () => {
+    const s = M.newScore({ preset: "treble", bars: 2 });
+    s.measures[0].key = 7; // C♯ major
+    s.staves[0].bars[0] = [ev("h", "C#5 E#5", { tie: true }), ev("h", "C#5 E#5")];
+    s.staves[0].bars[1] = [ev("w", "G#4")];
+    s.staves[0].bars[0][0].harm = M.parseChord("C#maj7");
+    s.measures[1].key = 0;
+    const t = JSON.parse(JSON.stringify(s));
+    if (M.transposeScore(t, 7, 4) || t.measures[0].key !== -4 || t.measures[1].key !== 1) return "keys " + t.measures.map((m) => m.key);
+    if (brief(t.staves[0]) !== "Ab5+C6:h~ Ab5+C6:h | Eb5:w" || M.chordText(t.staves[0].bars[0][0].harm) !== "A♭maj7") return brief(t.staves[0]);
+    const u = M.newScore({ preset: "treble", bars: 1 });
+    u.staves[0].bars[0] = [ev("w", "C5")];
+    if (M.transposeScore(u, 2, 1) || u.measures[0].key !== 2 || brief(u.staves[0]) !== "D5:w") return "up a tone " + brief(u.staves[0]);
+    if (M.transposeScore(u, 120, 70) !== "Some notes would go off the keyboard") return "range";
+    // respell: the tie partner follows; a chord can't end up with two notes on one line
+    const r = JSON.parse(JSON.stringify(s));
+    if (M.respell(r, 0, [{ bar: 0, idx: 0 }]) || brief(r.staves[0]) !== "Db5+F5:h~ Db5+F5:h | G#4:w") return "respell " + brief(r.staves[0]);
+    if (M.respell(r, 0, [{ bar: 0, idx: 0 }]) || brief(r.staves[0]) !== "C#5+E#5:h~ C#5+E#5:h | G#4:w") return "respell back " + brief(r.staves[0]);
+    const cl = M.newScore({ preset: "treble", bars: 1 });
+    cl.staves[0].bars[0] = [ev("w", "Db5 C#5")];
+    if (!M.respell(cl, 0, [{ bar: 0, idx: 0 }])) return "clash allowed";
+    // concert view: a B♭ trumpet's written D shows as C; the score itself is untouched
+    const v = M.newScore({ preset: "treble", bars: 1 });
+    v.staves[0].bars[0] = [ev("w", "D5")];
+    v.staves[0].bars[0][0].harm = M.parseChord("D7");
+    v.staves[0].transpose = [-2, -1];
+    const cv = M.concertView(v);
+    if (brief(cv.staves[0]) !== "C5:w" || cv.staves[0].transpose || M.chordText(cv.staves[0].bars[0][0].harm) !== "C7" || brief(v.staves[0]) !== "D5:w" || !v.staves[0].transpose) return "concert " + brief(cv.staves[0]);
+    return M.concertView(u) === u || "copy without transposing parts";
+  });
+
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;

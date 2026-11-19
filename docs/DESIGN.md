@@ -1318,7 +1318,7 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   | Feature | Where |
   |---|---|
   | Notes, rests, dots (double), ties, chords | palette, keys (§6.3, §11.1) |
-  | Double sharps / flats | Notes ▸ Double sharp and flat |
+  | Double sharps / flats | Notes ▸ Accidentals |
   | Any tuplet ratio | Notes ▸ Tuplet… (typed, e.g. 5:3) |
   | Layers 1–4 | Notes ▸ Layer, status bar |
   | Grace notes | Notes ▸ Grace notes |
@@ -1520,3 +1520,15 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   degrees, roman numerals, frames, inversions, N.C. and unknown kinds counted. MuseScore `<Harmony>`
   root and bass as tpc, `<name>` the suffix; written in the 4.20 layout (`<root>`, `<name>`,
   `<base>`), and read in that and the later `<harmonyInfo>` one (both checked in MuseScore 4).
+- Score ▸ Transpose…: up or down by an interval (unison to octave) plus up to two octaves; every
+  note, grace note and chord symbol on parts that aren't drums, and every key signature, in one
+  undoable step. If the opening key would need more than 7 sharps or flats the interval is spelled
+  the other way (C♯ major up a fifth → A♭ major). Later keys past 7 wrap; their notes keep the
+  interval's spelling (a known ceiling).
+- Notes ▸ Accidentals ▸ Respell: the selected notes take their other spelling with the fewest
+  accidentals (C♯ ↔ D♭, E ↔ F♭); notes tied to them follow so ties hold. Refused for drums and
+  when two notes of a chord would land on one line.
+- View ▸ Concert pitch: transposing parts drawn as they sound (`concertView`, a copy used only for
+  drawing; not saved or undone). Notes entered by click, A–G, chord letters or grace notes go
+  through `entered()`, which takes the accidental from the concert key and writes the note where
+  the part reads it; pitch names in the status bar are the ones shown.

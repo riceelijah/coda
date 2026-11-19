@@ -67,7 +67,7 @@ only says what to build in what order and how to know each phase is finished.
 | 40 | Breath marks, caesuras, ornaments, tremolo, arpeggio, fingering; accents/fermatas in playback (DESIGN §34) | done |
 | 40d | Notes menu in submenus; marking palettes open from the left palette; part names before the first system | done (no abbreviated names on later systems) |
 | 41 | Ottava lines, pedal marks, lyric extenders, nested slurs (DESIGN §37) | done (pedal in MIDI files counted, not read; `.musx` lines counted) |
-| 42 | Chord symbols; transpose the score; respell; concert-pitch view (DESIGN §38) | in progress: chord symbols done |
+| 42 | Chord symbols; transpose the score; respell; concert-pitch view (DESIGN §38) | done (chord symbols not played; whole-score transpose only) |
 | 43 | Playback: swing, accel./rit., metronome and count-in, loop and play selection, note cursor (DESIGN §39) | planned |
 | 44 | 64th notes (and 7-tuplets if the tick grid allows) (DESIGN §40) | planned |
 | 45 | Layout: system/page breaks, beam control, multi-bar rests, cue notes, go to bar (DESIGN §41) | planned |

@@ -525,6 +525,64 @@ export function shiftEvent(ev, c, d) {
   }
 }
 
+// Transpose the whole score (DESIGN §38) by c semitones and d steps: every note, grace note and
+// chord symbol on staves that aren't drums, and every key signature. When the opening key would
+// need more than 7 sharps or flats, the interval is spelled the other way (C♯ major up a fifth
+// goes to A♭, not G♯). ponytail: later keys that land past 7 wrap without respelling their notes.
+export const INTERVALS = [["Unison", 0, 0], ["Minor second", 1, 1], ["Major second", 2, 1], ["Minor third", 3, 2], ["Major third", 4, 2],
+  ["Perfect fourth", 5, 3], ["Augmented fourth", 6, 3], ["Diminished fifth", 6, 4], ["Perfect fifth", 7, 4], ["Minor sixth", 8, 5],
+  ["Major sixth", 9, 5], ["Minor seventh", 10, 6], ["Major seventh", 11, 6], ["Octave", 12, 7]];
+export function transposeScore(score, c, d) {
+  if (!c && !d) return "Pick an interval";
+  const k0 = score.measures[0].key || 0;
+  if (Math.abs(k0 + fifthsOf(c, d)) > 7) d = [d - 1, d + 1].find((x) => Math.abs(k0 + fifthsOf(c, x)) <= 7) ?? d;
+  const staves = score.staves.filter((st) => !isPerc(st)), evs = staves.flatMap((st) => allLayers(st).flatMap((bars) => bars.flat()));
+  if (evs.some((ev) => [...ev.pitches, ...(ev.grace || [])].some((p) => midi(p) + c < 0 || midi(p) + c > 127))) return "Some notes would go off the keyboard";
+  for (const ev of evs) shiftEvent(ev, c, d);
+  for (const m of score.measures) if (m.key !== undefined) m.key = wrapKey(m.key + fifthsOf(c, d));
+  return null;
+}
+
+// Respell the selected notes enharmonically (DESIGN §38): C♯ ↔ D♭, E ↔ F♭, the spelling with
+// the fewest accidentals that isn't the current one. Notes tied to them follow, so ties hold.
+export function respell(score, s, poss) {
+  const st = score.staves[s];
+  if (isPerc(st)) return "Drum notes have no spelling";
+  const flat = st.bars.flat(), done = new Set();
+  const alt = (p) => [-1, 1].map((dd) => { const n = fromDiatonic(diatonic(p) + dd); return { ...n, alter: midi(p) - midi({ ...n, alter: 0 }) }; })
+    .filter((q) => Math.abs(q.alter) <= 2).sort((x, y) => Math.abs(x.alter) - Math.abs(y.alter))[0];
+  let any = false;
+  for (const { bar, idx } of poss) {
+    const ev = st.bars[bar][idx];
+    for (const p of [...ev.pitches]) {
+      if (done.has(p)) continue;
+      const q = alt(p), same = (e) => e.pitches.find((x) => x.step === p.step && x.oct === p.oct && x.alter === p.alter);
+      let a = flat.indexOf(ev), z = a;
+      while (a > 0 && flat[a - 1].tie && same(flat[a - 1])) a--;
+      while (flat[z].tie && z + 1 < flat.length && same(flat[z + 1])) z++;
+      for (let j = a; j <= z; j++) {
+        const e = flat[j], x = same(e), np = { ...x, step: q.step, oct: q.oct, alter: q.alter };
+        e.pitches = sortPitches(e.pitches.map((y) => (y === x ? np : y)));
+        if (e.pitches.some((y, k) => k && samePitch(y, e.pitches[k - 1]))) return "Two notes of the chord would be on the same line";
+        done.add(np); any = true;
+      }
+    }
+  }
+  return any ? null : "Select notes to respell";
+}
+
+// The score as it sounds, for the concert-pitch view (DESIGN §38): a copy with every transposing
+// part's notes and chord symbols at concert pitch. Only for drawing; edits go to the score.
+export function concertView(score) {
+  if (!score.staves.some((st) => st.transpose && !isPerc(st))) return score;
+  const c = JSON.parse(JSON.stringify(score)); // ponytail: a copy per redraw; fine at NotePad sizes
+  for (const st of c.staves) if (st.transpose && !isPerc(st)) {
+    for (const bars of allLayers(st)) for (const bar of bars) for (const ev of bar) shiftEvent(ev, st.transpose[0], st.transpose[1]);
+    delete st.transpose;
+  }
+  return c;
+}
+
 export function setText(ev, s) {
   const t = cleanText(s, MAX_TEXT);
   if (NAV_WORDS.test(t)) return `Use Score ▸ Repeats and endings for "${t}"`;
