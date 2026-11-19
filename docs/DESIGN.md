@@ -1447,3 +1447,20 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   other ornaments.
 - MuseScore: `<Ornament>` (and MuseScore 3 articulation subtypes), `<Arpeggio>`,
   `<TremoloSingleChord>`/`<Tremolo>`, and voice-level `<Breath>` after the chord it follows.
+
+## 35. Marking palettes
+
+- Below the note tools, six palette buttons (Articulations, Ornaments, Dynamics, Slurs and
+  hairpins, Brass effects, Text/lyrics/tempo) each open a small grid of tools beside the palette,
+  like a sub-palette. A tool runs the same command as its menu item on the selection, is greyed out
+  when that command can't run, and the grid stays open for the next selection (Esc, the button
+  again, or another palette button closes it).
+- Icons come from the score's music font (VexFlow's glyphs, cropped to their box) or small SVGs
+  where the font has none (tremolo, arpeggio, hairpins, slide, text).
+
+## 36. Part names
+
+- Each part's name is drawn right-aligned before the first system, centred on a braced pair; the
+  first system is indented to fit the longest (up to 170 px). A score of one part with the
+  default name "Staff" shows none. Later systems show no names (no abbreviations yet).
+

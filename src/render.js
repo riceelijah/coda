@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, barNumber, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
+import { attrsAt, barNumber, partGroups, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel, BOTTOM_LINE, diatonic } from "./model.js";
 import { DRUMS } from "./drums.js";
 
 const VF = () => Vex.Flow;
@@ -64,15 +64,29 @@ function changeW(score, b) {
   return w;
 }
 
+// Part names before the first system (DESIGN §36): its indent, 0 when there are no names to show
+// (a lone part with the default name shows none).
+const partNames = (score) => {
+  const gs = partGroups(score).map((g) => ({ g, name: (score.staves[g[0]].name || "").trim() }));
+  return gs.length === 1 && gs[0].name === "Staff" ? [] : gs.filter((x) => x.name);
+};
+const x0Names = (score) => LEFT_PAD + nameIndent(score) - 20; // clear of a brace
+export function nameIndent(score) {
+  const n = partNames(score);
+  return n.length ? Math.min(170, 26 + 7.2 * Math.max(...n.map((x) => x.name.length))) : 0;
+}
+
 // Greedy system breaking + justification (DESIGN §5.2).
 export function layout(score) {
-  const avail = SHEET_W - LEFT_PAD - RIGHT_PAD;
+  const full = SHEET_W - LEFT_PAD - RIGHT_PAD, ind = nameIndent(score);
+  const room = () => (systems.length ? full : full - ind); // the first system is indented for part names
   const systems = [];
   let cur = null;
   for (let b = 0; b < score.measures.length; b++) {
     const first = !cur;
     const pre = prefixW(widestKey(score, b));
     const w = minWidth(score, b) + (first ? pre : changeW(score, b)) + (score.staves.some((st) => st.clefs?.[b + 1]) ? 24 : 0);
+    const avail = room();
     if (cur && cur.used + w > avail) {
       systems.push(cur);
       cur = null;
@@ -86,7 +100,7 @@ export function layout(score) {
   }
   if (cur) systems.push(cur);
   systems.forEach((sys, i) => {
-    const last = i === systems.length - 1;
+    const last = i === systems.length - 1, avail = i ? full : full - ind;
     if (last && sys.used < avail * 0.6) return;
     const f = avail / sys.used;
     sys.widths = sys.widths.map((w) => w * f);
@@ -177,7 +191,7 @@ export function render(score, container, sel, opts = {}) {
       try {
         ctx.clear?.();
         while (svg.lastChild) svg.removeChild(svg.lastChild);
-        let x = LEFT_PAD;
+        let x = LEFT_PAD + (si ? 0 : nameIndent(score));
         sys.bars.forEach((b, k) => {
           score.staves.forEach((st, s) => new VFl.Stave(x, tops[s], sys.widths[k]).setContext(ctx).draw());
           x += sys.widths[k];
@@ -418,7 +432,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
   const VFl = VF();
   // 1. staves
   const staves = []; // [k][s]
-  let x = LEFT_PAD;
+  let x = LEFT_PAD + (si ? 0 : nameIndent(score));
   sys.bars.forEach((b, k) => {
     const at = attrsAt(score, b);
     const m = score.measures[b];
@@ -443,6 +457,14 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
     x += sys.widths[k];
   });
   staves.forEach((row) => row.forEach((st) => st.setContext(ctx).draw()));
+  if (si === 0) { // part names, right-aligned before the first system, centred on a braced pair
+    ctx.save(); ctx.setFont("Georgia", 13, "normal");
+    for (const { g, name } of partNames(score)) {
+      const top = staves[0][g[0]].getYForLine(0), bot = staves[0][g[g.length - 1]].getYForLine(4);
+      ctx.fillText(name, x0Names(score) - ctx.measureText(name).width, (top + bot) / 2 + 4);
+    }
+    ctx.restore();
+  }
   // "×3" over a :| that plays more than twice (VexFlow draws only the dots)
   sys.bars.forEach((b, k) => {
     const n = score.measures[b].repEnd;

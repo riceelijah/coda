@@ -319,9 +319,95 @@ function buildPalette() {
     b.onclick = fn;
     pal.appendChild(b);
   });
+  buildMarkPalettes(pal);
+}
+
+// Marking palettes (DESIGN §35): a palette button opens a small grid of tools beside it, as a
+// sub-palette does. Each tool runs the same command as its menu item and stays open for the next
+// selection; Escape, the button again or another palette closes it.
+const SVG_ICON = {
+  tremolo: '<line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" stroke-width="1.4"/><g stroke="currentColor" stroke-width="2.2"><line x1="7" y1="10" x2="17" y2="7"/><line x1="7" y1="14" x2="17" y2="11"/><line x1="7" y1="18" x2="17" y2="15"/></g>',
+  arpeggio: '<path d="M12 2 q4 2 0 4 q-4 2 0 4 q4 2 0 4 q-4 2 0 4 q4 2 0 4" fill="none" stroke="currentColor" stroke-width="1.6"/>',
+  slur: '<path d="M3 15 q9 -10 18 0 q-9 -7 -18 0z" fill="currentColor"/>',
+  cresc: '<path d="M21 6 L3 12 L21 18" fill="none" stroke="currentColor" stroke-width="1.6"/>',
+  dim: '<path d="M3 6 L21 12 L3 18" fill="none" stroke="currentColor" stroke-width="1.6"/>',
+  gliss: '<line x1="4" y1="19" x2="20" y2="5" stroke="currentColor" stroke-width="1.8"/>',
+  lyrics: '<text x="12" y="17" font-size="13" text-anchor="middle" fill="currentColor" font-family="Georgia, serif">La</text><line x1="4" y1="20" x2="20" y2="20" stroke="currentColor"/>',
+  text: '<text x="12" y="16" font-size="10" text-anchor="middle" fill="currentColor" font-family="Georgia, serif" font-style="italic">Abc</text>',
+  rehearsal: '<rect x="5" y="4" width="14" height="16" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="12" y="17" font-size="12" text-anchor="middle" fill="currentColor" font-family="Georgia, serif" font-weight="bold">A</text>',
+  tempo: '<text x="12" y="16" font-size="10" text-anchor="middle" fill="currentColor" font-family="Georgia, serif">♩=</text>',
+  none: '<path d="M6 6 L18 18 M18 6 L6 18" stroke="currentColor" stroke-width="1.8"/>',
+};
+const dynIcon = (d) => `<text x="12" y="16" font-size="${d.length > 2 ? 10 : 13}" text-anchor="middle" fill="currentColor" font-family="Georgia, serif" font-style="italic" font-weight="bold">${d}</text>`;
+const MARK_GLYPH = { fermata: "fermataAbove", staccato: "articStaccatoAbove", accent: "articAccentAbove", tenuto: "articTenutoAbove", marcato: "articMarcatoAbove",
+  breath: "breathMarkComma", caesura: "caesura", trill: "ornamentTrill", invMordent: "ornamentShortTrill", mordent: "ornamentMordent", turn: "ornamentTurn",
+  scoop: "brassScoop", fall: "brassFallLipShort", doit: "brassDoitMedium" };
+const PALETTES = [
+  ["Articulations", "accent", ["fermata", "staccato", "accent", "tenuto", "marcato", "breath", "caesura"].map((m) => "n-" + m)],
+  ["Ornaments", "trill", ["n-trill", "n-invMordent", "n-mordent", "n-turn", "n-tremolo", "n-arpeggio"]],
+  ["Dynamics", "mf", [...M.DYNS.map((d) => "d-" + d), "d-none"]],
+  ["Slurs and hairpins", "slur", ["n-slur", "n-cresc", "n-dim"]],
+  ["Brass effects", "fall", ["n-scoop", "n-fall", "n-doit", "n-gliss"]],
+  ["Text, lyrics and tempo", "text", ["n-lyrics", "n-text", "b-rehearsal", "b-tempo"]],
+];
+const ICON_OF = { "n-slur": "slur", "n-cresc": "cresc", "n-dim": "dim", "n-gliss": "gliss", "n-tremolo": "tremolo", "n-arpeggio": "arpeggio",
+  "n-lyrics": "lyrics", "n-text": "text", "b-rehearsal": "rehearsal", "b-tempo": "tempo", "d-none": "none" };
+// An icon from the score's own music font, cropped to the glyph.
+function glyphIcon(code) {
+  const box = document.createElement("div");
+  box.style.cssText = "position:absolute;left:-999px;top:0";
+  document.body.appendChild(box);
+  const r = new Vex.Flow.Renderer(box, Vex.Flow.Renderer.Backends.SVG);
+  r.resize(60, 60);
+  Vex.Flow.Glyph.renderGlyph(r.getContext(), 20, 40, 34, code);
+  const g = box.querySelector("svg"), b = g.getBBox(), pad = 2, side = Math.max(b.width, b.height) + pad * 2;
+  const out = `<svg viewBox="${b.x + b.width / 2 - side / 2} ${b.y + b.height / 2 - side / 2} ${side} ${side}" aria-hidden="true" class="glyph">${g.innerHTML}</svg>`;
+  box.remove();
+  return out;
+}
+function iconFor(id) {
+  if (id.startsWith("d-") && id !== "d-none") return svgOf(dynIcon(id.slice(2)));
+  if (ICON_OF[id]) return svgOf(SVG_ICON[ICON_OF[id]]);
+  return glyphIcon(MARK_GLYPH[id.slice(2)]);
+}
+const svgOf = (inner) => `<svg viewBox="0 0 24 24" aria-hidden="true">${inner}</svg>`;
+function buildMarkPalettes(pal) {
+  const fly = $("flyout");
+  let open = null;
+  const close = () => { fly.hidden = true; open?.setAttribute("aria-expanded", "false"); open = null; };
+  PALETTES.forEach(([name, icon, ids], k) => {
+    const b = document.createElement("button");
+    b.className = "pal"; b.title = name; b.setAttribute("aria-label", name);
+    b.setAttribute("aria-haspopup", "menu"); b.setAttribute("aria-expanded", "false");
+    b.innerHTML = icon === "mf" ? svgOf(dynIcon("mf")) : SVG_ICON[icon] ? svgOf(SVG_ICON[icon]) : iconFor("n-" + icon);
+    b.onclick = () => {
+      if (open === b) { close(); return; }
+      close();
+      fly.replaceChildren(...ids.map((id) => {
+        const t = document.createElement("button");
+        t.className = "pal"; t.dataset.cmd = id; t.setAttribute("role", "menuitem");
+        t.title = t.ariaLabel = $(id).textContent.replace(/…$/, "");
+        t.innerHTML = iconFor(id); // static icon markup, no user data
+        t.onclick = () => { CMD[id].run(); enableItems(fly); };
+        return t;
+      }));
+      fly.setAttribute("aria-label", name);
+      const r = b.getBoundingClientRect(), row = pal.offsetWidth > pal.offsetHeight;
+      fly.style.left = (row ? r.left : r.right + 6) + "px";
+      fly.style.top = (row ? r.bottom + 6 : r.top) + "px";
+      fly.hidden = false;
+      enableItems(fly);
+      b.setAttribute("aria-expanded", "true");
+      open = b;
+    };
+    if (k === 0) pal.appendChild(document.createElement("hr"));
+    pal.appendChild(b);
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && open) close(); });
 }
 
 function updatePalette() {
+  if (!$("flyout").hidden) enableItems($("flyout"));
   const a = state.armed, ev = selEvent();
   const dur = ev ? ev.dur : a.dur, dots = ev ? ev.dots : a.dots;
   document.querySelectorAll(".pal[data-dur]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.dur === dur)));

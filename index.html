@@ -87,6 +87,14 @@
   .pal:hover { background: var(--btn-hover); }
   .pal[aria-pressed="true"], .pal[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   .pal svg { width: 26px; height: 26px; }
+  .pal svg.glyph path, .pal svg.glyph * { fill: currentColor; stroke: none; }
+  .pal[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .pal:disabled { opacity: .35; cursor: default; }
+  #flyout {
+    position: fixed; z-index: 25; display: grid; grid-template-columns: repeat(4, 40px); gap: 3px; padding: 5px;
+    background: var(--chrome); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  }
+  #flyout[hidden] { display: none; }
 
   #desk { grid-area: desk; overflow: auto; padding: 24px 16px 48px; }
   #sheet {
@@ -402,6 +410,7 @@
 </footer>
 
 <div id="ctx" class="mlist" role="menu" aria-label="Note actions" hidden></div>
+<div id="flyout" role="menu" hidden></div>
 <div id="report" role="status">
   <button class="tb close" id="report-close" aria-label="Dismiss">✕</button>
   <div id="report-head"></div>
@@ -606,7 +615,8 @@
       <tr><td>Click / drag</td><td>Selection tool: select a note, or drag a box around notes; <kbd>Shift</kbd>+click extends</td></tr>
       <tr><td><kbd>Shift</kbd>+<kbd>A</kbd>–<kbd>G</kbd></td><td>Add that note above the selected note (build a chord)</td></tr>
       <tr><td>Shift+click</td><td>Add or remove a chord note on the clicked note</td></tr>
-      <tr><td>Notes ▸ Articulations</td><td>Add or remove a fermata or articulation on the selected notes (also on right-click)</td></tr>
+      <tr><td>Notes ▸ Articulations, Ornaments</td><td>Add or remove a mark on the selected notes (also on right-click)</td></tr>
+      <tr><td>Lower palette buttons</td><td>Articulations, ornaments, dynamics, slurs and hairpins, brass effects, text: click one for its tools; they act on the selected notes and stay open (Esc closes)</td></tr>
       <tr><td>File ▸ Print… (<kbd>Ctrl/Cmd</kbd>+<kbd>P</kbd>)</td><td>Print the score, or save it as a PDF from the print dialog</td></tr>
       <tr><td>File ▸ Export</td><td>PDF (through the print dialog), MusicXML, .mxl, MuseScore, MIDI, WAV or compressed audio</td></tr>
       <tr><td>Score ▸ Parts and instruments…</td><td>Add, remove, rename and reorder parts, and pick each part's sound</td></tr>
