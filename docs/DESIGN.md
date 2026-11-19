@@ -1252,3 +1252,68 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   imports as one drum staff (keys outside 35–81 counted); drum staves export on channel 10.
   `.musx` percussion maps are not read yet: those staves import at their staff positions as
   pitched notes, and the report says so.
+
+## 28. Repeats and navigation; nothing import-only (Phase 33)
+
+- **Model** (`measures[b]`, beside `key`/`time`): `repStart: true` (‖: at the bar's start),
+  `repEnd: n` (:‖ at its end; the section plays n times, 2–10), `volta: [1, 2]` (the ending
+  numbers this bar belongs to, ascending, 1–10; consecutive bars with the same numbers are one
+  bracket), `segno: true` and `coda: true` (signs at the bar's start: the D.S. and To Coda
+  targets), `toCoda: true`, `fine: true` and `jump: "dc" | "dcFine" | "dcCoda" | "ds" | "dsFine" |
+  "dsCoda"` (at the bar's end). Absent when not set; `isValidScore` checks each. `setBarMark`,
+  `setVolta`, `parseVolta` in `model.js`. Adding a bar inside an ending leaves the new bar out of
+  it (the bracket splits); deleting a bar drops its marks.
+- **Playing order** (`playOrder(score)`, pure, shared by playback, audio and MIDI export): a
+  section runs from the last ‖: (or the bar after the last :‖ or run of endings, or bar 1) to :‖
+  and plays `repEnd` times; on pass n only endings holding n play. D.C. goes to bar 1, D.S. to the
+  first segno (bar 1 if none); each jump is taken once, repeats are not taken again after it, and
+  each run of endings then plays only its last ending. "al Fine" stops after a Fine bar; "al Coda"
+  goes from a To Coda bar to the next coda sign (ignored if there is none). Plain D.C./D.S. play to
+  the end. The order is capped (bars × 12 + 100) so a broken file can't loop forever.
+- **Playback:** `schedule()` lays bars out in playing order; Play from bar N starts where N first
+  plays (straight on from N if it never plays). The cursor follows the order. A tie doesn't carry
+  across a jump (the next note strikes again). Dynamics are looked up by the bar as written, so
+  a repeated section starts at the level written before it. MIDI export is unrolled; its key and
+  time meta events are sent wherever the signature in effect changes in playing order.
+- **Drawing:** VexFlow `Barline` REPEAT_BEGIN/REPEAT_END on every staff; `Volta` (BEGIN, MID, END,
+  BEGIN_END; the number only where the bracket begins) and `Repetition` (segno, coda, To Coda,
+  Fine, D.C./D.S. variants) on the top staff. A :‖ played more than twice gets "×n" above it.
+- **Editing:** Score ▸ Repeats and endings. Marks go on the caret bar (the selected note's bar);
+  choosing one that's there removes it. An ending covers the selected bars; "Ending with
+  numbers…" takes "1, 2" or "1-3"; "End repeat, play several times…" asks for the count.
+- **MusicXML:** `<barline>` left/right with `<repeat direction times>` and `<ending number type>`
+  (start; stop before a repeat or at the end; discontinue otherwise), in every part. Segno and
+  coda are `<direction>`s with `<segno/>`/`<coda/>`; To Coda, Fine and jumps are `<words>` with
+  `<sound tocoda|fine|dacapo|dalsegno>`, in the first part. Import takes barlines from the first
+  part and directions from any; `<sound>` attributes decide, else the words ("D.C.", "Da Capo",
+  "D.S.", "al Fine", "al Coda", "To Coda", "Fine"). Signs mid-bar move to its start (counted);
+  other words stay counted as text directions; unreadable ending numbers and counts over 10 are
+  counted.
+- **MuseScore:** `<startRepeat/>`, `<endRepeat>n</endRepeat>` in each staff's `<Measure>`;
+  in the first staff, `<Spanner type="Volta">` (`<endings>`, `<next><location><measures>`),
+  `<Marker>` with label segno/codab/coda (To Coda)/fine, and `<Jump>` with jumpTo start/segno,
+  playUntil fine/coda, continueAt codab. Unknown markers and jumps are counted.
+- **.musx:** forward and backward repeat barlines from the measure's flags; endings and text
+  repeats are counted, not read yet.
+- **Nothing import-only.** Everything the model holds can be made from File ▸ New:
+
+  | Feature | Where |
+  |---|---|
+  | Notes, rests, dots (double), ties, chords | palette, keys (§6.3, §11.1) |
+  | Double sharps / flats | Notes ▸ Double sharp / Double flat |
+  | Any tuplet ratio | Notes ▸ Tuplet… (typed, e.g. 5:3) |
+  | Layers 1–4 | Notes ▸ Layer, status bar |
+  | Grace notes | Notes ▸ Grace notes |
+  | Marks, dynamics, slurs, hairpins | Notes menu |
+  | Lyrics, verses 1–5 | Notes ▸ Lyrics…, ↑/↓ in the box |
+  | Clef changes | Score ▸ Clef from this bar |
+  | Key and any time signature mid-score | Score ▸ Key and time… (typed, e.g. 7/8) |
+  | Repeats, endings, D.C./D.S./segno/coda/Fine | Score ▸ Repeats and endings |
+  | Part names, order, grand staff, drum staff | Score ▸ Parts and instruments… |
+  | Any transposition | Parts dialog ▸ Other… (semitones, steps) |
+  | Instrument (GM program), drum per note | Parts dialog; Notes ▸ Drum sound… |
+  | Title, composer, tempo | Score ▸ Title, composer, tempo… |
+
+  Exception: a drum note away from its kit position (a file's own drum map) can't be placed
+  by hand; Drum sound… always uses the kit position. The model has one tempo per score, so
+  tempo changes are not held at all (importers keep the first and count the rest).

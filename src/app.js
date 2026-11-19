@@ -977,6 +977,7 @@ function openSetup(isNew) {
   $("f-tempo").value = isNew ? 100 : sc.tempo;
   if (isNew) $("f-sound").value = $("f-preset").value === "satb" ? 52 : 0;
   d.dataset.mode = isNew ? "new" : "edit";
+  if (!M.parseTime($("f-time").value)) $("f-time").value = "4/4"; // hidden in Score details, where a bad value would block Apply
   d.returnValue = "";
   d.showModal();
   $("f-title").select();
@@ -1285,6 +1286,31 @@ function closeAttrs() {
   }
 }
 
+// ---------- repeats and navigation (DESIGN §28) ----------
+// Marks go on the caret bar; an ending covers the selected bars (or the caret bar).
+
+const repBar = () => (state.sel ? state.sel.bar : state.caret.bar);
+function barMark(k, val) {
+  const b = repBar(), m = state.score.measures[b], on = val === true ? !m[k] : m[k] !== val;
+  if (edit((sc) => M.setBarMark(sc, b, k, on && val))) message(`${on ? "" : "Removed: "}${k === "jump" ? M.JUMPS[val] : document.getElementById("r-" + k).textContent} at bar ${b + 1}`);
+}
+function repeatTimes() {
+  const b = repBar(), v = prompt(`Bar ${b + 1} ends a repeat. How many times does the section play? (2–${M.MAX_REPEAT})`, state.score.measures[b].repEnd || 3);
+  if (v === null) return;
+  if (!(+v >= 2 && +v <= M.MAX_REPEAT && Number.isInteger(+v))) { message(`Play a section 2 to ${M.MAX_REPEAT} times`, true); return; }
+  edit((sc) => M.setBarMark(sc, b, "repEnd", +v));
+}
+function ending(nums) {
+  const a = repBar(), z = state.sel && state.selEnd ? state.selEnd.bar : a;
+  if (nums === "?") {
+    const v = prompt("Ending numbers, such as 1, 2 or 1-3", state.score.measures[a].volta?.join(", ") || "1, 2");
+    if (v === null) return;
+    nums = M.parseVolta(v);
+    if (!nums) { message(`Type ending numbers from 1 to ${M.MAX_REPEAT}, such as 1, 2`, true); return; }
+  }
+  if (edit((sc) => M.setVolta(sc, a, z, nums))) message(nums ? `Ending ${M.voltaLabel(nums)} over bar${a === z ? ` ${a + 1}` : `s ${Math.min(a, z) + 1}–${Math.max(a, z) + 1}`}` : "Ending removed");
+}
+
 // ---------- commands (DESIGN §14.1) ----------
 // One table for the menu bar, the context menu and modifier shortcuts, keyed by menu item id.
 
@@ -1313,6 +1339,8 @@ const CMD = {
   "n-octup": { run: () => transposeSel(7), on: hasSel },
   "n-octdown": { run: () => transposeSel(-7), on: hasSel },
   "n-tie": { run: () => tie(), on: hasSel },
+  "n-dsharp": { run: () => accidental(2) },
+  "n-dflat": { run: () => accidental(-2) },
   ...Object.fromEntries(M.MARKS.map((m) => ["n-" + m, { run: () => mark(m), on: hasSel }])),
   ...Object.fromEntries(M.DYNS.map((d) => ["d-" + d, { run: () => dynamic(d), on: hasSel }])),
   "d-none": { run: () => dynamic(null), on: hasSel },
@@ -1338,6 +1366,14 @@ const CMD = {
     edit((sc) => M.deleteMeasure(sc, b));
   }, on: () => state.score.measures.length > 1 },
   "b-attrs": { run: () => openAttrs() },
+  ...Object.fromEntries(M.BAR_FLAGS.map((k) => ["r-" + k, { run: () => barMark(k, true) }])),
+  "r-repEnd": { run: () => barMark("repEnd", 2) },
+  "r-times": { run: () => repeatTimes() },
+  ...Object.fromEntries(Object.keys(M.JUMPS).map((j) => ["r-" + j, { run: () => barMark("jump", j) }])),
+  "r-volta1": { run: () => ending([1]) },
+  "r-volta2": { run: () => ending([2]) },
+  "r-volta": { run: () => ending("?") },
+  "r-novolta": { run: () => ending(null), on: () => !!state.score.measures[repBar()].volta },
   "m-details": { run: () => openSetup(false) },
   "m-instruments": { run: () => openInstruments() },
   "b-help": { run: () => $("help").showModal() },

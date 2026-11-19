@@ -57,6 +57,7 @@ only says what to build in what order and how to know each phase is finished.
 | 30 | Grace notes (DESIGN §26) | done |
 | 31 | .musx: dynamics, slurs and hairpins, lyric verses, clef changes, grace notes (DESIGN §9.5) | done |
 | 32 | Unpitched percussion: drum staves, synthesized kit, MusicXML/MuseScore/MIDI (DESIGN §27) | done (`.musx` drum maps not read yet) |
+| 33 | Repeats, endings, segno/coda/D.C./D.S./Fine; nothing import-only (DESIGN §28) | done (`.musx` endings and text repeats counted, not read) |
 
 ---
 
@@ -309,3 +310,9 @@ DESIGN.md before work starts.
 - **Looped long notes** use a fixed 0.8–2.4 s loop with no crossfade; some sounds may click at the loop point.
 - **`.musx` has only been checked on small test files** (musxdom's). Ties, voice 2 and title/composer
   were not present in them; a real-world piece would confirm those.
+- **MuseScore repeat tags are written from the format as MuseScore saves it** (Volta spanners,
+  Marker labels, Jump fields, start/endRepeat); no sample with repeats exists here, so only our own
+  round trip is tested. A real MuseScore 3/4 file with endings and D.S. al Coda would confirm them.
+- **`.musx` repeats:** only the measure's forward/backward repeat flags are read (unverified, no
+  sample has them); endings and text repeats are counted.
+- **Drum notes away from their kit position** (from a file's own drum map) can't be placed by hand.

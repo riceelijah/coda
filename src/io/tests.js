@@ -697,6 +697,84 @@ export async function run({ check, eq }) {
     return bad.join("; ") || true;
   });
 
+  // A score with every repeat mark (DESIGN §28): |: 2 [1. 3 :|] [2. 4] 5 segno-6 7(To Coda) 8 9 10(D.S. al Coda) coda-11 12(Fine)
+  const repeatScore = () => {
+    const s = M.newScore({ bars: 12 });
+    for (let b = 0; b < 12; b++) s.staves[0].bars[b] = [ev("w", "C5")];
+    for (const [b, k, v] of [[1, "repStart", true], [2, "repEnd", 2], [5, "segno", true], [6, "toCoda", true], [9, "jump", "dsCoda"], [10, "coda", true], [11, "fine", true]])
+      if (M.setBarMark(s, b, k, v)) throw new Error("setBarMark " + k);
+    M.setVolta(s, 2, 2, [1]); M.setVolta(s, 3, 3, [2]);
+    return s;
+  };
+
+  await check("repeats: marks, endings, validation, playing order (DESIGN §28)", () => {
+    const bad = [], s = repeatScore();
+    if (!M.isValidScore(s)) bad.push("valid score refused");
+    for (const m of [{ repEnd: 1 }, { repEnd: 11 }, { volta: [2, 1] }, { volta: [] }, { jump: "dcx" }, { segno: 1 }, { repStart: false }])
+      if (M.isValidScore({ ...s, measures: [{ ...s.measures[0], ...m }, ...s.measures.slice(1)] })) bad.push("accepted " + JSON.stringify(m));
+    if (!M.setBarMark(s, 0, "repEnd", 1) || !M.setBarMark(s, 0, "jump", "x") || !M.setVolta(s, 0, 0, [0])) bad.push("bad marks taken");
+    if (!eq(M.parseVolta("1, 2"), [1, 2]) || !eq(M.parseVolta("1-3."), [1, 2, 3]) || M.parseVolta("a") || M.parseVolta("0")) bad.push("parseVolta");
+    const order = (sc) => M.playOrder(sc).map((b) => b + 1).join(" ");
+    if (order(s) !== "1 2 3 2 4 5 6 7 8 9 10 6 7 11 12") bad.push("D.S. al Coda: " + order(s));
+    // plain :| goes back to bar 1; three passes; Fine after D.C.; endings 1-2 and 3 with three passes
+    const t = M.newScore({ bars: 6 });
+    M.setBarMark(t, 1, "repEnd", 3);
+    if (order(t) !== "1 2 1 2 1 2 3 4 5 6") bad.push(":| x3 " + order(t));
+    const u = M.newScore({ bars: 4 });
+    M.setBarMark(u, 1, "fine", true); M.setBarMark(u, 3, "jump", "dcFine"); M.setBarMark(u, 0, "repEnd", 2);
+    if (order(u) !== "1 1 2 3 4 1 2") bad.push("D.C. al Fine, no repeat after the jump: " + order(u));
+    const v = M.newScore({ bars: 4 });
+    M.setVolta(v, 1, 1, [1, 2]); M.setBarMark(v, 1, "repEnd", 3); M.setVolta(v, 2, 2, [3]);
+    if (order(v) !== "1 2 1 2 1 3 4") bad.push("endings 1,2 / 3: " + order(v));
+    // D.C. after endings plays only the last ending; a missing coda sign ignores To Coda
+    M.setBarMark(v, 3, "jump", "dcCoda"); M.setBarMark(v, 0, "toCoda", true);
+    if (order(v) !== "1 2 1 2 1 3 4 1 3 4") bad.push("D.C. al Coda, last ending, no coda: " + order(v));
+    // a broken file can't loop forever
+    const w = M.newScore({ bars: 2 });
+    for (const m of w.measures) { m.repStart = true; m.repEnd = 10; }
+    if (M.playOrder(w).length > 200) bad.push("unbounded");
+    return bad.join("; ") || true;
+  });
+
+  await check("repeats in playback: bars play in order, from a bar inside, ties and dynamics follow (DESIGN §28)", () => {
+    const s = repeatScore();
+    s.staves[0].bars[1] = [ev("w", "C5", { tie: true, dyn: "p" })];
+    s.staves[0].bars[0] = [ev("w", "C5", { dyn: "f" })];
+    const { barStart, notes, total } = schedule(s);
+    if (barStart.map((x) => x.bar + 1).join(" ") !== "1 2 3 2 4 5 6 7 8 9 10 6 7 11 12") return "order " + barStart.map((x) => x.bar + 1).join(" ");
+    if (total !== 15 * 1920) return "total " + total;
+    // bar 2 ties into bar 3; after the jump back its tie doesn't reach into the 2nd ending (bar 4), which
+    // strikes again, still p: dynamics follow the bars as written
+    const c5 = notes.filter((n) => n.midi === 72).map((n) => [n.start / 1920, n.end / 1920, n.vel]);
+    if (!eq(c5.slice(0, 4), [[0, 1, 96], [1, 3, 50], [3, 4, 50], [4, 5, 50]])) return "ties/dynamics " + JSON.stringify(c5.slice(0, 4));
+    const from = schedule(s, 3).barStart.map((x) => x.bar + 1).join(" ");
+    if (from !== "4 5 6 7 8 9 10 6 7 11 12") return "from bar 4: " + from;
+    const mid = importMIDI(exportMIDI(s), "x.mid").score;
+    return mid.measures.length === 15 || "MIDI plays unrolled: " + mid.measures.length + " bars";
+  });
+
+  await check("repeats in files: MusicXML and MuseScore round trips; words and <sound> read (DESIGN §28)", () => {
+    const s = repeatScore();
+    M.setBarMark(s, 2, "repEnd", 3); M.setVolta(s, 3, 4, [2, 3]);
+    const marks = (sc) => JSON.stringify(sc.measures.map(({ key, time, sym, ...r }) => Object.fromEntries(Object.entries(r).sort())));
+    const x = importMusicXML(exportMusicXML(s), "r.musicxml");
+    if (marks(x.score) !== marks(s)) return "MusicXML " + marks(x.score);
+    const ms = importMSCX(exportMSCX(s), "r.mscx");
+    if (marks(ms.score) !== marks(s)) return "MuseScore " + marks(ms.score);
+    if (JSON.stringify(x.report).includes("not imported") || JSON.stringify(ms.report).includes("not imported")) return "reported lost: " + JSON.stringify([x.report, ms.report]);
+    // another program's words: D.S. al Fine with no <sound>; unknown words still counted
+    const xml = `<score-partwise><part-list><score-part id="P1"><part-name>A</part-name></score-part></part-list><part id="P1">
+      <measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      <direction><direction-type><segno/></direction-type></direction><note><rest/><duration>4</duration></note></measure>
+      <measure number="2"><note><rest/><duration>4</duration></note><direction><direction-type><words>Fine</words></direction-type></direction>
+      <direction><direction-type><words>dolce</words></direction-type></direction></measure>
+      <measure number="3"><note><rest/><duration>4</duration></note><direction><direction-type><words>D.S. al Fine</words></direction-type></direction>
+      <barline location="right"><ending number="1" type="stop"/></barline></measure></part></score-partwise>`;
+    const y = importMusicXML(xml, "w.xml");
+    if (marks(y.score) !== JSON.stringify([{ segno: true }, { fine: true }, { jump: "dsFine", volta: [1] }].map((r) => Object.fromEntries(Object.entries(r).sort())))) return "words " + marks(y.score);
+    return JSON.stringify(y.report).includes("Text directions") || "unknown words not counted";
+  });
+
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;

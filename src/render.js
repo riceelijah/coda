@@ -1,5 +1,5 @@
 // Coda renderer: score model -> SVG systems via VexFlow. See docs/DESIGN.md §5.
-import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc } from "./model.js";
+import { attrsAt, keyAt, nextEventPos, tupletRuns, allLayers, timeLabel, SPAN_KINDS, clefAt, isPerc, sameVolta, voltaLabel } from "./model.js";
 import { DRUMS } from "./drums.js";
 
 const VF = () => Vex.Flow;
@@ -323,6 +323,23 @@ function grow(svg, sys) {
   if (top < 0 || bottom > sys.height) { sys.height = bottom - top; svg.setAttribute("viewBox", `0 ${top} ${SHEET_W} ${bottom - top}`); }
 }
 
+// Repeat barlines on every staff; endings and D.C./segno/coda text on the top one (DESIGN §28).
+const REP_VF = { segno: "SEGNO_LEFT", coda: "CODA_LEFT", toCoda: "TO_CODA", fine: "FINE",
+  dc: "DC", dcFine: "DC_AL_FINE", dcCoda: "DC_AL_CODA", ds: "DS", dsFine: "DS_AL_FINE", dsCoda: "DS_AL_CODA" };
+function repeatMarks(VFl, score, b, s, stave) {
+  const m = score.measures[b], ms = score.measures;
+  if (m.repStart) stave.setBegBarType(VFl.Barline.type.REPEAT_BEGIN);
+  if (m.repEnd) stave.setEndBarType(VFl.Barline.type.REPEAT_END);
+  if (s !== 0) return;
+  if (m.volta) {
+    // a bracket carried onto a new line goes on as a plain line, without its number
+    const T = VFl.Volta.type, begins = !sameVolta(ms[b - 1]?.volta, m.volta), ends = !sameVolta(ms[b + 1]?.volta, m.volta);
+    stave.setVoltaType(begins && ends ? T.BEGIN_END : begins ? T.BEGIN : ends ? T.END : T.MID, begins ? voltaLabel(m.volta) : "", 0);
+  }
+  for (const key of ["segno", "coda", "toCoda", "fine"]) if (m[key]) stave.setRepetitionType(VFl.Repetition.type[REP_VF[key]]);
+  if (m.jump) stave.setRepetitionType(VFl.Repetition.type[REP_VF[m.jump]]);
+}
+
 // Is (b, i) selected? sel may carry `end` for a range (DESIGN §11.7).
 function inSel(sel, b, i) {
   const a = [sel.bar, sel.idx], z = sel.end ? [sel.end.bar, sel.end.idx] : a;
@@ -349,6 +366,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
       if (st.clefs?.[b + 1]) stave.setEndClef(st.clefs[b + 1], "small");
       if (b === 0 || (m.time && b > 0)) stave.addTimeSignature(timeLabel(at));
       if (b === lastBar) stave.setEndBarType(VFl.Barline.type.END);
+      repeatMarks(VFl, score, b, s, stave);
       return stave;
     });
     const start = Math.max(...row.map((r) => r.getNoteStartX()));
@@ -358,6 +376,11 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
     x += sys.widths[k];
   });
   staves.forEach((row) => row.forEach((st) => st.setContext(ctx).draw()));
+  // "×3" over a :| that plays more than twice (VexFlow draws only the dots)
+  sys.bars.forEach((b, k) => {
+    const n = score.measures[b].repEnd;
+    if (n > 2) { ctx.save(); ctx.setFont("Georgia", 13, "italic"); ctx.fillText(`×${n}`, staves[k][0].getX() + sys.widths[k] - 26, staves[k][0].getYForLine(0) - 8); ctx.restore(); }
+  });
 
   // 2. connectors
   const firstRow = staves[0];

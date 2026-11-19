@@ -3,6 +3,7 @@ import {
   attrsAt, barCapacity, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
   tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport,
 } from "../model.js";
+import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
 import { decodeText, parseXml, Report, unzip } from "./util.js";
 
@@ -153,6 +154,7 @@ export function exportMusicXML(score) {
     x.push(`<part id="P${gi + 1}">`);
     score.measures.forEach((m, b) => {
       x.push(`<measure number="${b + 1}">`);
+      x.push(leftBarline(score.measures, b));
       const a = attrsAt(score, b);
       const attrs = [];
       if (b === 0) attrs.push(`<divisions>${PPQ}</divisions>`);
@@ -177,6 +179,7 @@ export function exportMusicXML(score) {
       if (b === 0 && gi === 0) {
         x.push(`<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${score.tempo}</per-minute></metronome></direction-type><sound tempo="${score.tempo}"/></direction>`);
       }
+      if (gi === 0) x.push(...navXml(score.measures[b], true));
       // every layer bar with notes, as voice staff×4 + layer + 1, separated by <backup> (DESIGN §15)
       const chunks = [];
       g.forEach((s, k) => allLayers(score.staves[s]).forEach((bars, v) => {
@@ -186,13 +189,52 @@ export function exportMusicXML(score) {
         x.push(r.xml);
         if (i < chunks.length - 1) x.push(`<backup><duration>${r.ticks}</duration></backup>`);
       });
-      if (b === score.measures.length - 1) x.push('<barline location="right"><bar-style>light-heavy</bar-style></barline>');
+      if (gi === 0) x.push(...navXml(score.measures[b], false));
+      x.push(rightBarline(score.measures, b));
       x.push("</measure>");
     });
     x.push("</part>");
   });
   x.push("</score-partwise>");
   return x.filter(Boolean).join("\n");
+}
+
+// ---------- repeats and navigation (DESIGN §28) ----------
+// Barlines carry repeats and endings in every part; segno, coda and the jumps are directions in the
+// first part, with <sound> saying how they play.
+function leftBarline(ms, b) {
+  const m = ms[b], start = m.volta && !sameVolta(ms[b - 1]?.volta, m.volta);
+  if (!m.repStart && !start) return "";
+  return `<barline location="left">${m.repStart ? "<bar-style>heavy-light</bar-style>" : ""}${start ? `<ending number="${m.volta.join(", ")}" type="start">${voltaLabel(m.volta)}</ending>` : ""}${m.repStart ? '<repeat direction="forward"/>' : ""}</barline>`;
+}
+function rightBarline(ms, b) {
+  const m = ms[b], last = b === ms.length - 1, stop = m.volta && !sameVolta(ms[b + 1]?.volta, m.volta);
+  if (!m.repEnd && !stop && !last) return "";
+  // an ending that is followed by more music and not by a repeat is left open ("discontinue")
+  const end = stop ? `<ending number="${m.volta.join(", ")}" type="${m.repEnd || last ? "stop" : "discontinue"}"/>` : "";
+  return `<barline location="right">${m.repEnd || last ? "<bar-style>light-heavy</bar-style>" : ""}${end}${m.repEnd ? `<repeat direction="backward"${m.repEnd > 2 ? ` times="${m.repEnd}"` : ""}/>` : ""}</barline>`;
+}
+const JUMP_SOUND = { dc: 'dacapo="yes"', dcFine: 'dacapo="yes"', dcCoda: 'dacapo="yes"', ds: 'dalsegno="segno"', dsFine: 'dalsegno="segno"', dsCoda: 'dalsegno="segno"' };
+function navXml(m, atStart) {
+  const d = (type, sound) => `<direction placement="above"><direction-type>${type}</direction-type><sound ${sound}/></direction>`;
+  if (atStart) return [m.segno && d("<segno/>", 'segno="segno"'), m.coda && d("<coda/>", 'coda="coda"')];
+  return [m.toCoda && d("<words>To Coda</words>", 'tocoda="coda"'), m.fine && d("<words>Fine</words>", 'fine="yes"'),
+    m.jump && d(`<words>${JUMPS[m.jump]}</words>`, JUMP_SOUND[m.jump])];
+}
+// What a <direction> (or a lone <sound>) means for playback order, from its <sound> attributes,
+// else its words: {segno|coda|toCoda|fine: true} or {jump}, or null.
+function navOf(el) {
+  const snd = el.localName === "sound" ? el : kid(el, "sound"), a = (n) => snd?.getAttribute(n);
+  const types = kids(el, "direction-type").flatMap((dt) => [...dt.children]);
+  const w = types.filter((c) => c.localName === "words").map((c) => c.textContent).join(" ").trim().toLowerCase().replace(/\s+/g, " ");
+  const al = /al\s*fine/.test(w) ? "Fine" : /al\s*coda/.test(w) ? "Coda" : "";
+  if (a("dacapo") === "yes" || /^(d\.\s?c\.?|da capo)(\s|$)/.test(w)) return { jump: "dc" + al };
+  if (a("dalsegno") || /^(d\.\s?s\.?|dal segno)(\s|$)/.test(w)) return { jump: "ds" + al };
+  if (a("tocoda") || /^to coda/.test(w)) return { toCoda: true };
+  if (a("fine") || w === "fine") return { fine: true };
+  if (types.some((c) => c.localName === "segno") || a("segno")) return { segno: true };
+  if (types.some((c) => c.localName === "coda") || a("coda")) return { coda: true };
+  return null;
 }
 
 // ---------- import ----------
@@ -242,6 +284,8 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
 
   const score = { title: "", composer: "", tempo: 0, measures: [], staves: [] };
   const partAttrs = []; // per part, per bar: {key, time}; the key comes from the first part that isn't drums
+  const rep = []; // per bar: repeat and navigation marks (DESIGN §28)
+  let ending = null; // numbers of the ending open in the first part
   kids(root, "part").forEach((part, pi) => {
     const measures = kids(part, "measure");
     let nStaves = 1;
@@ -275,6 +319,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
     }
 
     measures.forEach((meas, mi) => {
+      if (ending && pi === 0) (rep[mi] ||= {}).volta = ending; // inside an ending begun earlier
       staves.forEach((st) => allLayers(st).forEach((bars) => bars.push([])));
       const lastEvent = {}; // staff:layer -> last kept event in this bar
       const pendGrace = {}; // staff:layer -> grace notes waiting for their note (DESIGN §26)
@@ -322,10 +367,34 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
             if (at === 0) st.clef = clef; else (st.clefs ||= {})[at] = clef;
           }
         } else if (tag === "barline") {
-          if (kid(el, "repeat") || kid(el, "ending")) report.count("Repeat signs and endings (not imported)");
+          if (pi > 0) continue; // every part repeats the same barlines: the first part's are used
+          const right = el.getAttribute("location") !== "left" && el.getAttribute("location") !== "middle";
+          const r = kid(el, "repeat"), e = kid(el, "ending");
+          if (r?.getAttribute("direction") === "forward") (rep[right ? mi + 1 : mi] ||= {}).repStart = true;
+          else if (r?.getAttribute("direction") === "backward" && (right || mi > 0)) {
+            const times = parseInt(r.getAttribute("times"), 10) || 2;
+            if (times > MAX_REPEAT) report.count(`Repeats played more than ${MAX_REPEAT} times (play ${MAX_REPEAT})`);
+            (rep[right ? mi : mi - 1] ||= {}).repEnd = Math.max(2, Math.min(MAX_REPEAT, times));
+          }
+          if (e) {
+            const nums = parseVolta(e.getAttribute("number") || "");
+            if (!nums) report.count("Endings with unusual numbers (not imported)");
+            else if (e.getAttribute("type") === "start") { ending = nums; (rep[mi] ||= {}).volta = nums; }
+            else { if (ending || !rep[mi]?.volta) (rep[mi] ||= {}).volta = ending || nums; ending = null; }
+          }
         } else if (tag === "direction" || tag === "sound") {
+          const nav = navOf(el);
+          if (nav) { // DESIGN §28: signs at a bar's start, the rest at its end
+            let at = mi;
+            if (nav.segno || nav.coda) {
+              if (pos.t >= barCapacity(time)) at = mi + 1;
+              else if (pos.t > 0) report.count("Segno and coda signs inside a bar moved to its start");
+            }
+            Object.assign(rep[at] ||= {}, nav);
+          }
           for (const dt of tag === "direction" ? kids(el, "direction-type") : []) {
             for (const c of dt.children) {
+              if (nav && ["words", "segno", "coda"].includes(c.localName)) continue;
               if (c.localName === "wedge") { // hairpins (DESIGN §23): start on the next note, stop on the last one
                 const t = c.getAttribute("type"), sn = +(txt(el, "staff") || 1);
                 if (t === "crescendo" || t === "diminuendo") pendHp[sn] = { hp: t === "crescendo" ? "<" : ">", at: pos.t, mi };
@@ -388,6 +457,7 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
   if (!score.tempo) score.tempo = 100;
   score.tempo = Math.max(20, Math.min(400, score.tempo));
   padBars(score);
+  rep.forEach((r, b) => { if (b < score.measures.length) Object.assign(score.measures[b], r); else report.count("Repeat marks after the last bar (not imported)"); });
   const lostClefs = finishClefs(score);
   if (lostClefs) report.count("Clef changes after the last bar (not imported)", lostClefs);
   report.notes = noteCount(score);

@@ -1,6 +1,6 @@
 // Coda playback: sampled General MIDI sounds fetched on demand, with a triangle-wave fallback.
 // See docs/DESIGN.md §7 and §13.3.
-import { attrsAt, barCapacity, eventTicks, midi as midiOf, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc } from "./model.js";
+import { attrsAt, barCapacity, eventTicks, midi as midiOf, PPQ, allLayers, partGroups, DYN_VEL, ACCENT_VEL, isPerc, playOrder } from "./model.js";
 import { drumHit } from "./drumsynth.js";
 import { GM } from "./gm.js";
 import { getSound } from "./usersounds.js";
@@ -8,21 +8,29 @@ import { getSound } from "./usersounds.js";
 let ctx = null;
 let current = null;
 
-// Flatten the score into notes and bar start times, starting at bar `from`.
+// Flatten the score into notes and bar start times, in playing order (repeats and jumps unrolled,
+// DESIGN §28), starting where bar `from` first plays (straight on from it if it never does).
 export function schedule(score, from = 0) {
-  const barStart = [];
+  const order = playOrder(score);
+  let seq = order.slice(Math.max(0, order.indexOf(from)));
+  if (!order.includes(from)) seq = score.measures.map((_, b) => b).slice(from);
+  const barStart = [], lin = []; // lin[b]: bar b's start in the score as written, for dynamics
   let t = 0;
-  for (let b = from; b < score.measures.length; b++) {
+  score.measures.forEach((_, b) => { lin.push(t); t += barCapacity(attrsAt(score, b).time); });
+  t = 0;
+  for (const b of seq) {
     barStart.push({ bar: b, tick: t });
     t += barCapacity(attrsAt(score, b).time);
   }
   const total = t;
   const notes = [];
-  const velAt = dynamics(score, from);
+  const linVel = dynamics(score, 0);
   score.staves.forEach((st, si) => allLayers(st).forEach((bars) => {
     const open = new Map(); // midi -> note awaiting a tie continuation, per layer
-    barStart.forEach(({ bar, tick }) => {
+    barStart.forEach(({ bar, tick }, k) => {
       let at = tick;
+      if (k && barStart[k - 1].bar !== bar - 1) open.clear(); // after a repeat or jump: a tie doesn't carry over
+      const velAt = (si, a) => linVel(si, lin[bar] + a - tick);
       for (const ev of bars[bar]) {
         const len = eventTicks(ev);
         // a drum staff plays its drum numbers on the kit, program -1 (DESIGN §27)
