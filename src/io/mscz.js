@@ -4,7 +4,7 @@ import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, 
 import { parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
-import { decodeText, parseXml, Report, unzip } from "./util.js";
+import { decodeText, parseXml, Report, unzip, countUnread } from "./util.js";
 import { gmByName } from "../gm.js";
 
 const DUR = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16", "32nd": "32" };
@@ -25,6 +25,16 @@ const GRACE = ["acciaccatura", "appoggiatura", "grace4", "grace16", "grace32", "
 const kids = (el, name) => (el ? [...el.children].filter((c) => c.localName === name) : []);
 const kid = (el, name) => kids(el, name)[0] || null;
 const txt = (el, name) => { const k = kid(el, name); return k ? k.textContent.trim() : null; };
+
+// What the importer reads, or can pass over because it is layout, ids or playback detail; anything
+// else is counted (CLAUDE.md: never drop silently). Names give the labels for common losses.
+const LAYOUT = ["eid", "linkedTo", "linkedMain", "visible", "offset", "color", "placement", "track", "Beam", "BeamMode", "StemDirection", "Stem", "Hook", "NoteDot", "noStem", "stemDirection", "mirror", "dotPosition", "headType", "fixed", "fixedLine", "line", "Events", "veloType", "velocity", "tuning", "Accidental", "duration", "autoplace", "minDistance", "userOff", "pos"];
+const VOICE_READ = new Set([...LAYOUT, "location", "Clef", "KeySig", "TimeSig", "Tempo", "Tuplet", "endTuplet", "Spanner", "Marker", "Jump", "StaffText", "SystemText", "Expression", "PlayTechAnnotation", "RehearsalMark", "Dynamic", "Fermata", "Chord", "Rest", "BarLine", "InstrumentChange", "StaffState"]);
+const VOICE_NAMES = { Harmony: "Chord symbols (not imported)", Breath: "Breath marks and caesuras (not imported)", FiguredBass: "Figured bass (not imported)", Tremolo: "Tremolos (not imported)", TremoloTwoChord: "Tremolos (not imported)", FretDiagram: "Fret diagrams (not imported)", Image: "Images (not imported)" };
+const CHORD_READ = new Set([...LAYOUT, ...GRACE, "durationType", "dots", "Note", "Articulation", "ChordLine", "Lyrics", "Spanner", "Tuplet"]);
+const CHORD_NAMES = { Ornament: "Ornaments (trills, mordents, turns) (not imported)", Arpeggio: "Arpeggios (not imported)", TremoloSingleChord: "Tremolos (not imported)", Tremolo: "Tremolos (not imported)", small: "Cue notes (shown and played as normal notes)", staffMove: "Cross-staff notes (shown on their own staff)" };
+const NOTE_READ = new Set([...LAYOUT, "pitch", "tpc", "tpc2", "Spanner", "Tie", "play", "small"]);
+const NOTE_NAMES = { Fingering: "Fingering (not imported)", headGroup: "Special noteheads (shown as normal)", Bend: "Bends (not imported)", fret: "Tablature frets and strings (not imported)", string: "Tablature frets and strings (not imported)" };
 
 export function importMSCZ(bytes, fileName = "") {
   const files = unzip(bytes, (n) => /\.mscx$/i.test(n) || n === "META-INF/container.xml");
@@ -331,7 +341,14 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             cur = barTicks(bar);
             break;
           }
-          default: break;
+          case "BarLine":
+            if (!["normal", "end", "start-repeat", "end-repeat", null].includes(txt(el, "subtype"))) report.count("Double and special barlines (shown as plain)");
+            break;
+          default: countUnread(report, { children: [el] }, VOICE_READ, VOICE_NAMES);
+        }
+        if (el.localName === "Chord" || el.localName === "Rest") {
+          countUnread(report, el, CHORD_READ, CHORD_NAMES);
+          for (const n of kids(el, "Note")) countUnread(report, n, NOTE_READ, NOTE_NAMES);
         }
       }
       if (pendG.notes.length) report.count("Grace notes with no note after them in the bar (not imported)", pendG.notes.length);

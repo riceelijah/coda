@@ -846,6 +846,20 @@ export async function run({ check, eq }) {
     return y.score.staves[0].bars[2][0].text === "dolce" || "other words become text on the next note: " + JSON.stringify(y.score.staves[0].bars);
   });
 
+  await check("importers count markings they don't read instead of dropping them (CLAUDE.md)", () => {
+    const xml = `<score-partwise version="4.0"><part-list><score-part id="P1"><part-name>A</part-name></score-part></part-list>
+      <part id="P1"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      <harmony><root><root-step>C</root-step></root><kind>major</kind></harmony><print new-system="yes"/>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration><type>whole</type><notations><ornaments><trill-mark/></ornaments></notations></note></measure></part></score-partwise>`;
+    const a = importMusicXML(xml, "u.xml").report.warnings.join("; ");
+    if (!/Chord symbols/.test(a) || !/Ornaments/.test(a) || /print/.test(a)) return "MusicXML: " + a;
+    const s = M.newScore({ bars: 1 });
+    s.staves[0].bars[0] = [{ dur: "w", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0 }] }];
+    const ms = exportMSCX(s).replace("<Chord>", "<Harmony><root>14</root></Harmony><Chord><Ornament><subtype>ornamentTrill</subtype></Ornament>");
+    const b = importMSCX(ms, "u.mscx").report.warnings.join("; ");
+    return (/Chord symbols/.test(b) && /Ornaments/.test(b)) || "MuseScore: " + b;
+  });
+
   await check("drum notes move a line keeping their drum, as a file's own drum map has them (DESIGN §28)", () => {
     const s = M.newScore({ preset: "drums", bars: 1 });
     s.staves[0].bars[0] = [{ dur: "q", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0, drum: 38 }] }]; // snare, at its kit position

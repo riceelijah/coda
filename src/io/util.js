@@ -43,6 +43,16 @@ export function zipNames(bytes) {
 }
 
 // Collects warnings; repeated kinds are counted ("Grace notes skipped: 12").
+// Count the children of `el` an importer neither reads nor skips on purpose, so nothing in a file is
+// dropped silently (CLAUDE.md). `read`: names handled elsewhere or recomputed by Coda (layout,
+// stems, beams…). `names`: report labels for the ones users would recognise; others by tag name.
+export function countUnread(report, el, read, names = {}) {
+  for (const c of el?.children || []) {
+    const t = c.localName;
+    if (!read.has(t)) report.count(names[t] || `Other markings ("${t}") not imported`);
+  }
+}
+
 export class Report {
   constructor(format) { this.format = format; this.counts = new Map(); this.lines = []; this.notes = 0; }
   count(label, n = 1) { this.counts.set(label, (this.counts.get(label) || 0) + n); }

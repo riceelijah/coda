@@ -5,7 +5,7 @@ import {
 } from "../model.js";
 import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
-import { decodeText, parseXml, Report, unzip } from "./util.js";
+import { decodeText, parseXml, Report, unzip, countUnread } from "./util.js";
 
 const TYPE_OF = { w: "whole", h: "half", q: "quarter", 8: "eighth", 16: "16th", 32: "32nd" };
 const DUR_OF = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16", "32nd": "32" };
@@ -334,6 +334,8 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
       for (const el of meas.children) {
         const tag = el.localName;
         if (tag === "attributes") {
+          countUnread(report, el, ATTR_READ);
+          for (const ms of kids(el, "measure-style")) countUnread(report, ms, new Set(["multiple-rest"]), { slash: "Slash notation (not imported)", "beat-repeat": "Repeat-beat signs (not imported)", "measure-repeat": "Repeat-bar signs (not imported)" });
           const d = txt(el, "divisions");
           if (d) divisions = +d || 1;
           const k = kid(el, "key");
@@ -377,6 +379,8 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           if (pi > 0) continue; // every part repeats the same barlines: the first part's are used
           const right = el.getAttribute("location") !== "left" && el.getAttribute("location") !== "middle";
           const r = kid(el, "repeat"), e = kid(el, "ending");
+          countUnread(report, el, BARLINE_READ, { fermata: "Fermatas on barlines (not imported)", "wavy-line": "Trill lines (not imported)" });
+          if (!["regular", "light-heavy", "heavy-light", null].includes(txt(el, "bar-style"))) report.count("Double and special barlines (shown as plain)");
           if (r?.getAttribute("direction") === "forward") (rep[right ? mi + 1 : mi] ||= {}).repStart = true;
           else if (r?.getAttribute("direction") === "backward" && (right || mi > 0)) {
             const times = parseInt(r.getAttribute("times"), 10) || 2;
@@ -439,7 +443,8 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
                 continue;
               }
               const label = DIRECTIONS[c.localName];
-              if (label && c.getAttribute("type") !== "stop" && c.getAttribute("type") !== "continue") report.count(label);
+              if (label) { if (c.getAttribute("type") !== "stop" && c.getAttribute("type") !== "continue") report.count(label); }
+              else countUnread(report, { children: [c] }, DIRTYPE_READ);
             }
           }
           const snd = tag === "sound" ? el : kid(el, "sound");
@@ -454,7 +459,11 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
         } else if (tag === "backup" || tag === "forward") {
           const d = Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
           pos.t = Math.max(0, pos.t + (tag === "backup" ? -d : d));
-        } else if (tag === "note") {
+        } else if (tag === "print") { // layout is Coda's own
+          // ponytail: breaks are skipped, not counted: MuseScore writes one for every line it laid out, so
+          // a file can't tell placed breaks from its own layout.
+        } else if (tag !== "note") countUnread(report, { children: [el] }, MEASURE_READ, MEASURE_NAMES);
+        if (tag === "note") {
           const start = pos.t;
           readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, start, pend, pendText, mi, pendHp, lastAny, pendGrace, openHp, openSlur, drums });
           if (!kid(el, "chord") && !kid(el, "grace")) pos.t += Math.round((+txt(el, "duration") * PPQ) / divisions) || 0;
@@ -517,7 +526,18 @@ export const DYN_IN = { ppp: "ppp", pp: "pp", p: "p", mp: "mp", mf: "mf", f: "f"
 const DIRECTIONS = {
   segno: "Segno and coda signs (not imported)", coda: "Segno and coda signs (not imported)",
   pedal: "Pedal marks (not imported)", "octave-shift": "Octave lines (not imported)",
+  dashes: "Dashed lines after text (not imported)", bracket: "Bracket lines (not imported)", "other-direction": "Other directions (not imported)",
 };
+// What each level of a MusicXML file holds that Coda reads, or skips on purpose (layout, stems,
+// beams, sound hints Coda works out itself). Anything else is counted (countUnread).
+const MEASURE_READ = new Set(["attributes", "barline", "direction", "sound", "backup", "forward", "note", "print", "bookmark", "link", "grouping", "listening"]);
+const MEASURE_NAMES = { harmony: "Chord symbols (not imported)", "figured-bass": "Figured bass (not imported)" };
+const ATTR_READ = new Set(["divisions", "key", "time", "clef", "transpose", "staves", "part-symbol", "instruments", "staff-details", "directive", "measure-style", "footnote", "level", "for-part"]);
+const BARLINE_READ = new Set(["bar-style", "repeat", "ending", "segno", "coda", "footnote", "level"]);
+const DIRTYPE_READ = new Set(["words", "rehearsal", "wedge", "dynamics", "segno", "coda", "metronome"]);
+const NOTATIONS_READ = new Set(["fermata", "articulations", "ornaments", "technical", "slur", "slide", "glissando", "tied", "tuplet", "arpeggiate", "footnote", "level"]);
+const NOTE_READ = new Set(["chord", "grace", "pitch", "unpitched", "rest", "duration", "tie", "voice", "type", "dot", "accidental", "time-modification",
+  "stem", "notehead", "notehead-text", "staff", "beam", "notations", "lyric", "instrument", "play", "listen", "footnote", "level"]);
 const MARKS = {
   articulations: "Other articulations (not imported)",
   ornaments: "Ornaments (not imported)", technical: "Technical markings (not imported)", arpeggiate: "Arpeggios (not imported)",
@@ -566,9 +586,13 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
         else if (t === "stop" && openSlur[lk] === num) { delete openSlur[lk]; slur.stop = true; }
       }
       else if ((c.localName === "slide" || c.localName === "glissando") && !isRest) { if (c.getAttribute("type") === "start") glide = true; }
-      else if (MARKS[c.localName] && c.getAttribute("type") !== "stop") report.count(MARKS[c.localName]);
+      else if (MARKS[c.localName]) { if (c.getAttribute("type") !== "stop") report.count(MARKS[c.localName]); }
+      else countUnread(report, { children: [c] }, NOTATIONS_READ, { dynamics: "Dynamics inside notations (not imported)" });
     }
   }
+  countUnread(report, el, NOTE_READ, { cue: "Cue notes (shown and played as normal notes)" });
+  const head = txt(el, "notehead");
+  if (head && head !== "normal" && !kid(el, "unpitched")) report.count("Special noteheads (shown as normal)");
   const addMarks = (ev) => { for (const m of marks) setMark(ev, m, true); if (glide) ev.gliss = true; };
   const tieStart = kids(el, "tie").some((t) => t.getAttribute("type") === "start");
 
