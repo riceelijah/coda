@@ -26,11 +26,19 @@ export function schedule(score, from = 0) {
   // seconds at an unrolled tick, each bar at its own tempo (DESIGN §29)
   const secs = [0];
   barStart.forEach(({ bar, tick }, k) => secs.push(secs[k] + ((barStart[k + 1]?.tick ?? total) - tick) * 60 / tempoAt(score, bar) / PPQ));
-  const timeOf = (x) => {
+  const plain = (x) => {
     let k = 0;
     while (k + 1 < barStart.length && barStart[k + 1].tick <= x) k++;
     if (!barStart.length) return x * 60 / (score.tempo || 100) / PPQ;
     return secs[k] + (x - barStart[k].tick) * 60 / tempoAt(score, barStart[k].bar) / PPQ;
+  };
+  // fermatas (DESIGN §34): a held note or rest takes twice as long, for every part. Seconds
+  // stretch, ticks don't. fermatas: unrolled start tick -> its length (the shortest held there).
+  const fermatas = new Map();
+  const timeOf = (x) => {
+    let t = plain(x);
+    for (const [f, l] of fermatas) if (x > f) t += plain(Math.min(x, f + l)) - plain(f);
+    return t;
   };
   const notes = [];
   const linVel = dynamics(score, 0);
@@ -43,6 +51,7 @@ export function schedule(score, from = 0) {
       const velAt = (si, a) => linVel(si, lin[bar] + a - tick);
       for (const ev of bars[bar]) {
         const len = eventTicks(ev);
+        if (ev.marks?.includes("fermata")) fermatas.set(at, Math.min(fermatas.get(at) ?? Infinity, len));
         // a drum staff plays its drum numbers on the kit, program -1 (DESIGN §27)
         const perc = isPerc(st), nextOpen = new Map(), tr = st.transpose?.[0] || 0, base = { vel: velAt(si, at), program: perc ? -1 : st.program ?? 0, staff: si, ...(st.sound && !perc ? { sound: st.sound } : {}) };
         const midi = (p) => (perc ? p.drum - tr : midiOf(p));
@@ -78,7 +87,7 @@ export function schedule(score, from = 0) {
       }
     });
   }));
-  return { notes, barStart, total, timeOf };
+  return { notes, barStart, total, timeOf, fermatas };
 }
 
 // How marks sound (DESIGN §34). `fresh`: this event's newly struck notes, low to high (not tied

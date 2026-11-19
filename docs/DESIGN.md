@@ -1453,6 +1453,10 @@ Print, and ⌘/Ctrl+P is now its PDF item.
   repeat in 32nds (a drum tremolo is a roll), mordents are two 32nds before the main note, a turn
   splits the note in four. Neighbours are the written notes a step away in the written key
   (accidentals earlier in the bar are not applied). Not on notes tied into, tied on, or sliding.
+- Fermatas hold a note or rest twice as long in every part: `schedule` keeps `fermatas` (unrolled
+  tick -> shortest held length there) and `timeOf` adds the extra seconds, so audio, WAV and the
+  play cursor agree and a repeated bar holds again. MIDI writes half the tempo for the held span;
+  MIDI import reads such a dip that returns by the barline as a held note (counted, not a tempo).
 
 ## 35. Marking palettes
 

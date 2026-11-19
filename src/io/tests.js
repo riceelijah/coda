@@ -924,6 +924,22 @@ export async function run({ check, eq }) {
     return br.end < 1440 || "breath";
   });
 
+  await check("fermatas hold twice as long in every part, again on a repeat; MIDI halves the tempo and reads back as held (DESIGN §34)", () => {
+    const s = M.newScore({ bars: 1, tempo: 100, preset: "trebleBass" });
+    const q = (st) => ({ dur: "q", dots: 0, tie: false, pitches: [{ step: st, oct: 4, alter: 0 }] });
+    s.staves[0].bars[0] = [q(0), q(1), q(2), q(3)];
+    M.setMark(s.staves[0].bars[0][2], "fermata", true);
+    const sch = schedule(s), beat = 0.6;
+    if (Math.abs(sch.timeOf(1920) - 5 * beat) > 1e-9 || Math.abs(sch.timeOf(960) - 2 * beat) > 1e-9) return "timing " + sch.timeOf(1920);
+    s.measures[0].repStart = true; s.measures[0].repEnd = 2;
+    const r = schedule(s);
+    if (Math.abs(r.timeOf(3840) - 10 * beat) > 1e-9) return "repeat " + r.timeOf(3840);
+    delete s.measures[0].repStart; delete s.measures[0].repEnd;
+    const back = importMIDI(exportMIDI(s), "f.mid");
+    if (back.score.measures.some((m) => m.tempo) || back.score.tempo !== 100) return "tempo read " + JSON.stringify(back.score.measures);
+    return back.report.warnings.some((w) => /Held notes/.test(w)) || "not counted: " + back.report.warnings;
+  });
+
   await check("drum notes move a line keeping their drum, as a file's own drum map has them (DESIGN §28)", () => {
     const s = M.newScore({ preset: "drums", bars: 1 });
     s.staves[0].bars[0] = [{ dur: "q", dots: 0, tie: false, pitches: [{ step: 0, oct: 5, alter: 0, drum: 38 }] }]; // snare, at its kit position
