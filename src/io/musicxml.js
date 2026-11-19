@@ -1,16 +1,16 @@
 // MusicXML import/export and MXL unzip. See docs/DESIGN.md §9.2–9.3.
 import {
   attrsAt, barCapacity, barLen, setBarLen, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
-  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER, ORNAMENTS, OTT_SHIFT, staffLines, ottAt, shiftUnderLines, MAX_KIND,
+  tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER, ORNAMENTS, OTT_SHIFT, staffLines, ottAt, shiftUnderLines, MAX_KIND, okDur,
 } from "../model.js";
 import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, RAMPS, rampOf, okSwing, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
 import { decodeText, parseXml, Report, unzip, countUnread } from "./util.js";
 
-const TYPE_OF = { w: "whole", h: "half", q: "quarter", 8: "eighth", 16: "16th", 32: "32nd" };
-const DUR_OF = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16", "32nd": "32" };
+const TYPE_OF = { w: "whole", h: "half", q: "quarter", 8: "eighth", 16: "16th", 32: "32nd", 64: "64th" };
+const DUR_OF = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16", "32nd": "32", "64th": "64" };
 const LONGER = new Set(["breve", "long", "maxima"]);
-const SHORTER = new Set(["64th", "128th", "256th", "512th", "1024th"]);
+const SHORTER = new Set(["128th", "256th", "512th", "1024th"]);
 const CLEF_OUT = { treble: ["G", 2], bass: ["F", 4], alto: ["C", 3], tenor: ["C", 4], percussion: ["percussion", 0] };
 
 // Marks (DESIGN §16): MusicXML <articulations> children <-> Coda mark names.
@@ -613,7 +613,7 @@ export function applyTempi(score, tempi, report) {
 }
 
 // a metronome beat unit in quarter notes
-const BEAT_Q = { whole: 4, half: 2, quarter: 1, eighth: 0.5, "16th": 0.25, "32nd": 0.125 };
+const BEAT_Q = { whole: 4, half: 2, quarter: 1, eighth: 0.5, "16th": 0.25, "32nd": 0.125, "64th": 0.0625 };
 
 // MusicXML dynamics -> Coda's set; rarer ones go to the nearest (DESIGN §22)
 export const DYN_IN = { ppp: "ppp", pp: "pp", p: "p", mp: "mp", mf: "mf", f: "f", ff: "ff", fff: "fff", fp: "fp", sf: "sf", sfz: "sfz", fz: "fz",
@@ -775,7 +775,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   let dur, dots = kids(el, "dot").length;
   if (type && DUR_OF[type]) dur = DUR_OF[type];
   else if (type && LONGER.has(type)) { dur = "w"; report.count("Notes longer than a whole note shortened"); }
-  else if (type && SHORTER.has(type)) { dur = "32"; report.count("Notes shorter than a 32nd lengthened"); }
+  else if (type && SHORTER.has(type)) { dur = "64"; report.count("Notes shorter than a 64th lengthened"); }
   else if (ticksRaw !== null) {
     const exact = durFromTicks(ticksRaw);
     const d = exact || nearestDur(ticksRaw);
@@ -783,6 +783,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
     dur = d.dur; dots = d.dots;
   } else return;
   dots = Math.min(2, dots);
+  if (!okDur(dur, dots)) { dots = 1; report.count("Double-dotted 64th notes given one dot"); }
 
   const ev = { dur, dots, tie: tieStart && !!pitch, pitches: pitch ? [pitch] : [] };
   const tm = kid(el, "time-modification");

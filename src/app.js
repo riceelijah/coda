@@ -10,7 +10,7 @@ import { DRUMS } from "./drums.js";
 
 const $ = (id) => document.getElementById(id);
 const PREFIX = "coda."; // library keys: coda.doc.<id>, coda.current (DESIGN §12)
-const DUR_NAMES = { w: "Whole note", h: "Half note", q: "Quarter note", 8: "Eighth note", 16: "16th note", 32: "32nd note" };
+const DUR_NAMES = { w: "Whole note", h: "Half note", q: "Quarter note", 8: "Eighth note", 16: "16th note", 32: "32nd note", 64: "64th note" };
 const KEY_LABELS = {
   "-7": "C♭ major / A♭ minor (7♭)", "-6": "G♭ major / E♭ minor (6♭)", "-5": "D♭ major / B♭ minor (5♭)",
   "-4": "A♭ major / F minor (4♭)", "-3": "E♭ major / C minor (3♭)", "-2": "B♭ major / G minor (2♭)",
@@ -237,6 +237,7 @@ const ICONS = {
   8: NOTE_HEAD(true) + STEM + FLAG(3),
   16: NOTE_HEAD(true) + STEM + FLAG(3) + FLAG(7),
   32: NOTE_HEAD(true) + STEM + FLAG(3) + FLAG(6.5) + FLAG(10),
+  64: NOTE_HEAD(true) + STEM + FLAG(2) + FLAG(4.8) + FLAG(7.6) + FLAG(10.4),
   rest: '<path d="M10 3 l5 6 l-4 5 l5 5 c-3-1-5 0-3 4 c-4-3-3-6 0-6 l-5-5 l4-4z" fill="currentColor"/>',
   dot: '<circle cx="12" cy="12" r="3" fill="currentColor"/>',
   sharp: '<g stroke="currentColor"><line x1="9.5" y1="3" x2="9.5" y2="21" stroke-width="1.4"/><line x1="14.5" y1="2" x2="14.5" y2="20" stroke-width="1.4"/><line x1="6" y1="10" x2="18" y2="7" stroke-width="2.6"/><line x1="6" y1="16" x2="18" y2="13" stroke-width="2.6"/></g>',
@@ -281,7 +282,7 @@ function buildPalette() {
   }
   pal.appendChild(tools);
   pal.appendChild(document.createElement("hr"));
-  const durKeys = { w: 7, h: 6, q: 5, 8: 4, 16: 3, 32: 2 };
+  const durKeys = { w: 7, h: 6, q: 5, 8: 4, 16: 3, 32: 2, 64: 1 };
   const group = document.createElement("div");
   group.setAttribute("role", "radiogroup");
   group.setAttribute("aria-label", "Duration");
@@ -446,6 +447,7 @@ function retime(fn) {
     for (const p of r) {
       const e = bars[p.bar][p.idx];
       fn(e);
+      if (!M.okDur(e.dur, e.dots)) return "A 64th note takes one dot at most";
       if (e.tup && !M.tupletOk(e.dur, e.dots, e.tup)) delete e.tup;
     }
     for (const b of new Set(r.map((p) => p.bar))) if (M.barTicks(bars[b]) > M.barLen(sc, b)) return "Bar is full";
@@ -455,6 +457,7 @@ function retime(fn) {
 
 function setDuration(d) {
   state.armed.dur = d;
+  if (!M.okDur(d, state.armed.dots)) state.armed.dots = 1; // a 64th takes one dot at most (DESIGN §40)
   if (state.sel) retime((e) => (e.dur = d));
   else { updatePalette(); updateStatus(); }
 }
@@ -470,6 +473,7 @@ function toggleDot() {
     retime((e) => (e.dots = dots));
   } else {
     state.armed.dots = (state.armed.dots + 1) % 3;
+    if (!M.okDur(state.armed.dur, state.armed.dots)) state.armed.dots = 0;
     updatePalette(); updateStatus();
   }
 }
@@ -1018,7 +1022,7 @@ function onKey(e) {
   if (mod && k.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
   if (mod && (k === "ArrowUp" || k === "ArrowDown")) { e.preventDefault(); transposeSel(k === "ArrowUp" ? 7 : -7); return; }
   if (mod || e.altKey) return;
-  const durKey = { 7: "w", 6: "h", 5: "q", 4: "8", 3: "16", 2: "32" }[k];
+  const durKey = { 7: "w", 6: "h", 5: "q", 4: "8", 3: "16", 2: "32", 1: "64" }[k];
   let handled = true;
   if (e.shiftKey && /^[A-G]$/.test(k)) chordLetter(k);
   else if (state.armed.grace && /^[a-gA-G]$/.test(k)) graceLetter(k.toUpperCase());

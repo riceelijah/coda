@@ -6,8 +6,8 @@ import { drumName, drumNear, drumStep, drumPitch, DRUMS } from "./drums.js";
 // on failure, so a failed command may leave the score half-changed.
 
 export const PPQ = 480;
-export const DURS = ["w", "h", "q", "8", "16", "32"];
-export const BASE = { w: 1920, h: 960, q: 480, 8: 240, 16: 120, 32: 60 };
+export const DURS = ["w", "h", "q", "8", "16", "32", "64"];
+export const BASE = { w: 1920, h: 960, q: 480, 8: 240, 16: 120, 32: 60, 64: 30 };
 export const CLEFS = ["treble", "bass", "alto", "tenor"];
 // Marks a note or rest can carry, in drawing and file order (DESIGN §16). Only a fermata goes on a rest.
 export const MARKS = ["fermata", "staccato", "accent", "tenuto", "marcato", "scoop", "fall", "doit",
@@ -28,6 +28,8 @@ export const fitPitch = (st, p) => (isPerc(st) ? drumNear(p) : p);
 // ---------- ticks ----------
 
 export function dotFactor(dots) { return dots === 2 ? 1.75 : dots === 1 ? 1.5 : 1; }
+// A value is allowed when it's a whole number of ticks: a 64th takes one dot at most (DESIGN §40).
+export const okDur = (dur, dots = 0) => DURS.includes(dur) && [0, 1, 2].includes(dots) && Number.isInteger(BASE[dur] * dotFactor(dots));
 
 export function eventTicks(ev) {
   let t = BASE[ev.dur] * dotFactor(ev.dots || 0);
@@ -55,6 +57,7 @@ export function durFromTicks(ticks) {
 export function nearestDur(ticks) {
   let best = { dur: "q", dots: 0 }, bestD = Infinity;
   for (const dur of DURS) for (const dots of [0, 1, 2]) {
+    if (!okDur(dur, dots)) continue;
     const d = Math.abs(BASE[dur] * dotFactor(dots) - ticks);
     if (d < bestD) { bestD = d; best = { dur, dots }; }
   }
@@ -62,7 +65,7 @@ export function nearestDur(ticks) {
 }
 
 // Greedy split of a tick span into plain/dotted values (used for padding and MIDI).
-const FILL = [1920, 1440, 960, 720, 480, 360, 240, 180, 120, 90, 60];
+const FILL = [1920, 1440, 960, 720, 480, 360, 240, 180, 120, 90, 60, 45, 30];
 export function splitTicks(ticks) {
   const out = [];
   for (const v of FILL) while (ticks >= v) { out.push(durFromTicks(v)); ticks -= v; }
@@ -442,6 +445,7 @@ export function setAlter(score, s, b, i, alter) {
 export function setDuration(score, s, b, i, dur, dots) {
   const ev = score.staves[s].bars[b][i];
   const old = { dur: ev.dur, dots: ev.dots };
+  if (!okDur(dur, dots)) return "A 64th note takes one dot at most";
   ev.dur = dur; ev.dots = dots;
   if (ev.tup && !tupletOk(dur, dots, ev.tup)) delete ev.tup;
   if (!fits(score, b, score.staves[s].bars[b])) { Object.assign(ev, old); return "Bar is full"; }
@@ -1234,7 +1238,7 @@ export const rampOf = (t) => !RAMP_WORDS.test(t) ? null : /^a/i.test(t) ? (/^acc
 export function setRamp(score, b, kind) {
   const m = score.measures[b];
   if (!m) return "No such bar";
-  if (!kind) delete m.ramp; else if (kind in RAMPS) m.ramp = kind; else return "Unknown tempo change";
+  if (!kind) delete m.ramp; else if (Object.hasOwn(RAMPS, kind)) m.ramp = kind; else return "Unknown tempo change";
   return null;
 }
 const RAMP_STEP = 240; // the tempo moves every eighth note
@@ -1254,7 +1258,7 @@ export function tempoSteps(score) {
     while (n < ms.length && !ms[n].tempo && !ms[n].ramp) n++;
     const dir = m.ramp === "rit" ? -1 : 1, nx = ms[n]?.tempo;
     const b0 = carry?.bar === b && !m.tempo ? carry.bpm : tempoAt(score, b);
-    const b1 = nx && (nx - b0) * dir > 0 ? nx : b0 * (dir < 0 ? 0.75 : 4 / 3);
+    const b1 = nx && (nx - b0) * dir > 0 ? nx : Math.min(400, Math.max(20, b0 * (dir < 0 ? 0.75 : 4 / 3))); // ramps in a row stay within 20–400
     const a = lin[b], z = n < ms.length ? lin[n] : t, steps = Math.max(1, Math.ceil((z - a) / RAMP_STEP));
     const bpm = (j) => b0 + ((b1 - b0) * (j + 1)) / steps;
     for (let k = b; k < n; k++) {
@@ -1273,7 +1277,7 @@ export function isValidScore(sc) {
     if (!n || !sc.measures[0].time) return false;
     if (!sc.measures.every((m) => m.sym === undefined || (m.time && TIME_SYMS[m.sym] && symOk(m.sym, m.time)))) return false;
     if (!sc.measures.every(okRepeats)) return false;
-    if (!sc.measures.every((m) => m.ramp === undefined || m.ramp in RAMPS) || (sc.swing !== undefined && !okSwing(sc.swing))) return false;
+    if (!sc.measures.every((m) => m.ramp === undefined || Object.hasOwn(RAMPS, m.ramp)) || (sc.swing !== undefined && !okSwing(sc.swing))) return false;
     if (!sc.measures.every((m, b) => m.tempo === undefined || (b > 0 && okBpm(m.tempo)))) return false;
     if (!sc.measures.every((m) => m.rehearsal === undefined || okText(m.rehearsal, MAX_REHEARSAL))) return false;
     if (!sc.measures.every((m) => m.len === undefined || (Number.isInteger(m.len) && m.len > 0 && m.len % 60 === 0))) return false;
@@ -1281,7 +1285,7 @@ export function isValidScore(sc) {
     const pitched = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && Math.abs(p.alter) <= 2 && p.drum === undefined && (p.finger === undefined || FINGER.test(p.finger));
     const drum = (p) => p.step >= 0 && p.step <= 6 && Number.isInteger(p.oct) && p.alter === 0 && Number.isInteger(p.drum) && p.drum >= 35 && p.drum <= 81;
     const okBars = (bars) => Array.isArray(bars) && bars.length === n && bars.every((bar) => Array.isArray(bar) && bar.every((e) =>
-      DURS.includes(e.dur) && Array.isArray(e.pitches) && e.pitches.every(okPitch) &&
+      okDur(e.dur, e.dots || 0) && Array.isArray(e.pitches) && e.pitches.every(okPitch) &&
       (e.grace === undefined || (Array.isArray(e.grace) && e.grace.length > 0 && e.grace.length <= MAX_GRACE && e.pitches.length > 0 && e.grace.every(okPitch))) &&
       (e.marks === undefined || (Array.isArray(e.marks) && e.marks.every((m) => MARKS.includes(m)))) &&
       (e.dyn === undefined || DYNS.includes(e.dyn)) && (e.text === undefined || okText(e.text, MAX_TEXT)) && (e.harm === undefined || okChord(e.harm)) &&

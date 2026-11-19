@@ -630,7 +630,7 @@ function drawSystem(score, sys, si, ctx, svg, cells, noteRef, sel, lastBar, { la
               { num_notes: run.tup[0], notes_occupied: run.tup[1], location: stem < 0 ? -1 : 1 }));
             tuplets[tuplets.length - 1].grey = grey;
           }
-          if (bar.some((e) => e.pitches.length && ["8", "16", "32"].includes(e.dur))) {
+          if (bar.some((e) => e.pitches.length && ["8", "16", "32", "64"].includes(e.dur))) {
             for (const bm of VFl.Beam.generateBeams(notes, { groups: VFl.Beam.getDefaultBeamGroups(`${time[0]}/${time[1]}`), maintain_stem_directions: !!stem })) {
               bm.grey = grey;
               beams.push(bm);

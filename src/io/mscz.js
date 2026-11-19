@@ -1,15 +1,15 @@
 // MuseScore .mscz / .mscx import (versions 3.x and 4.x). See docs/DESIGN.md §9.7.
 // Written from the file format as MuseScore saves it; no MuseScore source code is used.
-import { padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides, melismas, ONE_NOTE, OTT_SHIFT, MAX_KIND } from "../model.js";
+import { okDur, padBars, noteCount, tupletOk, spellMidi, midi, splitTicks, MAX_LAYERS, eventTicks, barTicks, barCapacity, barLen, setBarLen, setMark, TIME_SYMS, measuresFrom, attrsAt, partGroups, allLayers, BASE, keyAt, shiftPitch, wrapKey, fifthsOf, DYN_VEL, ACCENT_VEL, SPAN_KINDS, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, fromDiatonic, isPerc, toDrumStaff, drumReport, clearBrokenSlides, melismas, ONE_NOTE, OTT_SHIFT, MAX_KIND } from "../model.js";
 import { FINGER, ORNAMENTS, parseVolta, voltaLabel, sameVolta, MAX_REPEAT, JUMPS, RAMPS, rampOf, swingOf, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { isDrum, drumPitch, drumNear, DRUMS } from "../drums.js";
 import { completeTuplet, DYN_IN, readTempo, applyTempi } from "./musicxml.js";
 import { decodeText, parseXml, Report, unzip, countUnread } from "./util.js";
 import { gmByName } from "../gm.js";
 
-const DUR = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16", "32nd": "32" };
+const DUR = { whole: "w", half: "h", quarter: "q", eighth: "8", "16th": "16", "32nd": "32", "64th": "64" };
 const LONGER = new Set(["breve", "long"]);
-const SHORTER = new Set(["64th", "128th", "256th", "512th", "1024th"]);
+const SHORTER = new Set(["128th", "256th", "512th", "1024th"]);
 // MuseScore articulation subtype -> Coda marks (DESIGN §16). Combined ones ("articAccentStaccatoAbove")
 // give two; MuseScore 2 calls an accent "sforzato". Staccatissimo and the rest give none.
 const CHORDLINE_IN = { 1: "fall", 2: "doit", 4: "scoop" }, CHORDLINE_OUT = { fall: 1, doit: 2, scoop: 4 };
@@ -351,9 +351,10 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             }
             let dur = DUR[dt];
             if (!dur && LONGER.has(dt)) { dur = "w"; report.count("Notes longer than a whole note shortened"); }
-            if (!dur && SHORTER.has(dt)) { dur = "32"; report.count("Notes shorter than a 32nd lengthened"); }
+            if (!dur && SHORTER.has(dt)) { dur = "64"; report.count("Notes shorter than a 64th lengthened"); }
             if (!dur) { report.count("Notes with unknown lengths skipped"); break; }
-            const dots = Math.min(2, +(txt(el, "dots") || 0));
+            let dots = Math.min(2, +(txt(el, "dots") || 0));
+            if (!okDur(dur, dots)) { dots = 1; report.count("Double-dotted 64th notes given one dot"); }
             const ev = { dur, dots, tie: false, pitches: [] };
             const ratio = txt(el, "Tuplet") ? tuplets[txt(el, "Tuplet")] : tup;
             if (ratio && ratio[0] > 0 && ratio[1] > 0 && ratio[0] !== ratio[1]) {
@@ -493,7 +494,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
 // pointing at the next note; marks are Fermata/Articulation elements.
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const TYPE_NAME = { w: "whole", h: "half", q: "quarter", 8: "eighth", 16: "16th", 32: "32nd" };
+const TYPE_NAME = { w: "whole", h: "half", q: "quarter", 8: "eighth", 16: "16th", 32: "32nd", 64: "64th" };
 const CLEF_OUT = { treble: "G", bass: "F", alto: "C3", tenor: "C4", percussion: "PERC" };
 // the kit as a MuseScore drum set (DESIGN §27): line = half-spaces down from the top line
 const HEAD_MS = { x: "cross", cx: "xcircle", d: "diamond", t: "triangle-up" };

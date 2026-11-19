@@ -1568,3 +1568,17 @@ symbols, text and octave lines. Typed "rit." text is refused with a pointer to t
 "rall.", "accel.", "a tempo" (and spelled-out forms) become the bar mark; inside a bar they move to its
 start and are counted. MuseScore gets them as staff text, which it shows but doesn't play.
 ponytail: one ramp shape (linear, eighth steps) and fixed ¾ / 4⁄3 targets.
+
+## 40. 64th notes (Phase 44)
+
+A 64th is 30 ticks: palette button (four flags), key **1** (continuing 7 whole … 2 32nd), beamed with
+the shorter values, MusicXML "64th", MuseScore `64th`. `okDur(dur, dots)` allows a value only when it is a
+whole number of ticks, so a 64th takes one dot at most (45 ticks; two dots would be 52.5). `setDuration`,
+the dot key, the palette and validation all use it. An imported double-dotted 64th keeps one dot and is
+counted, and 128ths and shorter become 64ths and are counted. Padding fills down to 30 ticks.
+
+Ceilings:
+- **No 7-tuplets.** 480 ticks a quarter has no factor of 7, so no note value divides by 7. A typed 7:4 is
+  refused like any ratio that can't be whole ticks, and imported septuplets keep their written
+  lengths and are counted (§14.4). Changing the tick grid would change every stored pickup length.
+- A dotted 64th left alone leaves 15 ticks no rest can fill, as a double-dotted 32nd already does.

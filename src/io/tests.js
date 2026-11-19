@@ -1279,6 +1279,28 @@ export async function run({ check, eq }) {
     return (String(m.swing) === "3,1" && m.measures[1].ramp === "rit" && m.measures[2].ramp === "atempo") || "MuseScore " + m.swing + " " + m.measures.map((x) => x.ramp);
   });
 
+  await check("64th notes: ticks, one dot at most, tuplets, padding, MusicXML and MuseScore (DESIGN §40)", async () => {
+    if (M.BASE["64"] !== 30 || !M.okDur("64", 1) || M.okDur("64", 2) || !eq(M.durFromTicks(45), { dur: "64", dots: 1 })) return "values";
+    if (M.nearestDur(52).dots === 2 && M.nearestDur(52).dur === "64") return "nearest picks 52.5";
+    if (!M.tupletOk("64", 0, [3, 2]) || M.tupletOk("16", 0, [7, 4])) return "tuplets";
+    const s = M.newScore({ bars: 1 });
+    s.staves[0].bars[0] = [ev("64", "C5"), ev("64", "D5"), ev("64", "E5"), ev("64", "F5"), ev("64", "G5", { dots: 1 }), ev("64", "A5", { dots: 1 }), ev("64"), ev("8", "A5"), ev("q", "B5"), ev("h")];
+    if (!M.isValidScore(s) || M.barTicks(s.staves[0].bars[0]) !== 1920) return "bar " + M.barTicks(s.staves[0].bars[0]);
+    if (!M.setDuration(s, 0, 0, 4, "64", 2)) return "two dots accepted";
+    const bad = JSON.parse(JSON.stringify(s));
+    bad.staves[0].bars[0][0].dots = 2;
+    if (M.isValidScore(bad)) return "two dots valid";
+    const back = importMusicXML(exportMusicXML(s), "s.musicxml").score;
+    if (brief(back.staves[0]) !== brief(s.staves[0])) return "MusicXML " + brief(back.staves[0]);
+    const { exportMSCX, importMSCX } = await import("./mscz.js");
+    const m = importMSCX(exportMSCX(s), "s.mscx").score;
+    if (brief(m.staves[0]) !== brief(s.staves[0])) return "MuseScore " + brief(m.staves[0]);
+    const one = M.newScore({ bars: 1 });
+    one.staves[0].bars[0] = [ev("64", "C5")];
+    const padded = importMusicXML(exportMusicXML(one), "p.musicxml").score.staves[0].bars[0];
+    return M.barTicks(padded) === 1920 || "padding " + M.barTicks(padded);
+  });
+
   // Later phases: MIDI, MuseScore, musx.
   for (const path of ["./tests-midi.js", "./tests-mscz.js", "./tests-musx.js"]) {
     let mod = null;
