@@ -840,6 +840,14 @@ export async function run({ check, eq }) {
       if (sig(r.score) !== sig(s)) return n + " " + sig(r.score);
       if (/not imported|cut/.test(JSON.stringify(r.report))) return n + " reported " + JSON.stringify(r.report);
     }
+    // text on a lone rest, and on a whole-bar rest: kept, or moved and counted
+    const r = M.newScore({ bars: 3 });
+    r.staves[0].bars = [[ev("h", "C5"), { dur: "h", dots: 0, tie: false, pitches: [], text: "lunga" }], [{ dur: "w", dots: 0, tie: false, pitches: [], text: "tacet" }], [ev("w", "E5")]];
+    for (const [n, f] of [["MusicXML", (z) => importMusicXML(exportMusicXML(z), "r.musicxml")], ["MuseScore", (z) => importMSCX(exportMSCX(z), "r.mscx")]]) {
+      const o = f(r), b = o.score.staves[0].bars, rep = JSON.stringify(o.report);
+      if (b[0][1]?.text !== "lunga") return n + " rest text " + JSON.stringify(b[0]);
+      if (b[1][0]?.text !== "tacet" && !(b[2][0]?.text === "tacet" && /moved/.test(rep))) return n + " whole-bar rest text " + JSON.stringify(b) + rep;
+    }
     // MuseScore text with inline markup; a rehearsal mark too long to show is counted
     const raw = exportMSCX(s).replace("<StaffText><text>a &lt; b", "<StaffText><text><i>a</i> &lt; b").replace("<RehearsalMark><text>B<", "<RehearsalMark><text>Letter B and more<");
     const y = importMSCX(raw, "u.mscx");

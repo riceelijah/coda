@@ -264,6 +264,7 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
             }
             if (dt === "measure") { // whole-bar rest = empty bar
               if (marks.length) report.count("Fermatas on whole-bar rests (not imported)");
+              if (pendText[vi]) report.count("Text over a bar with no notes moved to the next note");
               cur += barCapacity(time); break;
             }
             let dur = DUR[dt];

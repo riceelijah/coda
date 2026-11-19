@@ -657,6 +657,7 @@ function readNote(el, { staves, voiceOf, lastEvent, divisions, time, report, sta
   const pt = pendText[staffNo];
   if (pt && (pt.mi < mi || start >= pt.at)) {
     if (pt.text.length > MAX_TEXT) report.count(`Text cut to ${MAX_TEXT} characters`);
+    if (pt.mi < mi) report.count("Text over a bar with no notes moved to the next note");
     if (setText(ev, pt.text)) report.count("Text directions (not imported)");
     pendText[staffNo] = null;
   }

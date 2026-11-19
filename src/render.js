@@ -212,11 +212,12 @@ export function render(score, container, sel, opts = {}) {
     const ref = noteRef[s][v][b]?.[i];
     if (!ev.text || !ref) return;
     const ctx = ctxs[ref.sys], note = ref.note, bb = note.getBoundingBox();
-    const y = Math.min(note.checkStave().getYForLine(0) - 10, bb ? bb.y - 8 : Infinity);
+    const y = Math.min(note.checkStave().getYForLine(0) - 10, bb ? bb.y - 8 : Infinity) - (ev.marks?.length ? 18 : 0); // over a fermata or accent
     try {
       tintedAll([ctx], opts.dim && v !== (opts.layer || 0), () => {
         ctx.save(); ctx.setFont("Georgia", 13, "normal", "italic");
-        ctx.fillText(ev.text, note.getAbsoluteX() - 4, y);
+        const w = ctx.measureText(ev.text).width; // kept inside the system's right edge
+        ctx.fillText(ev.text, Math.max(0, Math.min(note.getAbsoluteX() - 4, SHEET_W - 10 - w)), y);
         ctx.restore();
       });
     } catch (e) { console.error(e); }

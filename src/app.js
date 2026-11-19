@@ -1297,6 +1297,7 @@ function closeAttrs() {
 // Resolves to the text, or null when cancelled.
 function ask(head, label, value) {
   const d = $("ask");
+  if (d.open) return Promise.resolve(null); // one question at a time
   $("ask-head").textContent = head; $("ask-label").textContent = label; $("ask-in").value = value;
   d.returnValue = "";
   d.showModal();
@@ -1319,7 +1320,7 @@ async function noteText() {
   if (!ev) { message("Select a note or rest first", true); return; }
   const v = await ask(`Text above bar ${s.bar + 1}`, "Text, such as dolce or pizz. (empty to remove)", ev.text || "");
   if (v === null) return;
-  edit(() => M.setText(lb(s.staff)[s.bar][s.idx], v));
+  edit((sc) => M.setText(sc.staves[s.staff].bars[s.bar][s.idx], v)); // inside edit, bars is the current layer
 }
 async function rehearsal() {
   const b = repBar(), sc = state.score;
