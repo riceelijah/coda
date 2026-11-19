@@ -599,7 +599,7 @@ const click = (start, accent) => ({ start, end: start + 60, midi: accent ? 76 : 
 // Clicks for the bars played, and a count-in before them: the missing beats of a pickup, else a bar.
 export function clicks(score, barStart, total, { click: on, countIn }) {
   const out = [];
-  if (on) barStart.forEach(({ bar, tick }) => { for (const t of beatsOf(score, bar).ticks) if (tick + t < total) out.push(click(tick + t, t === 0)); });
+  if (on) barStart.forEach(({ bar, tick }) => { const { off, ticks } = beatsOf(score, bar); for (const t of ticks) if (tick + t < total) out.push(click(tick + t, t + off === 0)); }); // a pickup has no downbeat
   if (countIn && barStart.length) {
     const { beat, off, cap } = beatsOf(score, barStart[0].bar), n = off || cap;
     for (let t = -n; t < 0; t += beat) out.push(click(t, t === -n));
@@ -640,7 +640,7 @@ async function start(me, score, from, onPos, onStatus, opts) {
   const tick = () => {
     if (current !== me) return;
     let now = ctx.currentTime - t0;
-    if (opts.loop && now >= passes * end - 0.2) pass(); // the next time round, queued just ahead
+    if (opts.loop && now >= passes * end - 0.2) { passes = Math.max(passes, Math.floor(now / end) + 1); pass(); } // the next time round, queued just ahead (passes missed in a background tab are skipped)
     if (!opts.loop && now >= end) { stop(); onPos(null); return; }
     if (now >= 0) {
       now -= Math.floor(now / end) * end;

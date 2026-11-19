@@ -1279,6 +1279,22 @@ export async function run({ check, eq }) {
     return (String(m.swing) === "3,1" && m.measures[1].ramp === "rit" && m.measures[2].ramp === "atempo") || "MuseScore " + m.swing + " " + m.measures.map((x) => x.ramp);
   });
 
+  await check("Phase 43 review: a tempo ending a rit. is kept, rit. starts at the marked tempo, pickup clicks, swing ratios", () => {
+    const s = M.newScore({ bars: 6, tempo: 120 });
+    M.setRamp(s, 2, "rit");
+    if (M.setTempo(s, 4, 120) || s.measures[4].tempo !== 120 || M.tempoSteps(s)[4][0][1] !== 120) return "tempo after rit. dropped";
+    if (M.tempoSteps(s)[2][0][1] !== 120) return "rit. starts at " + M.tempoSteps(s)[2][0][1];
+    const p = M.newScore({ bars: 2 });
+    M.setBarLen(p, 0, 480); // a quarter pickup: beat 4, no accent
+    const { barStart, total } = schedule(p);
+    const c = clicks(p, barStart, total, { click: true });
+    if (c[0].start !== 0 || c[0].midi !== 77 || c[1].midi !== 76) return "pickup accent " + c.map((n) => n.midi);
+    if (String(M.swingOf(66)) !== "2,1" || String(M.swingOf(60)) !== "3,2" || M.swingOf(50) !== null) return "swingOf " + M.swingOf(66);
+    const r = M.newScore({ bars: 1 });
+    r.measures[0].ramp = "constructor";
+    return !M.isValidScore(r) || "constructor accepted";
+  });
+
   await check("64th notes: ticks, one dot at most, tuplets, padding, MusicXML and MuseScore (DESIGN §40)", async () => {
     if (M.BASE["64"] !== 30 || !M.okDur("64", 1) || M.okDur("64", 2) || !eq(M.durFromTicks(45), { dur: "64", dots: 1 })) return "values";
     if (M.nearestDur(52).dots === 2 && M.nearestDur(52).dur === "64") return "nearest picks 52.5";

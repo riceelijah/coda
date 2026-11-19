@@ -272,7 +272,8 @@ export function importMSCX(text, fileName = "", format = "MuseScore (uncompresse
           case "StaffText": case "SystemText": case "Expression": case "PlayTechAnnotation": { // text above the next note (DESIGN §30)
             const t = cleanText(kid(el, "text")?.textContent, 1e4), sw = kid(el, "swing"), ramp = rampOf(t);
             if (sw) { // DESIGN §39: <swing unit ratio>, the first for the whole score
-              const w = sw.getAttribute("unit") === "eighth" ? swingOf(+sw.getAttribute("ratio")) : null, straight = +sw.getAttribute("ratio") <= 50;
+              const unit = sw.getAttribute("unit"), w = unit === "eighth" ? swingOf(+sw.getAttribute("ratio")) : null;
+              const straight = unit === "zero" || +sw.getAttribute("ratio") <= 50; // MuseScore's "Straight"
               if (!w && !straight) report.count("Swing Coda can't play (not imported)");
               else if (swingSeen !== undefined) { if (String(w) !== String(swingSeen)) report.count("Swing changes after the start (not imported)"); }
               else { swingSeen = w; if (w) score.swing = w; }

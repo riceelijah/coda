@@ -1622,7 +1622,7 @@ function setRamp(kind) {
 }
 function setSwing(k) {
   const w = M.SWINGS[k][1];
-  if (edit((sc) => { if (w) sc.swing = w; else delete sc.swing; return null; })) message(w ? `Swing ${w[0]}:${w[1]}: eighth notes play long-short` : "Swing off: eighth notes play evenly");
+  if (edit((sc) => { if (w) sc.swing = [...w]; else delete sc.swing; return null; })) message(w ? `Swing ${w[0]}:${w[1]}: eighth notes play long-short` : "Swing off: eighth notes play evenly");
 }
 function showSwing() {
   M.SWINGS.forEach(([, w], k) => { const on = String(w) === String(state.score.swing ?? null); $("sw-" + k).setAttribute("aria-checked", on); $("sw-" + k).dataset.label ||= $("sw-" + k).textContent; $("sw-" + k).textContent = (on ? "✓ " : "") + $("sw-" + k).dataset.label; });

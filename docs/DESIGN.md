@@ -1542,7 +1542,7 @@ are this browser's preferences (localStorage, never the score or undo). Swing is
 - **Click.** A wood block on every beat, louder on the downbeat; built in `start()` so audio export,
   MIDI and the sounds a score needs never include it. Beats are dotted quarters in 6/8, 9/8, 12/8.
 - **Count-in.** A bar of clicks at the starting bar's tempo. From a pickup, only the beats it is
-  missing: an eighth pickup in 4/4 hears 1, 2, 3, and comes in on the "and" of 4.
+  missing: an eighth pickup in 4/4 hears four clicks and comes in on the "and" of the fourth. A pickup has no accented click.
 - **Loop.** With notes selected, the bars from the first to the last selected play over and over
   (count-in only before the first time). With nothing selected, from the caret to the end. Without
   Loop, Space plays from the caret as before: selecting two notes for a slur doesn't change Play.

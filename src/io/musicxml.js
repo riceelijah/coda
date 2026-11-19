@@ -3,7 +3,7 @@ import {
   attrsAt, barCapacity, barLen, setBarLen, barTicks, eventTicks, splitTicks, durFromTicks, nearestDur, tupletOk,
   tupletRuns, padBars, noteCount, PPQ, BASE, partGroups, layerBars, allLayers, MAX_LAYERS, setMark, TIME_SYMS, measuresFrom, keyAt, wrapKey, fifthsOf, clearBrokenSpans, syllabics, setLyric, MAX_LYRIC, MAX_VERSES, finishClefs, MAX_GRACE, isPerc, toDrumStaff, drumReport, clearBrokenSlides, FINGER, ORNAMENTS, OTT_SHIFT, staffLines, ottAt, shiftUnderLines, MAX_KIND, okDur,
 } from "../model.js";
-import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, RAMPS, rampOf, okSwing, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
+import { sameVolta, voltaLabel, parseVolta, JUMPS, MAX_REPEAT, setTempo, clampBpm, RAMPS, rampOf, okSwing, swingOf, setText, setRehearsal, cleanText, MAX_TEXT, MAX_REHEARSAL } from "../model.js";
 import { DRUMS, drumName, drumPitch, isDrum } from "../drums.js";
 import { decodeText, parseXml, Report, unzip, countUnread } from "./util.js";
 
@@ -475,8 +475,9 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
           }
           const swingEl = (tag === "sound" ? el : kid(el, "sound"))?.querySelector("swing");
           if (swingEl) { // DESIGN §39: the first one, for the whole score
-            const w = kid(swingEl, "straight") ? null : [+txt(swingEl, "first"), +txt(swingEl, "second")];
-            const ok = !w || (okSwing(w) && (txt(swingEl, "swing-type") || "eighth") === "eighth");
+            const f = +txt(swingEl, "first"), q = +txt(swingEl, "second");
+            const w = kid(swingEl, "straight") ? null : okSwing([f, q]) ? [f, q] : swingOf((100 * f) / (f + q)); // 60:40 is 3:2
+            const ok = kid(swingEl, "straight") || (w && (txt(swingEl, "swing-type") || "eighth") === "eighth");
             if (!ok) report.count("Swing Coda can't play (not imported)");
             else if (swingSeen !== undefined) { if (String(w) !== String(swingSeen)) report.count("Swing changes after the start (not imported)"); }
             else { swingSeen = w; if (w) score.swing = w; }
@@ -489,7 +490,8 @@ export function importMusicXML(text, fileName = "", format = "MusicXML") {
                 if (ramp) { // rit., accel. and a tempo play (DESIGN §39): on the bar
                   const at = pos.t >= barCapacity(time) ? mi + 1 : mi;
                   if (at === mi && pos.t > 0) report.count("rit., accel. and a tempo inside a bar moved to its start");
-                  (rep[at] ||= {}).ramp = ramp;
+                  if (rep[at]?.ramp && rep[at].ramp !== ramp) report.count("rit., accel. and a tempo that differ between parts (the first is kept)");
+                  else (rep[at] ||= {}).ramp = ramp;
                   continue;
                 }
                 if (/^swing$/i.test(t) && swingEl) continue; // shown from the swing setting

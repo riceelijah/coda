@@ -299,7 +299,8 @@ export function render(score, container, sel, opts = {}) {
     if (floor["top:" + c.sys + ":0"] !== undefined) y = Math.min(y, floor["top:" + c.sys + ":0"] - 6); // above an octave line
     const ctx = ctxs[c.sys];
     ctx.save(); ctx.setFont("Georgia", 13, "normal", "italic");
-    ctx.fillText(RAMPS[m.ramp], c.notes[0]?.x - 4 || c.x0 + 8, y);
+    const shifted = m.tempo || (!b && (score.swing || score.measures.some((x) => x.tempo))); // beside a tempo mark or "Swing" at the bar's start
+    ctx.fillText(RAMPS[m.ramp], (c.notes[0]?.x - 4 || c.x0 + 8) + (shifted ? 70 : 0), y);
     ctx.restore();
   });
 

@@ -1202,11 +1202,13 @@ export function tempoAt(score, b) {
 export function setTempo(score, b, bpm) {
   if (!okBpm(bpm)) return "Tempo must be 20–400";
   if (!score.measures[b]) return "No such bar";
+  // the same as before is no change, unless a rit. or accel. since then makes it the ramp's end (DESIGN §39)
+  const ramped = (k) => { for (let i = k - 1; i >= 0; i--) { if (score.measures[i].ramp === "rit" || score.measures[i].ramp === "accel") return true; if (score.measures[i].tempo) return false; } return false; };
   if (b === 0) score.tempo = bpm;
-  else if (tempoAt(score, b - 1) === bpm) delete score.measures[b].tempo;
+  else if (tempoAt(score, b - 1) === bpm && !ramped(b)) delete score.measures[b].tempo;
   else score.measures[b].tempo = bpm;
   const n = score.measures.findIndex((m, i) => i > b && m.tempo);
-  if (n > 0 && score.measures[n].tempo === tempoAt(score, n - 1)) delete score.measures[n].tempo;
+  if (n > 0 && score.measures[n].tempo === tempoAt(score, n - 1) && !ramped(n)) delete score.measures[n].tempo;
   return null;
 }
 
@@ -1228,8 +1230,10 @@ export const SWINGS = [["Off", null], ["Light (3:2)", [3, 2]], ["Medium (2:1)", 
 export const okSwing = (w) => Array.isArray(w) && w.length === 2 && w.every((n) => Number.isInteger(n) && n >= 1 && n <= 16) && w[0] > w[1];
 // The simplest ratio for a percentage (MuseScore stores 67 for 2:1).
 export function swingOf(pct) {
-  for (let q = 1; q <= 16; q++) for (let f = q + 1; f <= 16; f++) if (Math.round((100 * f) / (f + q)) === Math.round(pct)) return [f, q];
-  return null;
+  if (!(pct > 50 && pct < 100)) return null;
+  let best = null, d = 1.5; // the simplest ratio within 1.5%, so 66 is 2:1
+  for (let q = 1; q <= 16; q++) for (let f = q + 1; f <= 16; f++) { const e = Math.abs((100 * f) / (f + q) - pct); if (e < d - 1e-9) { best = [f, q]; d = e < 0.5 ? -1 : e; } }
+  return best;
 }
 // measures[b].ramp: "rit" or "accel" from bar b's start, or "atempo" (back to the marked tempo).
 export const RAMPS = { rit: "rit.", accel: "accel.", atempo: "a tempo" };
@@ -1260,7 +1264,7 @@ export function tempoSteps(score) {
     const b0 = carry?.bar === b && !m.tempo ? carry.bpm : tempoAt(score, b);
     const b1 = nx && (nx - b0) * dir > 0 ? nx : Math.min(400, Math.max(20, b0 * (dir < 0 ? 0.75 : 4 / 3))); // ramps in a row stay within 20–400
     const a = lin[b], z = n < ms.length ? lin[n] : t, steps = Math.max(1, Math.ceil((z - a) / RAMP_STEP));
-    const bpm = (j) => b0 + ((b1 - b0) * (j + 1)) / steps;
+    const bpm = (j) => (steps > 1 ? b0 + ((b1 - b0) * j) / (steps - 1) : b1); // from the marked tempo to the target
     for (let k = b; k < n; k++) {
       out[k] = [];
       for (let j = Math.floor((lin[k] - a) / RAMP_STEP); a + j * RAMP_STEP < lin[k] + barLen(score, k); j++) out[k].push([Math.max(0, a + j * RAMP_STEP - lin[k]), bpm(j)]);
