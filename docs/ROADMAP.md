@@ -26,14 +26,14 @@ Smart Shape, Lyrics, Repeat, Key Signature, Mass Mover).
 | **Tuplet entry** | **Done (Phases 9, 17):** 3:2, 2:3, 4:3, 5:4, 6:4 (`9`/`;`, Notes ▸ Tuplet…). 7-tuplets don't fit the tick grid. | — |
 | **Second voice** (stems up/down in one staff) | **Done (Phase 18):** layers 1–4, entered with the Layer buttons; open, draw, play and save from MusicXML, MuseScore and .musx. | — |
 | **Articulations**: staccato, accent, tenuto, marcato, fermata | **Done (Phase 19):** Notes menu and right-click; MusicXML and MuseScore both read them; staccato plays short. `.musx` articulations too (Phase 25). | — |
-| **Dynamics and hairpins** (p, mf, ff, cresc.) | **Done (Phases 26–27):** dynamics and hairpins shape playback and MIDI velocity. Tempo text and rehearsal letters are not done. | — |
+| **Dynamics and hairpins** (p, mf, ff, cresc.) | **Done (Phases 26–27):** dynamics and hairpins shape playback and MIDI velocity. Tempo changes, text and rehearsal letters: done (Phases 34–35). | — |
 | **Slurs** | **Done (Phase 27).** | — |
 | **Lyrics** | **Done (Phase 28):** L, then type; space moves on, hyphen splits a word, ↑/↓ for verses 1–5. | — |
-| **Repeats and 1st/2nd endings**, played back | NotePad drew them but didn't play them back; Coda can do both. | M |
+| **Repeats and 1st/2nd endings**, played back | **Done (Phase 33):** repeats, endings, segno/coda, D.C./D.S./Fine, drawn and played. | — |
 | **Clef changes mid-score** | **Done (Phase 29):** Score ▸ Clef from this bar. | — |
-| **Pickup bar** (anacrusis) | NotePad couldn't do this either; very common in songs and hymns. | S |
+| **Pickup bar** (anacrusis) | **Done (Phase 39).** | — |
 | **Grace notes** | **Done (Phase 30):** grace mode; played on the beat. | — |
-| **MIDI keyboard entry** | Browsers can read a MIDI keyboard directly (Web MIDI API), so no dependency is needed. Chrome and Edge support it; Firefox asks for permission; Safari doesn't. | S |
+| **MIDI keyboard entry** | **Done (Phase 46):** Edit ▸ MIDI keyboard, step entry with chords. Not in Safari (no Web MIDI). Real-time recording is not done. | — |
 | **MIDI export** | **Done (Phase 22):** File ▸ Export ▸ MIDI. | — |
 | **Up to 8 staves with instrument names** | **Done (Phases 12–13, 23):** Score ▸ Parts and instruments adds, removes, renames and reorders parts and picks their sounds. | — |
 
@@ -60,19 +60,23 @@ Ordered roughly by how often they come up for students, teachers and hobbyists.
 
 | Feature | Notes | Size |
 |---|---|---|
-| **Transpose the whole score** (by interval or to a new key) | A teacher must-have. | S |
-| **Transposing instruments** and a concert-pitch toggle | **Done (Phase 24):** set per part in Parts and instruments; read and written in MusicXML and MuseScore files. `.musx` transpositions read (Phase 25). Still to do: a concert-pitch view toggle. | S |
-| **Chord symbols** above the staff | Lead sheets; NotePad couldn't do this. | M |
+| **Transpose the whole score** (by interval or to a new key) | **Done (Phase 42).** Transposing only a selection is not done. | — |
+| **Transposing instruments** and a concert-pitch toggle | **Done (Phase 24):** set per part in Parts and instruments; read and written in MusicXML and MuseScore files. `.musx` transpositions read (Phase 25). Concert-pitch view: done (Phase 42). | — |
+| **Chord symbols** above the staff | **Done (Phase 42).** Not played back yet. | M |
 | **Part extraction** (print one staff on its own) | | M |
-| **Better playback sounds** | **Done (Phase 13):** all 128 General MIDI sounds, downloaded on demand. Your own sounds: done (Phase 21). Still to do: a note-level playback cursor. | — |
+| **Better playback sounds** | **Done (Phase 13):** all 128 General MIDI sounds, downloaded on demand. Your own sounds: done (Phase 21). Playback cursor, click, count-in, loop, swing, rit./accel.: done (Phase 43). | — |
 | **Export PDF / audio** | **Done (Phase 22):** File ▸ Export: PDF via the print dialog, MusicXML, .mxl, .mscz, MIDI, WAV, compressed audio. Still to do: one-click PDF without the print dialog (needs a PDF library), PNG. | — |
-| **Page and system breaks**, staff size, page size | A small set of controls, not full engraving. | M |
-| **Multi-measure rests** | Mostly matters for parts. | S |
-| **Enharmonic respell** (F# ⇄ Gb) | Shortcut key. | S |
-| **Beam control** (break/join beams) | | S |
-| **Percussion staff** (drum kit) | | L |
+| **Page and system breaks**, staff size, page size | **Breaks done (Phase 45).** Staff and page size are not done. | M |
+| **Multi-measure rests** | **Done (Phase 45):** View ▸ Multi-bar rests. | — |
+| **Enharmonic respell** (F# ⇄ Gb) | **Done (Phase 42).** | — |
+| **Beam control** (break/join beams) | **Done (Phase 45),** with cue notes. | — |
+| **Percussion staff** (drum kit) | **Done (Phases 32, 37).** | — |
 | **Guitar tab** | | L |
-| **Touch / tablet entry** | Taps already register as clicks, but the hover preview doesn't show on touch screens. | M |
+| **Linked parts** (a part's own layout that follows the score) | | L |
+| **Cross-staff notes** (piano notes drawn on the other staff) | | M |
+| **One-click PDF** without the print dialog | Needs a PDF library: a new dependency, so ask first. | M |
+| **Seven-note tuplets** | The 480-ticks-a-quarter grid has no factor of 7; changing it changes every stored length. | M |
+| **Touch / tablet entry** | **Partly done (Phase 46):** tapped submenus open and finger drags scroll. Still no hover preview on touch screens; not tried on a real tablet. | M |
 | **Accessibility**: screen-reader navigation of the score | MuseScore is investing here for blind musicians. Coda's model makes a text description of the selected note cheap to produce. | M |
 
 ## 5. Not planned for now
